@@ -1,0 +1,13 @@
+node_modules/
+attachments/
+.project_id
+.github_repo
+.env
+.env.*
+.vercel/
+.grok/preview.log
+screenshots/*
+!screenshots/.gitkeep
+!screenshots/app-builder-preview.png
+!screenshots/app-builder-preview-mobile.png
+!screenshots/app-builder-preview.json

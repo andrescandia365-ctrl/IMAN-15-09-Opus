@@ -1,0 +1,566 @@
+import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Banknote, CreditCard, Info, Minus, Plus, ScanBarcode, Search, Smartphone, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { CameraScan } from "@/components/camera-scan";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { sendOrQueueDeskTicket } from "@/lib/desk-outbox";
+import { useDragScroll } from "@/lib/drag-scroll";
+import { formatARS, PAY_LABEL } from "@/lib/format";
+import { findByScan } from "@/lib/pack";
+import { ticketTotal, useImanStore } from "@/lib/store";
+import type { PayMethod, Product, TicketLine } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { errorText } from "@/lib/errors";
+
+const BILLS = [1000, 10_000, 20_000];
+const PACK_TOAST = "Eso es el bulto. Sumá stock en Inventario o Pedidos.";
+const SWIPE = 36;
+
+function matchesNameOrCode(p: Product, q: string) {
+  if (!q) return true;
+  const n = q.trim().toLowerCase();
+  if (!n) return true;
+  const code = n.replace(/\s/g, "");
+  return (
+    p.name.toLowerCase().includes(n) ||
+    p.barcode.toLowerCase().includes(code) ||
+    Boolean(p.packBarcode && p.packBarcode.toLowerCase().includes(code)) ||
+    (p.shortCode != null && String(p.shortCode).trim().toLowerCase() === code)
+  );
+}
+
+function isTicketChrome(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest("button"));
+}
+
+export function PhoneSellView() {
+  const products = useImanStore((s) => s.products);
+  const categories = useImanStore((s) => s.categories);
+  const ticket = useImanStore((s) => s.ticket);
+  const addToTicket = useImanStore((s) => s.addToTicket);
+  const setLineQty = useImanStore((s) => s.setLineQty);
+  const removeLine = useImanStore((s) => s.removeLine);
+  const clearTicket = useImanStore((s) => s.clearTicket);
+  const payMethod = useImanStore((s) => s.payMethod);
+  const setPayMethod = useImanStore((s) => s.setPayMethod);
+  const paidInput = useImanStore((s) => s.paidInput);
+  const setPaidInput = useImanStore((s) => s.setPaidInput);
+  const deskStoreId = useImanStore((s) => s.deskStoreId);
+
+  const [cam, setCam] = useState(false);
+  const [q, setQ] = useState("");
+  const [cat, setCat] = useState<string | "all">("all");
+  const [asked, setAsked] = useState<Product | null>(null);
+  const [payOpen, setPayOpen] = useState(false);
+  const [sending, setSending] = useState(false);
+  const catsRef = useDragScroll<HTMLDivElement>();
+  const listRef = useDragScroll<HTMLDivElement>();
+  const swipe = useRef<{ y: number; moved: boolean } | null>(null);
+  const ignoreClick = useRef(false);
+  const total = ticketTotal(ticket);
+  const paid = Number(paidInput) || 0;
+  const change = payMethod === "efectivo" ? Math.max(0, paid - total) : 0;
+
+  const filtered = useMemo(() => {
+    return products
+      .filter((p) => p.active)
+      .filter((p) => cat === "all" || p.categoryId === cat)
+      .filter((p) => matchesNameOrCode(p, q))
+      .sort((a, b) => a.name.localeCompare(b.name, "es"))
+      .slice(0, 80);
+  }, [products, cat, q]);
+
+  function addProduct(p: Product) {
+    const r = addToTicket(p.id, 1);
+    if (!r.ok) {
+      toast.error(r.error);
+      return false;
+    }
+    setAsked(null);
+    return true;
+  }
+
+  function applyExact(raw: string): boolean {
+    const scanned = findByScan(products, raw);
+    if (!scanned) return false;
+    if (scanned.kind === "pack") {
+      toast.error(PACK_TOAST);
+      return true;
+    }
+    addProduct(scanned.product);
+    return true;
+  }
+
+  function onQueryChange(raw: string) {
+    setQ(raw);
+    setAsked(null);
+    const t = raw.trim();
+    if (!t) return;
+    const looksCode = /^[0-9]{4,}$/.test(t.replace(/\s/g, ""));
+    if (!looksCode) return;
+    if (applyExact(t)) setQ("");
+  }
+
+  function onSearchSubmit() {
+    const raw = q.trim();
+    if (!raw) return;
+    if (applyExact(raw)) {
+      setQ("");
+      return;
+    }
+    if (filtered.length === 1) {
+      addProduct(filtered[0]!);
+      setQ("");
+    }
+  }
+
+  function confirmSale() {
+    if (!ticket.length) {
+      toast.error("Armá el ticket primero");
+      return;
+    }
+    toast.success(
+      payMethod === "efectivo" && paid > 0
+        ? `${formatARS(total)} · ${PAY_LABEL[payMethod]} · vuelto ${formatARS(change)}`
+        : `${formatARS(total)} · ${PAY_LABEL[payMethod]}`,
+    );
+  }
+
+  async function send() {
+    if (!ticket.length) {
+      toast.error("Armá el ticket primero");
+      return;
+    }
+    if (!deskStoreId) {
+      toast.error("Abrí un local");
+      return;
+    }
+    setSending(true);
+    try {
+      const result = await sendOrQueueDeskTicket({
+        storeId: deskStoreId,
+        lines: ticket,
+        payMethod,
+        paid: payMethod === "efectivo" ? Number(paidInput) || null : null,
+      });
+      clearTicket();
+      setPayOpen(false);
+      if (result === "queued") {
+        toast("Sin red. El sobre espera. La venta en este aparato sigue.");
+      } else {
+        toast.success("Ticket mandado a la PC");
+      }
+    } catch (err) {
+      toast.error(errorText(err, "No se pudo enviar"));
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function onSwipeDown(e: ReactPointerEvent<HTMLElement>) {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    if (isTicketChrome(e.target)) return;
+    ignoreClick.current = false;
+    swipe.current = { y: e.clientY, moved: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function onSwipeMove(e: ReactPointerEvent<HTMLElement>) {
+    const start = swipe.current;
+    if (!start) return;
+    if (Math.abs(e.clientY - start.y) > 10) {
+      start.moved = true;
+      ignoreClick.current = true;
+    }
+  }
+
+  function onSwipeUp(e: ReactPointerEvent<HTMLElement>) {
+    const start = swipe.current;
+    swipe.current = null;
+    if (!start) return;
+    const dy = e.clientY - start.y;
+    if (dy < -SWIPE) setPayOpen(true);
+    else if (dy > SWIPE) setPayOpen(false);
+  }
+
+  function onHandleClick() {
+    if (ignoreClick.current) {
+      ignoreClick.current = false;
+      return;
+    }
+    setPayOpen((v) => !v);
+  }
+
+  function onHandlePointerDown(e: ReactPointerEvent<HTMLElement>) {
+    e.stopPropagation();
+    onSwipeDown(e);
+  }
+
+  const methods: { id: PayMethod; label: string; icon: typeof Banknote }[] = [
+    { id: "efectivo", label: "Efectivo", icon: Banknote },
+    { id: "mercadopago", label: "MP", icon: Smartphone },
+    { id: "debito", label: "Débito", icon: CreditCard },
+  ];
+
+  return (
+    <div className="relative flex h-full min-h-0 flex-col gap-1.5 overflow-hidden">
+      <div className="relative shrink-0">
+        <Search className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-ink-muted" />
+        <Input
+          value={q}
+          onChange={(e) => onQueryChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onSearchSubmit();
+          }}
+          placeholder="Nombre o código"
+          className="h-16 rounded-xl bg-paper pl-12 pr-14 text-lg font-medium text-ink shadow-[var(--shadow-ticket)] ticket-grain placeholder:text-ink-muted"
+          autoComplete="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          aria-label="Buscar por nombre o código"
+        />
+        <button
+          type="button"
+          className="absolute right-2 top-1/2 grid size-12 -translate-y-1/2 place-items-center text-ink-muted"
+          onClick={() => setCam(true)}
+          aria-label="Cámara"
+        >
+          <ScanBarcode className="size-6" />
+        </button>
+      </div>
+
+      <div className="relative flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden">
+        <div className={cn("flex min-h-32 flex-1 flex-col gap-1.5", payOpen && "invisible")}>
+          <div ref={catsRef} className="flex shrink-0 cursor-grab gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+            <Chip active={cat === "all"} onClick={() => setCat("all")}>
+              Todo
+            </Chip>
+            {categories.map((c) => (
+              <Chip key={c.id} active={cat === c.id} onClick={() => setCat(c.id)}>
+                {c.name}
+              </Chip>
+            ))}
+          </div>
+          <div className="relative min-h-0 flex-1 overflow-hidden">
+            <div ref={listRef} className="h-full cursor-grab overflow-y-auto">
+              {filtered.length === 0 ? (
+                <p className="px-2 py-8 text-center text-sm text-subtle">
+                  {products.filter((p) => p.active).length === 0
+                    ? "Todavía no hay productos. Cargalos en Stock."
+                    : "Nada con esa búsqueda."}
+                </p>
+              ) : (
+                <ul>
+                  {filtered.map((p) => (
+                    <li key={p.id}>
+                      <ProductRow product={p} onAdd={() => addProduct(p)} onAsk={() => setAsked(p)} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {asked ? (
+              <>
+                <button
+                  type="button"
+                  className="absolute inset-0 z-20 bg-bg/70"
+                  aria-label="Cerrar consulta"
+                  onClick={() => setAsked(null)}
+                />
+                <div className="absolute inset-x-2 top-2 z-30 rounded-xl bg-surface px-4 py-4 shadow-[var(--shadow-border)]">
+                  <p className="truncate font-display text-xl">{asked.name}</p>
+                  <p className="num mt-1 text-3xl text-sage">{formatARS(asked.price)}</p>
+                  <p className="mt-1 text-sm text-muted">{asked.stock} u. en góndola</p>
+                  <p className="mt-0.5 font-mono text-[11px] text-subtle">{asked.barcode}</p>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
+
+        <div
+          className={cn(
+            "flex min-h-0 flex-col gap-1.5",
+            payOpen ? "absolute inset-0 z-20" : "relative min-h-40 flex-1",
+          )}
+        >
+      <section
+        data-ticket-sheet
+        data-pay-open={payOpen ? "1" : "0"}
+        className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-paper text-ink shadow-[var(--shadow-ticket)] ticket-grain"
+        onPointerDown={onSwipeDown}
+        onPointerMove={onSwipeMove}
+        onPointerUp={onSwipeUp}
+        onPointerCancel={() => {
+          swipe.current = null;
+        }}
+      >
+        <div className="flex shrink-0 flex-col px-4 pt-2 pb-2">
+          <div
+            className="flex touch-none select-none justify-center py-2"
+            role="button"
+            tabIndex={0}
+            aria-label={payOpen ? "Ocultar cobro" : "Mostrar cobro"}
+            onPointerDown={onHandlePointerDown}
+            onPointerMove={onSwipeMove}
+            onPointerUp={onSwipeUp}
+            onPointerCancel={() => {
+              swipe.current = null;
+            }}
+            onClick={onHandleClick}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setPayOpen((v) => !v);
+              }
+            }}
+          >
+            <div className="h-1.5 w-12 rounded-full bg-ink/25" />
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-display text-lg tracking-tight">Ticket</h2>
+            {payOpen ? (
+              <span className="text-[11px] uppercase tracking-[0.08em] text-ink-muted">deslizá abajo</span>
+            ) : (
+              <button
+                type="button"
+                className="h-9 rounded-md bg-ink px-3 text-sm font-medium text-paper disabled:opacity-40"
+                disabled={!ticket.length || sending}
+                onClick={() => void send()}
+              >
+                {sending ? "Enviando…" : "Enviar a la PC"}
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4">
+          <TicketLines ticket={ticket} onQty={setLineQty} onRemove={removeLine} />
+        </div>
+        <div className="flex shrink-0 items-end justify-between border-t border-dashed border-ink/20 px-4 py-3">
+          <span className="text-[11px] uppercase tracking-[0.08em] text-ink-muted">Total</span>
+          <span className="num text-3xl font-medium leading-none">{formatARS(total)}</span>
+        </div>
+      </section>
+
+      {payOpen ? (
+      <div className="shrink-0 space-y-1.5">
+        <div className="grid grid-cols-3 gap-1.5">
+          {methods.map((m) => {
+            const Icon = m.icon;
+            const on = payMethod === m.id;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setPayMethod(m.id)}
+                className={cn(
+                  "flex h-10 flex-col items-center justify-center gap-0.5 rounded-md text-[11px] font-medium",
+                  on ? "bg-accent text-accent-fg" : "bg-elevated text-muted",
+                )}
+              >
+                <Icon className="size-3.5" />
+                {m.label}
+              </button>
+            );
+          })}
+        </div>
+        {payMethod === "efectivo" ? (
+          <div className="space-y-1.5">
+            <div className="flex gap-1.5">
+              <Input
+                inputMode="numeric"
+                value={paidInput}
+                onChange={(e) => setPaidInput(e.target.value.replace(/[^\d]/g, ""))}
+                placeholder="Cuánto pagó"
+                className="h-10 min-w-0 flex-1 text-base font-medium"
+              />
+              {BILLS.map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  className="h-10 shrink-0 rounded-md bg-elevated px-2 text-[11px] text-muted"
+                  onClick={() => setPaidInput(String(k))}
+                >
+                  {formatARS(k)}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-baseline justify-between px-1">
+              <span className="text-[11px] uppercase tracking-[0.08em] text-subtle">Vuelto</span>
+              <span className="num text-lg font-medium text-sage">{formatARS(change)}</span>
+            </div>
+          </div>
+        ) : null}
+        <Button className="w-full" size="lg" disabled={!ticket.length} onClick={confirmSale}>
+          Confirmar venta
+        </Button>
+        <Button
+          className="w-full"
+          size="default"
+          variant="secondary"
+          disabled={!ticket.length || sending}
+          onClick={() => void send()}
+        >
+          {sending ? "Enviando…" : "Enviar a la PC"}
+        </Button>
+      </div>
+      ) : null}
+        </div>
+      </div>
+
+      {cam ? (
+        <CameraScan
+          stayOpen
+          onClose={() => setCam(false)}
+          onCode={(c) => {
+            applyExact(c);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function TicketLines({
+  ticket,
+  onQty,
+  onRemove,
+}: {
+  ticket: TicketLine[];
+  onQty: (id: string, qty: number) => void;
+  onRemove: (id: string) => void;
+}) {
+  if (!ticket.length) {
+    return <p className="py-4 text-center text-sm text-ink-muted">Un toque suma la unidad.</p>;
+  }
+  return (
+    <ul className="flex flex-col gap-2 pb-2">
+      {ticket.map((l) => (
+        <li key={l.productId} className="flex items-center gap-1 border-b border-ink/10 pb-2">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium">{l.name}</div>
+            <div className="num text-xs text-ink-muted">{formatARS(l.price)}</div>
+          </div>
+          <button
+            type="button"
+            className="grid size-11 place-items-center rounded-sm"
+            onClick={() => onQty(l.productId, l.qty - 1)}
+            aria-label="Menos"
+          >
+            <Minus className="size-3.5" />
+          </button>
+          <span className="num w-5 text-center text-sm">{l.qty}</span>
+          <button
+            type="button"
+            className="grid size-11 place-items-center rounded-sm"
+            onClick={() => onQty(l.productId, l.qty + 1)}
+            aria-label="Más"
+          >
+            <Plus className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            className="grid size-11 place-items-center text-ink-muted"
+            onClick={() => onRemove(l.productId)}
+            aria-label="Quitar"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ProductRow({
+  product,
+  onAdd,
+  onAsk,
+}: {
+  product: Product;
+  onAdd: () => void;
+  onAsk: () => void;
+}) {
+  const hold = useRef<number | null>(null);
+  const start = useRef<{ x: number; y: number } | null>(null);
+  const skip = useRef(false);
+
+  function clearHold() {
+    if (hold.current) {
+      window.clearTimeout(hold.current);
+      hold.current = null;
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-0.5">
+      <button
+        type="button"
+        onPointerDown={(e) => {
+          if (e.pointerType === "mouse" && e.button !== 0) return;
+          skip.current = false;
+          start.current = { x: e.clientX, y: e.clientY };
+          clearHold();
+          hold.current = window.setTimeout(() => {
+            skip.current = true;
+            onAsk();
+            hold.current = null;
+          }, 480);
+        }}
+        onPointerMove={(e) => {
+          if (!start.current) return;
+          if (Math.hypot(e.clientX - start.current.x, e.clientY - start.current.y) > 10) {
+            skip.current = true;
+            clearHold();
+          }
+        }}
+        onPointerUp={() => {
+          clearHold();
+          start.current = null;
+          if (!skip.current) onAdd();
+        }}
+        onPointerCancel={() => {
+          clearHold();
+          start.current = null;
+        }}
+        onContextMenu={(e) => e.preventDefault()}
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2.5 text-left hover:bg-elevated/70"
+      >
+        <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{product.name}</span>
+        <span className="num shrink-0 text-sage">{formatARS(product.price)}</span>
+      </button>
+      <button
+        type="button"
+        className="grid size-11 shrink-0 place-items-center text-subtle"
+        onClick={() => onAsk()}
+        aria-label={`Ver ${product.name}`}
+      >
+        <Info className="size-4" />
+      </button>
+    </div>
+  );
+}
+
+function Chip({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  children: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "h-8 shrink-0 whitespace-nowrap rounded-full px-3 text-xs font-medium",
+        active ? "bg-accent text-accent-fg" : "bg-elevated text-muted",
+      )}
+    >
+      {children}
+    </button>
+  );
+}

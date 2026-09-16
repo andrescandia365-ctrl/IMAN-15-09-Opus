@@ -1,0 +1,630 @@
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  AlertTriangle,
+  ClipboardList,
+  LayoutGrid,
+  Moon,
+  ShoppingBag,
+  Sun,
+  Truck,
+  UserRound,
+  Volume2,
+  VolumeX,
+  Wallet,
+  X,
+} from "lucide-react";
+import { BrandMark } from "@/components/brand-mark";
+import { OwnerDesk } from "@/components/owner-desk";
+import { OwnerPinDialog } from "@/components/owner-pin-dialog";
+import { CashView } from "@/components/cash-view";
+import { CounterView } from "@/components/counter-view";
+import { InventoryView } from "@/components/inventory-view";
+import { OrdersView } from "@/components/orders-view";
+import { PhoneExpireView, PhoneStockView } from "@/components/phone-floor";
+import { PhoneReceiveView } from "@/components/phone-receive";
+import { PhoneSellView } from "@/components/phone-sell";
+import { ReceiptDialog } from "@/components/receipt";
+import { SyncButton } from "@/components/sync-button";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { UserButton } from "@/lib/auth/gates";
+import { currentShiftKey, formatARS, shiftLabel } from "@/lib/format";
+import { toast } from "sonner";
+import { addStore, groupRollup, selectStore, type StoreMeta, type StoreRollup } from "@/lib/kiosk";
+
+import type { MyAccess } from "@/lib/license";
+import { clearFlashSecret, readFlashSecret } from "@/lib/shop-secret-flash";
+import { snapshotKiosk, useCashSnapshot, useImanStore } from "@/lib/store";
+import { loadLocalSnapshot, saveLocalSnapshot, setActiveLocalStore } from "@/lib/local-db";
+import { isBrowserOnline } from "@/lib/floor-lock";
+import { syncNow } from "@/lib/sync";
+import type { ViewId } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { usePhoneUi } from "@/lib/device";
+import { lockOwner } from "@/lib/owner-pin";
+import { errorText } from "@/lib/errors";
+
+const DESK_NAV: { id: ViewId; label: string; icon: typeof LayoutGrid }[] = [
+  { id: "counter", label: "Mostrador", icon: LayoutGrid },
+  { id: "inventory", label: "Inventario", icon: ShoppingBag },
+  { id: "orders", label: "Pedidos", icon: ClipboardList },
+  { id: "cash", label: "Caja", icon: Wallet },
+];
+
+const PHONE_NAV: { id: ViewId | "owner"; label: string; icon: typeof LayoutGrid }[] = [
+  { id: "counter", label: "Vender", icon: LayoutGrid },
+  { id: "inventory", label: "Stock", icon: ShoppingBag },
+  { id: "orders", label: "Llegó", icon: Truck },
+  { id: "expire", label: "Vence", icon: AlertTriangle },
+  { id: "owner", label: "Dueño", icon: UserRound },
+];
+
+export function Shell({
+  access,
+  onAccess,
+  stores,
+  activeStoreId,
+  seats,
+  onStores,
+  onActiveStore,
+  onLeave,
+  onStudio,
+}: {
+  access: MyAccess;
+  onAccess: (next: MyAccess) => void;
+  stores: StoreMeta[];
+  activeStoreId: string;
+  seats: number;
+  onStores: (next: StoreMeta[]) => void;
+  onActiveStore: (id: string) => void;
+  onLeave: () => void;
+  onStudio?: () => void;
+}) {
+  const view = useImanStore((s) => s.view);
+  const setView = useImanStore((s) => s.setView);
+  const settings = useImanStore((s) => s.settings);
+  const saveSettings = useImanStore((s) => s.saveSettings);
+  const products = useImanStore((s) => s.products);
+  const hydrateKiosk = useImanStore((s) => s.hydrateKiosk);
+  const cash = useCashSnapshot();
+  const phone = usePhoneUi();
+  const [clock, setClock] = useState(() => new Date());
+  const [tasksOpen, setTasksOpen] = useState(false);
+  const [ownerOpen, setOwnerOpen] = useState(false);
+  const [pinAsk, setPinAsk] = useState<"create" | "enter" | null>(null);
+  const [lowDismissed, setLowDismissed] = useState<number | null>(null);
+  const [wooSecret, setWooSecret] = useState("");
+  const [switching, setSwitching] = useState(false);
+  const [rollup, setRollup] = useState<{
+    stores: StoreRollup[];
+    todayTotal: number;
+    monthTotal: number;
+  } | null>(null);
+
+  if (activeStoreId && useImanStore.getState().deskStoreId !== activeStoreId) {
+    useImanStore.getState().setDeskStoreId(activeStoreId);
+  }
+
+  useEffect(() => {
+    const t = setInterval(() => setClock(new Date()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const owner = ownerOpen;
+  const shiftKey = currentShiftKey(settings.shifts, clock.getHours());
+  const tasks = settings.tasks[shiftKey] ?? [];
+  const low = products.filter((p) => p.active && p.stock <= p.stockMin).length;
+  const time = clock.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+  function requestOwner() {
+    if (ownerOpen) {
+      lockOwner();
+      setOwnerOpen(false);
+      return;
+    }
+    setPinAsk(settings.ownerPinHash ? "enter" : "create");
+  }
+
+  useEffect(() => {
+    if (!phone) return;
+    if (view === "cash" || view === "reports" || view === "settings") {
+      setView("counter");
+    }
+  }, [phone, view, setView]);
+
+  useEffect(() => {
+    if (!ownerOpen) return;
+    if (!isBrowserOnline()) return;
+    void groupRollup()
+      .then(setRollup)
+      .catch((err) => console.error("[stores] rollup", err));
+  }, [ownerOpen, stores, activeStoreId]);
+
+  async function flushCurrent() {
+    const snap = snapshotKiosk(useImanStore.getState());
+    await saveLocalSnapshot(activeStoreId, snap);
+    if (typeof navigator !== "undefined" && navigator.onLine) {
+      await syncNow(activeStoreId).catch(() => {});
+    }
+  }
+
+  async function switchTo(id: string) {
+    if (id === activeStoreId || switching) {
+      return;
+    }
+    setSwitching(true);
+    try {
+      await flushCurrent();
+      const local = await loadLocalSnapshot(id);
+      if (!isBrowserOnline()) {
+        if (local) {
+          onActiveStore(id);
+          setActiveLocalStore(id);
+          hydrateKiosk(local);
+          setOwnerOpen(false);
+          toast("Sin red. Abrimos la copia de este aparato.");
+          return;
+        }
+        toast.error("Sin red. Este aparato no tiene una copia de ese local.");
+        return;
+      }
+      const next = await selectStore({ data: { storeId: id } });
+      onStores(next.stores);
+      onActiveStore(next.activeStoreId);
+      setActiveLocalStore(next.activeStoreId);
+      hydrateKiosk(next.payload);
+      setOwnerOpen(false);
+      toast.success(next.payload.settings.name);
+    } catch (err) {
+      const local = await loadLocalSnapshot(id);
+      if (local) {
+        onActiveStore(id);
+        setActiveLocalStore(id);
+        hydrateKiosk(local);
+        setOwnerOpen(false);
+        toast("Sin red. Abrimos la copia de este aparato.");
+        return;
+      }
+      toast.error(errorText(err, "No se pudo cambiar de local"));
+    } finally {
+      setSwitching(false);
+    }
+  }
+
+  async function createLocal(name: string, catalog: "example" | "empty") {
+    if (stores.length >= seats) {
+      toast.error(`El plan abre ${seats} ${seats === 1 ? "local" : "locales"}`);
+      return;
+    }
+    setSwitching(true);
+    try {
+      await flushCurrent();
+      const next = await addStore({ data: { name, catalog } });
+      onStores(next.stores);
+      onActiveStore(next.activeStoreId);
+      setActiveLocalStore(next.activeStoreId);
+      hydrateKiosk(next.payload);
+      setOwnerOpen(false);
+      toast.success("Local nuevo");
+    } catch (err) {
+      toast.error(errorText(err, "No se pudo crear el local"));
+    } finally {
+      setSwitching(false);
+    }
+  }
+
+  const pane = useMemo(() => {
+    if (phone) {
+      if (view === "inventory") return <PhoneStockView />;
+      if (view === "orders") return <PhoneReceiveView />;
+      if (view === "expire") return <PhoneExpireView />;
+      return <PhoneSellView />;
+    }
+    switch (view) {
+      case "inventory":
+        return <InventoryView />;
+      case "orders":
+        return <OrdersView />;
+      case "cash":
+        return <CashView />;
+      default:
+        return <CounterView />;
+    }
+  }, [view, phone]);
+
+  return (
+    <TooltipProvider delayDuration={250}>
+      <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-bg text-fg">
+        <header className="sticky top-0 z-40 grid h-20 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-border bg-surface px-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(auto,1fr)] sm:px-5">
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              className="flex min-w-0 items-center gap-3 text-left"
+              onClick={() => requestOwner()}
+              aria-label="Panel del dueño"
+            >
+              <BrandMark
+                src={settings.storeLogo}
+                className={cn("size-16", owner && "ring-2 ring-sage")}
+                markClassName="size-8"
+              />
+              <span className="min-w-0">
+                <span className="block truncate font-display text-xl leading-none tracking-tight">
+                  {settings.name || "Local"}
+                </span>
+              </span>
+            </button>
+          </div>
+
+          <nav
+            className={cn(
+              "hidden items-center gap-1 rounded-lg bg-bg p-1.5 sm:flex sm:-translate-x-10",
+              owner && "sm:hidden",
+            )}
+          >
+            {DESK_NAV.map((n) => {
+              const Icon = n.icon;
+              const on = view === n.id;
+              return (
+                <button
+                  key={n.id}
+                  type="button"
+                  aria-label={n.label}
+                  onClick={() => setView(n.id)}
+                  className={cn(
+                    "inline-flex h-12 shrink-0 items-center gap-2 rounded-md px-3.5 text-base font-medium transition-colors duration-150 lg:px-4",
+                    on ? "bg-accent text-accent-fg" : "text-muted hover:text-fg",
+                  )}
+                >
+                  <Icon className="size-[1.125rem]" />
+                  <span className="hidden md:inline">{n.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="flex shrink-0 items-center justify-end gap-1.5 whitespace-nowrap">
+            {onStudio ? (
+              <button
+                type="button"
+                onClick={onStudio}
+                className="hidden h-9 shrink-0 items-center rounded-md px-2.5 text-xs text-sage hover:bg-elevated sm:inline-flex"
+              >
+                Estudio
+              </button>
+            ) : null}
+            <IconTip label="Tareas del turno">
+              <button
+                type="button"
+                aria-label="Tareas del turno"
+                onClick={() => setTasksOpen(true)}
+                className="hidden h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs text-muted hover:bg-elevated hover:text-fg xl:inline-flex"
+              >
+                <span className="num">{time}</span>
+                <span className="text-subtle">·</span>
+                {shiftLabel(settings.shifts, shiftKey)}
+              </button>
+            </IconTip>
+            <SyncButton storeId={activeStoreId} />
+            {cash.over ? (
+              <button
+                type="button"
+                className="hidden shrink-0 sm:inline-flex"
+                onClick={() => setView("cash")}
+              >
+                <Badge variant="warn">Caja llena</Badge>
+              </button>
+            ) : (
+              <IconTip label="Plata en caja · abrir Caja">
+                <button
+                  type="button"
+                  aria-label="Plata en caja"
+                  onClick={() => setView("cash")}
+                  className="hidden h-9 shrink-0 items-center whitespace-nowrap rounded-md px-2 font-mono text-xs text-muted hover:text-fg lg:inline-flex"
+                >
+                  {formatARS(cash.cajaChica)}
+                </button>
+              </IconTip>
+            )}
+            <IconTip label={settings.voiceEnabled ? "Silenciar voz" : "Activar voz"}>
+              <button
+                type="button"
+                aria-label={settings.voiceEnabled ? "Silenciar voz" : "Activar voz"}
+                className="hidden size-10 shrink-0 place-items-center rounded-md text-muted hover:bg-elevated hover:text-fg sm:grid"
+                onClick={() => saveSettings({ voiceEnabled: !settings.voiceEnabled })}
+              >
+                {settings.voiceEnabled ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}
+              </button>
+            </IconTip>
+            <IconTip label={settings.theme === "dark" ? "Pantalla clara" : "Pantalla oscura"}>
+              <button
+                type="button"
+                aria-label={settings.theme === "dark" ? "Pantalla clara" : "Pantalla oscura"}
+                className="grid size-10 shrink-0 place-items-center rounded-md text-muted hover:bg-elevated hover:text-fg"
+                onClick={() => saveSettings({ theme: settings.theme === "dark" ? "light" : "dark" })}
+              >
+                {settings.theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+              </button>
+            </IconTip>
+            <div className="iman-account hidden shrink-0 md:block">
+              <UserButton />
+            </div>
+          </div>
+        </header>
+
+        {access.isVendor && wooSecret ? (
+          <div className="border-b border-border bg-paper px-4 py-3 text-ink">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">Path 2 · clave de WooCommerce</p>
+            <p className="mt-1 break-all font-mono text-sm">{wooSecret}</p>
+            <p className="mt-1 text-xs text-ink-muted">Copiala ahora. En el panel del dueño está el snippet.</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  void navigator.clipboard.writeText(wooSecret);
+                }}
+              >
+                Copiar clave
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => requestOwner()}>
+                Ver el dueño
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  clearFlashSecret();
+                  setWooSecret("");
+                }}
+              >
+                Ya la guardé
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {!access.isVendor && !access.license?.active && !access.trial?.active ? (
+          <div className="mx-3 mt-3 flex items-center justify-between gap-3 rounded-lg bg-warn/10 px-3 py-2 text-sm text-warn sm:mx-5">
+            <span>Día 20. El mostrador sigue. Activá el plan cuando termines la fila.</span>
+            <Button size="sm" variant="ghost" className="text-warn" onClick={onLeave}>
+              Código
+            </Button>
+          </div>
+        ) : null}
+
+        {low > 0 && view === "counter" && !phone && lowDismissed !== low ? (
+          <div className="mx-3 mt-3 flex items-center justify-between gap-3 rounded-lg bg-warn/10 px-3 py-2 text-sm text-warn sm:mx-5">
+            <span>{low} productos bajo mínimo</span>
+            <div className="flex items-center gap-1">
+              <Button size="sm" variant="ghost" className="text-warn" onClick={() => setView("inventory")}>
+                Ver
+              </Button>
+              <button
+                type="button"
+                className="grid size-8 place-items-center rounded-md text-warn hover:bg-warn/10"
+                aria-label="Quitar aviso"
+                onClick={() => setLowDismissed(low)}
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        <main className="mx-auto min-h-0 w-full max-w-[2400px] flex-1 overflow-hidden px-3 py-3 pb-[calc(var(--bottom-nav)+16px)] sm:px-5 sm:pb-5">
+          {ownerOpen ? (
+            <OwnerDesk
+              access={access}
+              onAccess={onAccess}
+              stores={stores}
+              activeStoreId={activeStoreId}
+              rollup={rollup}
+              remaining={Math.max(0, seats - stores.length)}
+              onClose={() => {
+                lockOwner();
+                setOwnerOpen(false);
+              }}
+              onHub={onLeave}
+              onSwitch={(id) => void switchTo(id)}
+              onCreate={(name) => void createLocal(name, "empty")}
+            />
+          ) : (
+            <div className="h-full min-h-0 overflow-hidden">{pane}</div>
+          )}
+        </main>
+
+        <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-surface pb-[env(safe-area-inset-bottom)] sm:hidden">
+          {PHONE_NAV.map((n) => {
+            const Icon = n.icon;
+            const on = n.id === "owner" ? ownerOpen : !ownerOpen && view === n.id;
+            return (
+              <button
+                key={n.id}
+                type="button"
+                onClick={() => {
+                  if (n.id === "owner") {
+                    requestOwner();
+                    return;
+                  }
+                  setOwnerOpen(false);
+                  setView(n.id);
+                }}
+                className={cn(
+                  "flex h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[10px]",
+                  on ? "text-sage" : "text-subtle",
+                )}
+              >
+                <Icon className="size-4" />
+                {n.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        <Sheet open={tasksOpen} onOpenChange={setTasksOpen}>
+          <SheetContent side="right">
+            <p className="font-display text-xl">
+              Turno {shiftLabel(settings.shifts, shiftKey)}
+            </p>
+            <p className="mt-1 text-sm text-muted">{time}</p>
+            {settings.taskRemindersEnabled ? (
+              <ul className="mt-4 flex flex-col gap-2">
+                {tasks.map((t) => (
+                  <li key={t} className="rounded-md bg-elevated px-3 py-2.5 text-sm">
+                    {t}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-4 text-sm text-subtle">Recordatorios desactivados.</p>
+            )}
+          </SheetContent>
+        </Sheet>
+
+        <ReceiptDialog />
+        {pinAsk ? (
+          <OwnerPinDialog
+            open
+            mode={pinAsk}
+            onClose={() => setPinAsk(null)}
+            onOk={() => {
+              setPinAsk(null);
+              setOwnerOpen(true);
+            }}
+          />
+        ) : null}
+      </div>
+    </TooltipProvider>
+  );
+}
+
+function OwnerStores({
+  stores,
+  activeStoreId,
+  cap,
+  busy,
+  onSwitch,
+  onCreate,
+}: {
+  stores: StoreMeta[];
+  activeStoreId: string;
+  cap: number;
+  busy: boolean;
+  onSwitch: (id: string) => void;
+  onCreate: (name: string, catalog: "example" | "empty") => void;
+}) {
+  const [name, setName] = useState("");
+  const [catalog, setCatalog] = useState<"example" | "empty">("empty");
+  const [rollup, setRollup] = useState<{
+    stores: StoreRollup[];
+    todayTotal: number;
+    monthTotal: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!isBrowserOnline()) return;
+    void groupRollup()
+      .then(setRollup)
+      .catch((err) => console.error("[stores] rollup", err));
+  }, [stores, activeStoreId]);
+
+  return (
+    <div className="mt-4 rounded-lg bg-elevated p-3">
+      <p className="text-[11px] uppercase tracking-[0.14em] text-subtle">Grupo</p>
+      {rollup ? (
+        <p className="mt-1 text-sm">
+          Hoy {formatARS(rollup.todayTotal)}
+          <span className="text-muted"> · mes {formatARS(rollup.monthTotal)}</span>
+        </p>
+      ) : (
+        <p className="mt-1 text-sm text-muted">Sumando locales…</p>
+      )}
+      <ul className="mt-2 space-y-1">
+        {(rollup?.stores ?? stores).map((s) => (
+          <li key={s.id}>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onSwitch(s.id)}
+              className={cn(
+                "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm",
+                s.id === activeStoreId ? "bg-surface" : "hover:bg-surface/60",
+              )}
+            >
+              <span className="truncate">{s.name}</span>
+              {"todayTotal" in s ? (
+                <span className="num text-xs text-muted">{formatARS(s.todayTotal)}</span>
+              ) : null}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {stores.length < cap ? (
+        <form
+          className="mt-3 space-y-2 border-t border-border pt-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const n = name.trim();
+            if (!n) return;
+            onCreate(n, catalog);
+            setName("");
+          }}
+        >
+          <Label htmlFor="new-store">Agregar local</Label>
+          <Input
+            id="new-store"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Sucursal 2"
+            maxLength={40}
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setCatalog("empty")}
+              className={cn(
+                "flex-1 rounded-md px-2 py-1.5 text-xs",
+                catalog === "empty" ? "bg-accent text-accent-fg" : "bg-surface text-muted",
+              )}
+            >
+              Vacío
+            </button>
+            <button
+              type="button"
+              onClick={() => setCatalog("example")}
+              className={cn(
+                "flex-1 rounded-md px-2 py-1.5 text-xs",
+                catalog === "example" ? "bg-accent text-accent-fg" : "bg-surface text-muted",
+              )}
+            >
+              Catálogo de prueba
+            </button>
+          </div>
+          <Button type="submit" size="sm" className="w-full" disabled={busy || !name.trim()}>
+            Crear local
+          </Button>
+        </form>
+      ) : (
+        <p className="mt-2 text-xs text-subtle">El plan abre {cap} locales.</p>
+      )}
+    </div>
+  );
+}
+
+function IconTip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}

@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "IMAN",
+      "hasCanvas": false,
+      "bodyTextLen": 3645,
+      "bodyTextHash": "f541637c8fc745e94dbd551eb9b0c0e20e8fd9717fac98a277d510dff0d73f46",
+      "bodyTextPrefix": "IMAN Estudio Entrar Activar con mi código ARGENTINA · KIOSCO, AL",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "IMAN",
+      "hasCanvas": false,
+      "bodyTextLen": 3638,
+      "bodyTextHash": "d8b086ab34be06d85c52c1e95b00b55db989ea24c5997694936fa135506625d9",
+      "bodyTextPrefix": "IMAN Estudio Activar con mi código ARGENTINA · KIOSCO, ALMACÉN, ",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}

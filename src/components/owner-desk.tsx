@@ -1,0 +1,541 @@
+import { useMemo, useState } from "react";
+import { FileText, MapPin, Settings2, Tag, Ticket, Users, Wallet } from "lucide-react";
+import { Pie, PieChart, Cell, ResponsiveContainer, Tooltip as RTooltip } from "recharts";
+import { toast } from "sonner";
+import { LedgerSheet } from "@/components/ledger-grid";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  booksForYm,
+  currentYm,
+  downloadText,
+  ledgerCsv,
+  monthCc,
+  monthTitle,
+  monthsOfQuarter,
+  monthsOfYear,
+  quarterOf,
+} from "@/lib/ledger";
+import { SettingsView } from "@/components/settings-view";
+import { TeamView } from "@/components/team-view";
+import { OwnerPrices } from "@/components/owner-prices";
+import { OwnerTicket } from "@/components/owner-ticket";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { formatARS } from "@/lib/format";
+import type { StoreMeta, StoreRollup } from "@/lib/kiosk";
+import type { MyAccess } from "@/lib/license";
+import { useImanStore } from "@/lib/store";
+import { cn } from "@/lib/utils";
+import { usePhoneUi } from "@/lib/device";
+
+type Tab = "precios" | "mes" | "ticket" | "factura" | "grupo" | "equipo" | "local";
+
+export function OwnerDesk({
+  access,
+  onAccess,
+  stores,
+  activeStoreId,
+  rollup,
+  remaining,
+  onClose,
+  onHub,
+  onSwitch,
+  onCreate,
+}: {
+  access: MyAccess;
+  onAccess: (next: MyAccess) => void;
+  stores: StoreMeta[];
+  activeStoreId: string;
+  rollup: { stores: StoreRollup[]; todayTotal: number; monthTotal: number } | null;
+  remaining: number;
+  onClose: () => void;
+  onHub: () => void;
+  onSwitch: (id: string) => void;
+  onCreate: (name: string) => void;
+}) {
+  const [tab, setTab] = useState<Tab>("precios");
+  const [newName, setNewName] = useState("");
+  const [gastosOpen, setGastosOpen] = useState(false);
+  const books = useImanStore((s) => s.books);
+  const sheets = useImanStore((s) => s.monthSheets);
+  const labels = useImanStore((s) => s.settings.ledgerLabels);
+  const releaseMonth = useImanStore((s) => s.releaseMonth);
+  const nowYm = currentYm();
+  const [year, setYear] = useState(() => Number(nowYm.slice(0, 4)));
+  const [q, setQ] = useState<1 | 2 | 3 | 4>(() => quarterOf(nowYm));
+  const [ym, setYm] = useState(nowYm);
+  const qMonths = monthsOfQuarter(year, q);
+  const viewBooks = useMemo(() => booksForYm(books, sheets, ym), [books, sheets, ym]);
+  const cc = useMemo(() => monthCc(viewBooks, ym), [viewBooks, ym]);
+  const qCc = useMemo(() => {
+    return qMonths.reduce(
+      (acc, m) => {
+        const c = monthCc(booksForYm(books, sheets, m), m);
+        return {
+          ingresoCaja: acc.ingresoCaja + c.ingresoCaja,
+          ingresoMp: acc.ingresoMp + c.ingresoMp,
+          proveedores: acc.proveedores + c.proveedores,
+          ganancias: acc.ganancias + c.ganancias,
+        };
+      },
+      { ingresoCaja: 0, ingresoMp: 0, proveedores: 0, ganancias: 0 },
+    );
+  }, [books, sheets, qMonths]);
+  const current = ym === nowYm;
+  const phone = usePhoneUi();
+  const sales = useImanStore((s) => s.sales);
+  const pie = useMemo(() => {
+    const map = { efectivo: 0, mercadopago: 0, debito: 0 };
+    for (const s of sales) {
+      if (!s.createdAt.startsWith(String(year))) continue;
+      map[s.paymentMethod] += s.total;
+    }
+    return [
+      { name: "Efectivo", value: map.efectivo },
+      { name: "Mercado Pago", value: map.mercadopago },
+      { name: "Débito", value: map.debito },
+    ].filter((d) => d.value > 0);
+  }, [sales, year]);
+  const pieTotal = pie.reduce((a, d) => a + d.value, 0);
+  const PIE_COLORS = ["#7d9a7e", "#d4a84b", "#c45c4a", "#6b8cae", "#c4b49a", "#8a7a68"];
+  const tabs = (
+    [
+      ["precios", "Precios", Tag],
+      ["mes", "El mes", Wallet],
+      ["ticket", "Ticket", Ticket],
+      ["factura", "Factura", FileText],
+      ...(stores.length >= 2 ? ([["grupo", "Grupo", MapPin]] as const) : []),
+      ["equipo", "Equipo", Users],
+      ["local", "Local", Settings2],
+    ] as const
+  );
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+      <div className="flex shrink-0 items-center gap-2">
+        <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto no-scrollbar">
+          {tabs.map(([id, label, Icon]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id)}
+              className={cn(
+                "inline-flex h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-full px-3 text-sm font-medium",
+                tab === id ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
+              )}
+            >
+              <Icon className="size-3.5 shrink-0" />
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="flex shrink-0 gap-2">
+          {phone ? null : (
+            <Button variant="ghost" onClick={onHub}>
+              Todos los locales
+            </Button>
+          )}
+          <Button variant="secondary" onClick={onClose}>
+            {phone ? "Volver" : "Volver al mostrador"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {tab === "precios" ? (
+          <div className="h-full min-h-0 overflow-hidden rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+            <OwnerPrices />
+          </div>
+        ) : null}
+        {tab === "ticket" ? (
+          <div className="h-full min-h-0 overflow-y-auto rounded-xl bg-surface p-5 shadow-[var(--shadow-border)]">
+            <OwnerTicket />
+          </div>
+        ) : null}
+        {tab === "grupo" ? (
+          <div className="h-full min-h-0 space-y-4 overflow-y-auto">
+            <div className="rounded-xl bg-surface p-5 shadow-[var(--shadow-border)]">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-subtle">Grupo</p>
+              <p className="mt-1 font-display text-3xl">
+                Hoy {formatARS(rollup?.todayTotal ?? 0)}
+                <span className="ml-3 text-lg text-muted">mes {formatARS(rollup?.monthTotal ?? 0)}</span>
+              </p>
+              <ul className="mt-4 divide-y divide-border">
+                {stores.map((s) => (
+                  <li key={s.id} className="flex items-center justify-between py-2">
+                    <button type="button" className="text-left" onClick={() => onSwitch(s.id)}>
+                      <span className="font-medium">{s.alias || s.name}</span>
+                      {s.alias && s.alias !== s.name ? (
+                        <span className="ml-2 text-xs text-subtle">{s.name}</span>
+                      ) : null}
+                    </button>
+                    <span className="num text-sm text-muted">
+                      {formatARS(rollup?.stores.find((x) => x.id === s.id)?.todayTotal ?? 0)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            {remaining > 0 ? (
+              <form
+                className="rounded-xl bg-surface p-5 shadow-[var(--shadow-border)]"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const n = newName.trim();
+                  if (!n) return;
+                  onCreate(n);
+                  setNewName("");
+                }}
+              >
+                <p className="text-sm text-muted">Quedan {remaining} puertas en el plan.</p>
+                <Input
+                  className="mt-2"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="Nombre del local"
+                />
+                <Button type="submit" className="mt-3" disabled={!newName.trim()}>
+                  Agregar local
+                </Button>
+              </form>
+            ) : null}
+          </div>
+        ) : null}
+
+        {tab === "mes" ? (
+          <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                className="grid size-11 place-items-center rounded-full bg-elevated text-sm text-muted hover:text-fg"
+                onClick={() => setYear((y) => y - 1)}
+              >
+                ←
+              </button>
+              <span className="num px-1 text-sm">{year}</span>
+              <button
+                type="button"
+                className="grid size-11 place-items-center rounded-full bg-elevated text-sm text-muted hover:text-fg"
+                onClick={() => setYear((y) => y + 1)}
+              >
+                →
+              </button>
+              {([1, 2, 3, 4] as const).map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => {
+                    setQ(n);
+                    const months = monthsOfQuarter(year, n);
+                    setYm(months.includes(nowYm) && nowYm.startsWith(String(year)) ? nowYm : months[0]!);
+                  }}
+                  className={cn(
+                    "h-11 rounded-full px-3 text-sm font-medium",
+                    q === n ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
+                  )}
+                >
+                  Q{n}
+                </button>
+              ))}
+              {qMonths.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setYm(m)}
+                  className={cn(
+                    "h-11 rounded-full px-3 text-sm font-medium capitalize",
+                    ym === m ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
+                  )}
+                >
+                  {monthTitle(m).split(" ")[0]}
+                </button>
+              ))}
+              <div className="ml-auto flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-subtle">
+                  Bajar CSV
+                </span>
+                {(
+                  [
+                    ["Mes", [ym]],
+                    ["Año", monthsOfYear(year)],
+                    ["Q1", monthsOfQuarter(year, 1)],
+                    ["Q2", monthsOfQuarter(year, 2)],
+                    ["Q3", monthsOfQuarter(year, 3)],
+                    ["Q4", monthsOfQuarter(year, 4)],
+                  ] as const
+                ).map(([label, yms]) => (
+                  <Button
+                    key={label}
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      const text = yms
+                        .map((mo) => ledgerCsv(mo, booksForYm(books, sheets, mo), labels))
+                        .join("\n\n");
+                      downloadText(`iman-planilla-${label.toLowerCase()}-${year}.csv`, text);
+                      toast.success("CSV descargado");
+                    }}
+                  >
+                    {label}
+                  </Button>
+                ))}
+                {!current ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      const r = releaseMonth(ym);
+                      if (!r.ok) toast.error(r.error);
+                      else toast.success(`Liberadas ${r.freed} filas del mes. Queda el archivo del dueño.`);
+                    }}
+                  >
+                    Liberar memoria
+                  </Button>
+                ) : null}
+                <Button variant="secondary" size="sm" onClick={() => setGastosOpen(true)}>
+                  Gastos fijos
+                </Button>
+              </div>
+            </div>
+            <div className="grid shrink-0 grid-cols-2 gap-2 lg:grid-cols-5">
+              <Kpi k="Fac X" v={formatARS(cc.facX)} />
+              <Kpi k="Fac A" v={formatARS(cc.facA)} />
+              <Kpi k="Cigarrillos" v={formatARS(cc.cigarrillos)} />
+              <Kpi k="Ganancias" v={formatARS(cc.ganancias)} />
+              <div className="col-span-2 flex items-center gap-3 rounded-xl bg-surface px-4 py-3 shadow-[var(--shadow-border)] lg:col-span-1">
+                {pie.length ? (
+                  <>
+                    <div className="h-16 w-16 shrink-0">
+                      <ResponsiveContainer>
+                        <PieChart>
+                          <Pie data={pie} dataKey="value" nameKey="name" innerRadius={18} outerRadius={30}>
+                            {pie.map((_, i) => (
+                              <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <RTooltip formatter={(v) => formatARS(Number(v) || 0)} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <ul className="min-w-0 flex-1 space-y-0.5 text-xs">
+                      {pie.map((d, i) => (
+                        <li key={d.name} className="flex justify-between gap-2">
+                          <span className="truncate text-muted">{d.name}</span>
+                          <span className="num text-fg">
+                            {pieTotal ? Math.round((d.value / pieTotal) * 100) : 0}%
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <p className="text-xs text-subtle">
+                    Q{q} {year} · caja {formatARS(qCc.ingresoCaja)}
+                  </p>
+                )}
+              </div>
+            </div>
+            {sheets
+              .filter((s) => {
+                const drop = new Date(s.archivedAt);
+                drop.setMonth(drop.getMonth() + 12);
+                const days = Math.ceil((drop.getTime() - Date.now()) / 86_400_000);
+                return days > 0 && days <= 30;
+              })
+              .map((s) => (
+                <p key={s.ym} className="shrink-0 text-sm text-warn">
+                  {monthTitle(s.ym)} se borra en 30 días.
+                </p>
+              ))}
+            <div className="min-h-0 flex-1 overflow-hidden rounded-xl bg-surface p-3 shadow-[var(--shadow-border)]">
+              <LedgerSheet ym={ym} editable={current} />
+            </div>
+            <Dialog open={gastosOpen} onOpenChange={setGastosOpen}>
+              <DialogContent className="w-[min(36rem,calc(100vw-48px))] max-w-none p-6">
+                <DialogHeader className="mb-4 pr-10">
+                  <p className="text-xs font-medium uppercase tracking-[0.16em] text-subtle">El mes</p>
+                  <DialogTitle className="mt-1 font-display text-3xl leading-none tracking-tight">
+                    Gastos fijos
+                  </DialogTitle>
+                  <DialogDescription>Alquiler y los que no cambian.</DialogDescription>
+                </DialogHeader>
+                <ExpenseEditor />
+              </DialogContent>
+            </Dialog>
+          </div>
+        ) : null}
+
+        {tab === "equipo" ? (
+          <div className="h-full min-h-0 overflow-hidden">
+            <TeamView />
+          </div>
+        ) : null}
+
+        {tab === "factura" ? (
+          <div className="h-full min-h-0 overflow-y-auto rounded-xl bg-surface p-5 shadow-[var(--shadow-border)]">
+            <OwnerFactura />
+          </div>
+        ) : null}
+
+        {tab === "local" ? (
+          <div className="grid h-full min-h-0 gap-3 overflow-y-auto lg:grid-cols-[minmax(16rem,0.7fr)_minmax(0,1.3fr)]">
+            <div className="rounded-xl bg-surface p-5 shadow-[var(--shadow-border)]">
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-subtle">Locales</p>
+              <ul className="mt-3 space-y-1">
+                {stores.map((s) => (
+                  <li key={s.id}>
+                    <button
+                      type="button"
+                      onClick={() => onSwitch(s.id)}
+                      className={cn(
+                        "flex w-full items-center justify-between rounded-md px-3 py-2.5 text-left text-sm",
+                        s.id === activeStoreId ? "bg-accent text-accent-fg" : "hover:bg-elevated",
+                      )}
+                    >
+                      <span>
+                        <span className="block font-medium">{s.alias || s.name}</span>
+                        {s.alias && s.alias !== s.name ? (
+                          <span className="block text-xs text-subtle">{s.name}</span>
+                        ) : null}
+                      </span>
+                      <span className="text-xs opacity-80">{s.id === activeStoreId ? "acá" : "Abrir"}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {remaining > 0 ? (
+                <form
+                  className="mt-3"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const n = newName.trim();
+                    if (!n) return;
+                    onCreate(n);
+                    setNewName("");
+                  }}
+                >
+                  <Input
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="Nombre del local"
+                  />
+                  <Button type="submit" className="mt-2" disabled={!newName.trim()}>
+                    Agregar local
+                  </Button>
+                </form>
+              ) : null}
+            </div>
+            <SettingsView access={access} onAccess={onAccess} />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function Kpi({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="rounded-xl bg-surface px-4 py-3 shadow-[var(--shadow-border)]">
+      <p className="text-xs font-medium uppercase tracking-[0.12em] text-subtle">{k}</p>
+      <p className="num mt-1 text-xl text-sage">{v}</p>
+    </div>
+  );
+}
+
+function ExpenseEditor() {
+  const settings = useImanStore((s) => s.settings);
+  const saveSettings = useImanStore((s) => s.saveSettings);
+  const rows = settings.monthExpenses ?? [];
+  return (
+    <ul className="space-y-2">
+      {rows.map((e, i) => (
+        <li key={e.name} className="flex gap-2">
+          <Input className="flex-1" value={e.name} readOnly />
+          <Input
+            className="w-32 text-right"
+            inputMode="numeric"
+            value={e.amount || ""}
+            onChange={(ev) => {
+              const amount = Number(ev.target.value.replace(/[^\d]/g, "")) || 0;
+              const next = rows.map((r, idx) => (idx === i ? { ...r, amount } : r));
+              saveSettings({ monthExpenses: next });
+            }}
+          />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function OwnerFactura() {
+  const settings = useImanStore((s) => s.settings);
+  const saveSettings = useImanStore((s) => s.saveSettings);
+  const f = settings.fiscal ?? {
+    enabled: false,
+    cuit: "",
+    puntoVenta: "1",
+    tipo: "C" as const,
+    api: "",
+    queue: 0,
+  };
+  function patch(p: Partial<typeof f>) {
+    saveSettings({ fiscal: { ...f, ...p } });
+  }
+  return (
+    <div className="space-y-4">
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={f.enabled}
+          onChange={(e) => patch({ enabled: e.target.checked })}
+        />
+        Emitir factura
+      </label>
+      {f.enabled ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <p className="text-xs text-subtle">CUIT</p>
+            <Input value={f.cuit} onChange={(e) => patch({ cuit: e.target.value })} placeholder="20-12345678-9" />
+          </div>
+          <div>
+            <p className="text-xs text-subtle">Punto de venta</p>
+            <Input
+              value={f.puntoVenta}
+              onChange={(e) => patch({ puntoVenta: e.target.value })}
+              placeholder="0001"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <p className="text-xs text-subtle">Tipo</p>
+            <div className="mt-1 flex gap-2">
+              {(["C", "B", "A"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className={cn(
+                    "h-11 flex-1 rounded-full text-sm font-medium",
+                    f.tipo === t ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
+                  )}
+                  onClick={() => patch({ tipo: t })}
+                >
+                  Fac {t}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="sm:col-span-2">
+            <p className="text-xs text-subtle">API / token del controlador</p>
+            <Input value={f.api} onChange={(e) => patch({ api: e.target.value })} placeholder="Pegá la clave" />
+          </div>
+          <p className="text-sm text-muted sm:col-span-2">Cola: {f.queue} comprobantes pendientes.</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}

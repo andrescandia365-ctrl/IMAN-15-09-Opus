@@ -1,0 +1,222 @@
+import type { DayBook, KioskPayload, MonthAgg, MonthSheet, OrderDraft, Sale } from "@/lib/types";
+
+/** Live tickets we keep in the blob. Older ones fold into monthAggs. */
+export const SALES_KEEP = 1500;
+export const SALES_DAYS = 7;
+export const MOVEMENTS_KEEP = 150;
+export const SHIFTS_KEEP = 90;
+export const DROPS_KEEP = 80;
+export const ORDERS_KEEP = 40;
+export const REFUNDS_KEEP = 200;
+export const PAYOUTS_KEEP = 200;
+export const BOOKS_KEEP = 400;
+export const MAX_JSON_BYTES = 1_800_000;
+
+function ymOf(iso: string): string {
+  return iso.slice(0, 7);
+}
+
+function foldSale(map: Map<string, MonthAgg>, s: Sale): void {
+  const ym = ymOf(s.createdAt);
+  const cur = map.get(ym) ?? {
+    ym,
+    ventas: 0,
+    tickets: 0,
+    mp: 0,
+    efectivo: 0,
+    debito: 0,
+    cogs: 0,
+  };
+  cur.ventas += s.total;
+  cur.tickets += 1;
+  if (s.paymentMethod === "mercadopago") cur.mp += s.total;
+  else if (s.paymentMethod === "efectivo") cur.efectivo += s.total;
+  else cur.debito += s.total;
+  cur.cogs += s.items.reduce((a, it) => a + it.price * it.qty * 0.7, 0);
+  map.set(ym, cur);
+}
+
+export function mergeAggs(a: MonthAgg[], b: MonthAgg[]): MonthAgg[] {
+  const map = new Map<string, MonthAgg>();
+  for (const row of [...a, ...b]) {
+    const cur = map.get(row.ym);
+    if (!cur) {
+      map.set(row.ym, { ...row });
+      continue;
+    }
+    map.set(row.ym, {
+      ym: row.ym,
+      ventas: cur.ventas + row.ventas,
+      tickets: cur.tickets + row.tickets,
+      mp: cur.mp + row.mp,
+      efectivo: cur.efectivo + row.efectivo,
+      debito: cur.debito + row.debito,
+      cogs: cur.cogs + row.cogs,
+    });
+  }
+  return [...map.values()].sort((x, y) => y.ym.localeCompare(x.ym)).slice(0, 36);
+}
+
+function keepNewest<T extends { createdAt: string }>(rows: T[], n: number): T[] {
+  if (rows.length <= n) return rows;
+  return [...rows].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, n);
+}
+
+/** Trim the JSON blob so a busy till does not explode the save. */
+export function prunePayload(p: KioskPayload): KioskPayload {
+  const cutoff = Date.now() - SALES_DAYS * 86_400_000;
+  const keep: Sale[] = [];
+  const folded: Sale[] = [];
+  const sales = [...p.sales].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  for (const s of sales) {
+    const old = new Date(s.createdAt).getTime() < cutoff;
+    if (!old && keep.length < SALES_KEEP) keep.push(s);
+    else folded.push(s);
+  }
+  const extra: MonthAgg[] = [];
+  const map = new Map<string, MonthAgg>();
+  for (const s of folded) foldSale(map, s);
+  extra.push(...map.values());
+
+  const bookCut = Date.now() - BOOKS_KEEP * 86_400_000;
+  const books = (p.books ?? []).filter((b: DayBook) => new Date(b.date).getTime() >= bookCut);
+  const monthSheets = [...(p.monthSheets ?? [])]
+    .sort((a, b) => b.ym.localeCompare(a.ym))
+    .slice(0, 12);
+
+  return {
+    ...p,
+    sales: keep,
+    movements: keepNewest(p.movements, MOVEMENTS_KEEP),
+    shifts: [...p.shifts].sort((a, b) => (a.openedAt < b.openedAt ? 1 : -1)).slice(0, SHIFTS_KEEP),
+    drops: keepNewest(p.drops, DROPS_KEEP),
+    orders: keepNewest(p.orders, ORDERS_KEEP),
+    refunds: keepNewest(p.refunds ?? [], REFUNDS_KEEP),
+    payouts: keepNewest(p.payouts ?? [], PAYOUTS_KEEP),
+    roster: (p.roster ?? []).filter((r) => {
+      const t = new Date(`${r.date}T12:00:00`).getTime();
+      return t >= Date.now() - 45 * 86_400_000;
+    }),
+    books,
+    monthAggs: mergeAggs(p.monthAggs ?? [], extra),
+    monthSheets,
+    ticket: p.ticket.slice(0, 80),
+  };
+}
+
+export function jsonBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).length;
+}
+
+function hasCatalog(p: KioskPayload | null | undefined): boolean {
+  return Boolean(p && (p.products.length > 0 || p.sales.length > 0));
+}
+
+function namedLines(o: OrderDraft): number {
+  return (o.lines ?? []).filter((l) => l.productId && (l.name || l.qty)).length;
+}
+
+/** Keep the more complete piece: received > sent > more renglones. */
+export function richerOrder(a: OrderDraft, b: OrderDraft): OrderDraft {
+  if (a.received !== b.received) return a.received ? a : b;
+  if (a.sent !== b.sent) return a.sent ? a : b;
+  const an = namedLines(a);
+  const bn = namedLines(b);
+  if (an !== bn) return an > bn ? a : b;
+  if ((a.lines?.length ?? 0) !== (b.lines?.length ?? 0)) {
+    return (a.lines?.length ?? 0) > (b.lines?.length ?? 0) ? a : b;
+  }
+  const aDates = (a.liftAt ? 1 : 0) + (a.deliverAt ? 1 : 0);
+  const bDates = (b.liftAt ? 1 : 0) + (b.deliverAt ? 1 : 0);
+  if (aDates !== bDates) return aDates > bDates ? a : b;
+  return (a.createdAt ?? "") >= (b.createdAt ?? "") ? a : b;
+}
+
+export function mergeOrders(server: OrderDraft[] | undefined, local: OrderDraft[] | undefined): OrderDraft[] {
+  const map = new Map<string, OrderDraft>();
+  for (const o of [...(server ?? []), ...(local ?? [])]) {
+    if (!o?.id) continue;
+    const cur = map.get(o.id);
+    map.set(o.id, cur ? richerOrder(cur, o) : o);
+  }
+  return [...map.values()].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+}
+
+/** Two tills: keep every ticket. An empty new device must not wipe the photocopy. */
+export function mergePayload(server: KioskPayload, local: KioskPayload): KioskPayload {
+  if (!hasCatalog(local) && hasCatalog(server)) {
+    return prunePayload({
+      ...server,
+      orders: mergeOrders(server.orders, local.orders),
+    });
+  }
+  const salesById = new Map<string, Sale>();
+  for (const s of server.sales) salesById.set(s.id, s);
+  for (const s of local.sales) salesById.set(s.id, s);
+  const sales = [...salesById.values()].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  const refundsById = new Map<string, NonNullable<KioskPayload["refunds"]>[number]>();
+  for (const r of server.refunds ?? []) refundsById.set(r.id, r);
+  for (const r of local.refunds ?? []) refundsById.set(r.id, r);
+  const refunds = [...refundsById.values()].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  const products = local.products.length ? local.products : server.products;
+  const categories = local.categories.length ? local.categories : server.categories;
+  const settings = {
+    ...server.settings,
+    ...local.settings,
+    name: local.settings.name?.trim() || server.settings.name,
+    city: local.settings.city?.trim() || server.settings.city,
+    ownerPinHash: local.settings.ownerPinHash || server.settings.ownerPinHash,
+    storeLogo: local.settings.storeLogo || server.settings.storeLogo,
+  };
+  return prunePayload({
+    ...server,
+    ...local,
+    products,
+    categories,
+    settings,
+    sales,
+    refunds,
+    orders: mergeOrders(server.orders, local.orders),
+    monthAggs: mergeAggs(server.monthAggs ?? [], local.monthAggs ?? []),
+    monthSheets: mergeSheets(server.monthSheets ?? [], local.monthSheets ?? []),
+    ticket: local.ticket?.length ? local.ticket : server.ticket,
+  });
+}
+
+function remoteHasWork(p: KioskPayload | null | undefined): boolean {
+  if (!p) return false;
+  if (hasCatalog(p)) return true;
+  return (p.orders ?? []).some((o) => o.sent && namedLines(o) > 0);
+}
+
+/** Pull: never replace a live local with an empty cloud. Count new sent orders. */
+export function incomingCopy(
+  remote: KioskPayload | null | undefined,
+  local: KioskPayload,
+): { payload: KioskPayload; newOrders: number; emptyRemote: boolean } {
+  if (!remote || !remoteHasWork(remote)) {
+    if (hasCatalog(local) || (local.orders ?? []).some((o) => o.sent)) {
+      return { payload: local, newOrders: 0, emptyRemote: true };
+    }
+    return { payload: local, newOrders: 0, emptyRemote: true };
+  }
+  const payload = hasCatalog(local) ? mergePayload(remote, local) : prunePayload(remote);
+  const had = new Set((local.orders ?? []).filter((o) => o.sent).map((o) => o.id));
+  const newOrders = (payload.orders ?? []).filter(
+    (o) => o.sent && namedLines(o) > 0 && !had.has(o.id),
+  ).length;
+  return { payload, newOrders, emptyRemote: false };
+}
+
+export function localHasCopy(p: KioskPayload | null | undefined): boolean {
+  return hasCatalog(p);
+}
+
+function mergeSheets(a: MonthSheet[], b: MonthSheet[]): MonthSheet[] {
+  const map = new Map<string, MonthSheet>();
+  for (const s of [...a, ...b]) {
+    const cur = map.get(s.ym);
+    if (!cur || s.days.length >= cur.days.length) map.set(s.ym, s);
+  }
+  return [...map.values()].sort((x, y) => y.ym.localeCompare(x.ym)).slice(0, 36);
+}

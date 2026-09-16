@@ -1,0 +1,278 @@
+{
+  "schema": "iman.handoff.v1",
+  "generatedAt": "2026-09-15",
+  "locale": "es-AR",
+  "product": {
+    "name": "IMAN",
+    "slogan": "Números claros. Local que crece.",
+    "oneLiner": "POS + caja + stock + vencimientos for Argentine kioscos/almacenes. Sold as laser scanner + license 12/24/36 months.",
+    "market": "Argentina small physical stores. ARS. WhatsApp pedidos. WooCommerce pack shop.",
+    "voice": "Spanish, short, floor language. No SaaS English. No ports/localhost in user-facing copy. Speak in product terms."
+  },
+  "invariants": [
+    "Encargado sells and does caja WITHOUT a PIN. Dueño overlay/tab requires owner PIN (4-8 digits).",
+    "Phone is a CHECK of the store, not a second till: Vender, Stock, Llego, Vence, Dueno. NO caja on phone. The phone marks a pedido as Llego and can send a ticket to the PC; it never cobra.",
+    "PC till is full: Mostrador, Inventario, Pedidos, Caja, Dueño overlay (logo).",
+    "Do NOT overwrite a store with a full JSON blob on every scan. Sync is an append-only event tape + snapshot on Sincronizar. The blob save is rev-checked: on a stale rev it merges and retries once.",
+    "Do NOT constant-backup every local to the cloud. That kills the 10k ceiling. Chrome wipe recovery = last successful Sincronizar.",
+    "City is per-local (settings.city), printed on the ticket. Not a global IMAN city.",
+    "One account, several locales (plan seats). Same login for encargado and dueño.",
+    "Packs: buy bulto (packBarcode + packQty), sell units (barcode). Stock is always units.",
+    "Planilla del mes (Caja) is to SQUARE CASH, not P&L. Ganancias / EBITDA live on Dueño Mes only.",
+    "todayKey is LOCAL date, never toISOString().slice(0,10) (UTC shift).",
+    "Roles are a PIN gate, not a second user account. Do not add Google/X as a requirement; email login exists.",
+    "Manuals are for IMAN sellers and hired support, not the encargado. Spanish. Taller only.",
+    "Tauri .exe is LATER. PWA install is the PC app for now.",
+    "Hostinger = landing + Woo. POS writes = Neon (or small VPS). Not Hostinger Node for the till.",
+    "Vendor claim phrase: SOY EL VENDEDOR (src/lib/plan.ts VENDOR_PHRASE).",
+    "Do not invent features, gold-plate, or 'clean up' unrelated code. Founder uses notes-until-GO then GO.",
+    "Corrective loop if asked to audit: 1 question requirements 2 delete 3 simplify 4 accelerate. Do not code until GO.",
+    "Estudio password lives ONLY in the server env var IMAN_ESTUDIO_PASSWORD. Never in src/, never in git.",
+    "Every read-modify-write on the local queue goes through editQueue (src/lib/local-db.ts). Two events in the same tick used to overwrite each other."
+  ],
+  "stack": {
+    "app": "React 19 + TanStack Start (file routes) + Tailwind v4 + Zustand",
+    "auth": "Better Auth, email. Session cookie.",
+    "dbPreview": "PGLite",
+    "dbProd": "Neon Postgres",
+    "local": "IndexedDB database iman-local, kv store snap:{storeId} + q:{storeId}",
+    "pwa": "public/manifest.webmanifest + public/sw.js + registerPwa()",
+    "previewPort": "0.0.0.0:8080",
+    "currency": "ARS, format.es-AR in src/lib/format.ts"
+  },
+  "run": {
+    "dev": "npm run dev → 0.0.0.0:8080",
+    "typecheck": "npx tsc --noEmit -p tsconfig.json",
+    "migrate": "npm run db:migrate",
+    "notes": "Sandbox live preview auto-discovers 8080. Leave the dev server up. User has no shell."
+  },
+  "gates": {
+    "file": "src/components/app.tsx",
+    "machine": [
+      "no session → Landing",
+      "session, no plan → Activate (/activar)",
+      "plan, 0 stores → LocalsWizard (forced)",
+      "else Hub → enter store → Shell desk",
+      "vendor-only Hub → Taller (VendorDashboardView)"
+    ],
+    "routes": [
+      "/",
+      "/login",
+      "/activar",
+      "/terminos",
+      "/api/auth/$",
+      "/api/woo/issue"
+    ]
+  },
+  "surfaces": {
+    "pcNav": [
+      "counter=Mostrador",
+      "inventory=Inventario",
+      "orders=Pedidos",
+      "cash=Caja"
+    ],
+    "phoneNav": [
+      "counter=Vender",
+      "inventory=Stock",
+      "expire=Vence",
+      "owner=Dueño"
+    ],
+    "owner": "Overlay OwnerDesk, not a URL. Logo IMAN. PIN required. Phone tab Dueño same panel.",
+    "phoneFiles": [
+      "src/components/phone-floor.tsx",
+      "src/lib/device.ts usePhoneUi matchMedia 639px"
+    ]
+  },
+  "payload": {
+    "type": "KioskPayload in src/lib/types.ts",
+    "persistedLocal": "IndexedDB snap:{storeId}",
+    "persistedRemote": "kiosk_store.payload jsonb + rev CAS (saveKiosk on Sincronizar, NOT every keystroke)",
+    "prune": "src/lib/cap.ts prunePayload / mergePayload",
+    "fields": [
+      "products",
+      "categories",
+      "sales",
+      "settings",
+      "suppliers",
+      "shifts",
+      "drops",
+      "orders",
+      "movements",
+      "refunds",
+      "ticket",
+      "payMethod",
+      "books",
+      "monthAggs",
+      "monthSheets"
+    ]
+  },
+  "settings": {
+    "name": "store name",
+    "city": "per local, ticket + header",
+    "ownerPinHash": "SHA-256 iman.dueno.v1:{pin} via src/lib/owner-pin.ts",
+    "printerBaud": "9600 | 19200 | 115200",
+    "voiceEnabled": "PC only; phone silent",
+    "ledgerLabels": "rename gasto rows",
+    "ledgerTints": "cell colors"
+  },
+  "events": {
+    "table": "kiosk_event (migrations/0008_events.sql)",
+    "client": "src/lib/events.ts applyEvent, src/lib/local-db.ts recordEvent",
+    "sync": "src/lib/sync.ts syncNow + pushQuiet; src/lib/kiosk.ts pushEvents/pullEvents",
+    "button": "src/components/sync-button.tsx header Sincronizar",
+    "types": [
+      "sale",
+      "stock",
+      "ledger",
+      "product",
+      "product.delete",
+      "refund",
+      "receive",
+      "order",
+      "staff"
+    ],
+    "rule": "Devices push events. Never last-write-wins the whole blob over a day's tickets. Snapshot is bootstrapping a new device after sync.",
+    "cursor": "Server-assigned seq (migrations/0015_event_seq.sql). pullEvents takes afterSeq and returns {events, cursor, hasMore}. Device clocks are NOT the cursor: an offline phone pushing old timestamps used to be invisible to the PC.",
+    "push": "Batched (src/lib/event-queue.ts chunk, 200 per call). The device acks only the ids the server returns in `accepted`."
+  },
+  "packs": {
+    "file": "src/lib/pack.ts",
+    "packQty": "units per bulto, default 1",
+    "packBarcode": "scan adds packQty units",
+    "unitBarcode": "scan adds 1",
+    "stock": "always units; stockBreakdown shows packs + rest",
+    "refunds": "units; proveedor NC subtracts today's FAC X / FAC A / cigarrillos"
+  },
+  "ledger": {
+    "file": "src/lib/ledger.ts + src/components/ledger-grid.tsx",
+    "purpose": "Cuadrar caja del encargado. Not P&L.",
+    "datoRow": "opaque green bg, z-30, bigger type, scroll to today",
+    "rollover": "month closes → monthSheets archive on dueño. Q1-Q4. CSV export. releaseMonth frees memory; current month stays.",
+    "defaults": "FAC X/A, cigarrillos, caja, virtual, proveedores, total ventas, retiros + 8 empty named gasto rows. NOT Andres/Angie/Duvet."
+  },
+  "ticket": {
+    "print": "src/lib/print.ts printTicket tries USB ESC/POS then window.print 80mm",
+    "escpos": "src/lib/escpos.ts PC850",
+    "usb": "src/lib/usb-print.ts Web Serial, Chrome on PC",
+    "contents": [
+      "IMAN",
+      "store",
+      "city",
+      "datetime",
+      "ticket id",
+      "qty/unit/importe",
+      "pay",
+      "total",
+      "change",
+      "slogan"
+    ]
+  },
+  "camera": {
+    "file": "src/components/camera-scan.tsx BarcodeDetector + getUserMedia environment",
+    "where": "phone Vender + Stock + Vence (and counter search on sm:hidden)",
+    "intent": "scan for stock/vencimiento updates and simple sell. iPhone may lack BarcodeDetector → type the code."
+  },
+  "authLicense": {
+    "betterAuth": "src/lib/auth/*",
+    "licenses": "migrations/0003_licenses.sql + src/lib/license.ts",
+    "plans": "12/24/36 months, seats 1/2/3 src/lib/plan.ts",
+    "path2": "Woo POST /api/woo/issue with shop secret mints code. src/routes/api/woo/issue.ts",
+    "vendor": "claim with phrase SOY EL VENDEDOR. Taller = VendorDashboardView.",
+    "activate": "src/components/activate-screen.tsx code entry after compra"
+  },
+  "sql": {
+    "0001_auth": "user/session",
+    "0002_kiosk": "kiosk_store jsonb + kiosk_account",
+    "0003_licenses": "iman_licenses",
+    "0004_woo": "shop secret / orders",
+    "0005_stores": "multi-store",
+    "0006_seats": "plan seats",
+    "0007_scale": "rev / cap helpers",
+    "0008_events": "kiosk_event append-only tape"
+  },
+  "keyFiles": {
+    "app shell": "src/components/app.tsx, src/components/shell.tsx",
+    "state": "src/lib/store.ts",
+    "types": "src/lib/types.ts",
+    "till": "src/components/counter-view.tsx",
+    "inventory": "src/components/inventory-view.tsx",
+    "orders": "src/components/orders-view.tsx",
+    "caja": "src/components/cash-view.tsx",
+    "owner": "src/components/owner-desk.tsx, src/components/owner-pin-dialog.tsx",
+    "phone": "src/components/phone-floor.tsx",
+    "refunds": "src/components/refunds.tsx",
+    "settings": "src/components/settings-view.tsx",
+    "manuals": "src/lib/manuals.ts (seller, support, dev) shown in Taller",
+    "kiosk api": "src/lib/kiosk.ts",
+    "cap": "src/lib/cap.ts",
+    "format": "src/lib/format.ts",
+    "dashboard 10k": "src/lib/dashboard.ts + src/components/vendor-dashboard.tsx"
+  },
+  "deadOrOrphan": [
+    "src/components/reports-view.tsx unused on floor (Hoy tab removed from dueño)",
+    "src/components/onboarding-screen.tsx may be leftover vs LocalsWizard",
+    "src/lib/app-data/* unused Grok connectors",
+    "src/lib/multiplayer/* unused",
+    "suggest board / pedido sugerido was deleted from UX; do not revive"
+  ],
+  "built": [
+    "Multi-store licensed POS",
+    "Local-first IndexedDB + event tape + Sincronizar",
+    "PWA install",
+    "Phone companion (sell/stock/expire/dueño)",
+    "Camera barcode on phone",
+    "Packs + proveedor NC + cliente refund",
+    "Supplier CRUD + WhatsApp note pedidos + loose receive (pedido hecho en web del proveedor)",
+    "Planilla scroll/highlight/archive/export",
+    "Complete ticket + USB thermal ESC/POS",
+    "City per local",
+    "Owner PIN",
+    "Spanish manuals seller/support/dev-10k in Taller",
+    "Vendor dashboard capacity vs 10k"
+  ],
+  "notBuilt": [
+    "Tauri desktop exe",
+    "Load-tested 10k concurrent locales",
+    "USB printer on every cheap clone / iOS",
+    "Owner PIN recovery if forgotten while locked out",
+    "Real NC document (only lowers FAC that day)",
+    "Encargado vs dueño as separate logins",
+    "PowerSync / CRDT",
+    "React Native",
+    "Automatic full-blob backup",
+    "Thermal WebUSB class-7 path (serial only today)"
+  ],
+  "infra10k": {
+    "shape": "PC/PWA local-first. Phone Sincronizar. Server = mailbox + license. Events not blobs.",
+    "hostinger": "landing + Woo mint",
+    "neon": "auth, kiosk_store snapshot, kiosk_event tape",
+    "watch": [
+      "accountCount / 10000",
+      "avg kiosk_store bytes (alert > 1MB)",
+      "kiosk_event rows vs store bytes (events should dominate growth)",
+      "plansActive vs sessions",
+      "pending sync counts in the wild"
+    ],
+    "chromeWipe": "Teach Sincronizar → Al día → then wipe. Support never says clear site data first. Manuals in Taller."
+  },
+  "founderHabits": {
+    "language": "Spanish/English mix. 'Go' means implement the last notes. Until GO, notes only.",
+    "screenshots": "Annotated JPEGs are the spec. Excel (Aylen caja, EBITDA) is the ledger/P&L source of truth.",
+    "doNot": "Social login debates settled: email stays. Don't remove OAuth if still in Better Auth unless asked. Don't lecture about two stores. Multi-store is a feature for people who already have 3 doors."
+  },
+  "nextAgent": {
+    "attach": [
+      "IMAN_HANDOFF.txt",
+      "IMAN_HANDOFF.json"
+    ],
+    "doNotAttach": [
+      ".ts",
+      ".tsx",
+      "src/components/app.tsx"
+    ],
+    "why": "Many chats and hosts reject TSX ('file format is not supported'). Gate machine is inlined in IMAN_HANDOFF.txt.",
+    "hostinger": "Does not run TSX. Landing+Woo only. Till = built PWA on Neon/Node, not File Manager /src.",
+    "beforeCoding": "Do not scaffold a new app. Do not restart from attachments/index.html.",
+    "verify": "tsc --noEmit. Speak product language. Notes until GO."
+  }
+}

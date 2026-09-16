@@ -1,0 +1,209 @@
+import { emptyBook, cellsOf } from "./ledger";
+import { packOf } from "./pack";
+import type {
+  DayBook,
+  KioskPayload,
+  OrderDraft,
+  Product,
+  Refund,
+  Sale,
+  StaffMember,
+  StaffPayout,
+  RosterSlot,
+} from "./types";
+import { richerOrder } from "./cap";
+
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | Json[]
+  | { [key: string]: Json };
+
+export type ImanEvent = {
+  id: string;
+  at: string;
+  deviceId: string;
+  storeId: string;
+  type: "sale" | "stock" | "ledger" | "product" | "product.delete" | "refund" | "receive" | "order" | "staff";
+  body: Json;
+  acked?: boolean;
+};
+
+function upsertBook(books: DayBook[], row: DayBook): DayBook[] {
+  const i = books.findIndex((b) => b.date === row.date);
+  if (i < 0) return [row, ...books];
+  const next = books.slice();
+  next[i] = { ...books[i]!, ...row };
+  return next;
+}
+
+export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
+  switch (ev.type) {
+    case "sale": {
+      const sale = ev.body as unknown as Sale;
+      if (!sale?.id || payload.sales.some((s) => s.id === sale.id)) return payload;
+      const qty = new Map(sale.items.map((it) => [it.productId, it.qty]));
+      return {
+        ...payload,
+        sales: [sale, ...payload.sales],
+        products: payload.products.map((p) => {
+          const q = qty.get(p.id);
+          return q ? { ...p, stock: Math.max(0, p.stock - q) } : p;
+        }),
+      };
+    }
+    case "stock": {
+      const b = ev.body as { productId: string; delta: number; reason?: string };
+      if (!b?.productId || !b.delta) return payload;
+      return {
+        ...payload,
+        products: payload.products.map((p) =>
+          p.id === b.productId ? { ...p, stock: Math.max(0, p.stock + b.delta) } : p,
+        ),
+      };
+    }
+    case "ledger": {
+      const b = ev.body as { date: string; rowId: string; value: number };
+      if (!b?.date || !b.rowId) return payload;
+      const cur = payload.books?.find((x) => x.date === b.date) ?? emptyBook(b.date);
+      const cells = { ...cellsOf(cur), [b.rowId]: b.value };
+      return {
+        ...payload,
+        books: upsertBook(payload.books ?? [], {
+          ...cur,
+          date: b.date,
+          cells,
+          facA: cells.fac_a ?? cur.facA,
+          facX: cells.fac_x ?? cur.facX,
+          cigarrillos: cells.cigarrillos ?? cur.cigarrillos,
+        }),
+      };
+    }
+    case "product": {
+      const p = ev.body as unknown as Product;
+      if (!p?.id) return payload;
+      const exists = payload.products.some((x) => x.id === p.id);
+      return {
+        ...payload,
+        products: exists ? payload.products.map((x) => (x.id === p.id ? p : x)) : [...payload.products, p],
+      };
+    }
+    case "product.delete": {
+      const id = (ev.body as { id: string })?.id;
+      if (!id) return payload;
+      return { ...payload, products: payload.products.filter((p) => p.id !== id) };
+    }
+    case "refund": {
+      const r = ev.body as unknown as Refund;
+      if (!r?.id || (payload.refunds ?? []).some((x) => x.id === r.id)) return payload;
+      const sign = r.kind === "cliente" ? 1 : -1;
+      return {
+        ...payload,
+        refunds: [r, ...(payload.refunds ?? [])],
+        products: payload.products.map((p) =>
+          p.id === r.productId ? { ...p, stock: Math.max(0, p.stock + sign * r.units) } : p,
+        ),
+      };
+    }
+    case "order": {
+      const o = ev.body as unknown as OrderDraft;
+      if (!o?.id) return payload;
+      const cur = payload.orders.find((x) => x.id === o.id);
+      if (cur?.received) return payload;
+      const next = cur ? richerOrder(cur, o) : o;
+      const orders = cur
+        ? payload.orders.map((x) => (x.id === o.id ? next : x))
+        : [next, ...payload.orders];
+      return { ...payload, orders };
+    }
+    case "receive": {
+      const b = ev.body as unknown as {
+        orderId: string;
+        lines: { productId: string; units: number }[];
+        receiptStatus?: "complete" | "short";
+        orderLines?: OrderDraft["lines"];
+      };
+      if (!b?.orderId) return payload;
+      const order = payload.orders.find((o) => o.id === b.orderId);
+      if (order?.received) return payload;
+      const qty = new Map((b.lines ?? []).map((l) => [l.productId, l.units]));
+      return {
+        ...payload,
+        products: payload.products.map((p) => {
+          const u = qty.get(p.id);
+          return u ? { ...p, stock: p.stock + u } : p;
+        }),
+        orders: payload.orders.map((o) =>
+          o.id === b.orderId
+            ? {
+                ...o,
+                received: true,
+                sent: true,
+                receiptStatus: b.receiptStatus ?? o.receiptStatus,
+                lines: b.orderLines ?? o.lines,
+              }
+            : o,
+        ),
+      };
+    }
+    case "staff": {
+      const b = ev.body as {
+        op?: string;
+        member?: StaffMember;
+        id?: string;
+        date?: string;
+        shiftKey?: string;
+        staffId?: string;
+        pay?: StaffPayout;
+      };
+      if (b.op === "save" && b.member?.id) {
+        const staff = payload.staff ?? [];
+        const exists = staff.some((x) => x.id === b.member!.id);
+        return {
+          ...payload,
+          staff: exists ? staff.map((x) => (x.id === b.member!.id ? b.member! : x)) : [...staff, b.member],
+        };
+      }
+      if (b.op === "delete" && b.id) {
+        return {
+          ...payload,
+          staff: (payload.staff ?? []).filter((p) => p.id !== b.id),
+          roster: (payload.roster ?? []).filter((r) => r.staffId !== b.id),
+        };
+      }
+      if (b.op === "roster" && b.date && b.shiftKey) {
+        const rest = (payload.roster ?? []).filter((r) => !(r.date === b.date && r.shiftKey === b.shiftKey));
+        const roster: RosterSlot[] = b.staffId ? [...rest, { date: b.date, shiftKey: b.shiftKey, staffId: b.staffId }] : rest;
+        return { ...payload, roster };
+      }
+      if (b.op === "pay" && b.pay?.id) {
+        const payouts = payload.payouts ?? [];
+        if (payouts.some((p) => p.id === b.pay!.id)) return payload;
+        return { ...payload, payouts: [b.pay, ...payouts] };
+      }
+      return payload;
+    }
+    default:
+      return payload;
+  }
+}
+
+export function applyEvents(payload: KioskPayload, events: ImanEvent[]): KioskPayload {
+  return events.reduce(applyEvent, payload);
+}
+
+export function receiveBody(
+  orderId: string,
+  lines: { productId: string; qty: number; asUnit?: boolean }[],
+  products: Product[],
+) {
+  return {
+    orderId,
+    lines: lines.map((l) => {
+      const p = products.find((x) => x.id === l.productId);
+      return { productId: l.productId, units: l.asUnit ? l.qty : l.qty * packOf(p) };
+    }),
+  };
+}

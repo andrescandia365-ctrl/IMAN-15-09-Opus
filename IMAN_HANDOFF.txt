@@ -1,0 +1,259 @@
+IMAN HANDOFF — machine + human. Plain text. Do NOT attach .tsx/.ts files.
+schema: iman.handoff.v1
+generated: 2026-09-15
+
+WHY THIS FILE EXISTS
+Many chats, hosts and “continue this app” tools reject .tsx (“file format is not supported”).
+Continue from THIS file + IMAN_HANDOFF.json. The live app is React/TSX in the original workspace; you do not need to ingest app.tsx to keep building.
+
+IF THEY MEANT HOSTINGER
+Hostinger shared hosting does not run .tsx. Do not upload /src.
+Hostinger = landing + WooCommerce (license mint).
+The till is a built PWA (npm run build) on a Node/Neon host, not PHP.
+Uploading app.tsx to File Manager will always fail.
+
+==============================================================================
+PRODUCT
+==============================================================================
+Name: IMAN
+Slogan: Números claros. Local que crece.
+POS + caja + stock + vencimientos for Argentine kioscos/almacenes.
+Sold as laser scanner + license 12 / 24 / 36 months (seats 1 / 2 / 3).
+Voice: Spanish, short, floor language. No ports, no localhost, no SaaS English in user copy.
+
+==============================================================================
+INVARIANTS (never break)
+==============================================================================
+1. Encargado sells and does CAJA with NO PIN.
+2. Dueño overlay / phone tab Dueño requires owner PIN (4–8 digits, SHA-256 iman.dueno.v1:{pin}, unlock 20 min).
+3. Phone = check the store, NOT a second till: Vender, Stock, Llegó, Vence, Dueño. NO caja, NO voice.
+   El celu marca Llegó y manda el ticket a la PC; nunca cobra.
+4. PC till = Mostrador, Inventario, Pedidos, Caja, Dueño (logo).
+5. Do NOT overwrite a local with a full JSON blob on every scan. Sync = append-only event tape + snapshot on Sincronizar.
+   La fotocopia va con rev: si otro aparato subió algo, junta y reintenta una vez en lugar de pisar.
+6. Do NOT constant-backup every local. Chrome wipe recovery = last successful Sincronizar. Support never says “clear site data” first.
+7. City is per-local (settings.city). Printed on ticket. Rosario must not print CABA.
+8. One account, several locales (plan seats). Same login for encargado and dueño.
+9. Packs: buy bulto (packBarcode + packQty), sell units (barcode). Stock is always units.
+10. Planilla del mes (Caja) squares CASH, not P&L. Ganancias live on Dueño Mes.
+11. Dates: todayKey = LOCAL date. Never toISOString().slice(0,10).
+12. Manuals are for IMAN sellers + hired support, Spanish, Taller only. Not for the encargado.
+13. Tauri .exe is LATER. PWA install is the PC app.
+14. Hostinger = landing + Woo. POS writes = Neon (or small VPS).
+15. Vendor claim phrase: SOY EL VENDEDOR
+16. Founder: notes until he says GO. Then implement. Corrective loop if asked: 1 question reqs 2 delete 3 simplify 4 accelerate — no code until GO.
+17. La clave del Estudio vive SOLO en la variable de entorno del servidor IMAN_ESTUDIO_PASSWORD.
+    Nunca en src/, nunca en git: founder-public.ts viaja al navegador.
+18. Toda modificación de la cola local pasa por editQueue (src/lib/local-db.ts). Dos eventos en el
+    mismo tick se pisaban y se perdía uno (devolución a proveedor, recibir pedido, borrado masivo).
+
+==============================================================================
+STACK
+==============================================================================
+React 19 + TanStack Start (file routes) + Tailwind v4 + Zustand
+Auth: Better Auth, email
+DB preview: PGLite | prod: Neon Postgres
+Local: IndexedDB name "iman-local" kv keys snap:{storeId} q:{storeId} session
+PWA: /manifest.webmanifest + /sw.js
+Dev: 0.0.0.0:8080  (npm run dev)
+Typecheck: npx tsc --noEmit -p tsconfig.json
+Currency: ARS es-AR  src/lib/format.ts
+
+==============================================================================
+APP.TSX GATE MACHINE (inlined so you never open the tsx)
+==============================================================================
+File in repo: src/components/app.tsx  — do not attach it.
+
+Gate = hub | wizard | activate | desk | taller
+
+Boot:
+- register PWA
+- if no user → LandingScreen
+- else load IndexedDB session + snap immediately (offline till)
+- then loadAccount() + getMyAccess()
+- redeem pending license code if any
+- merge remote payload with local snap (mergePayload)
+- persist session + snap
+
+If loadAccount fails and not Unauthorized: keep local copy, toast "Sin red. El local de este aparato sigue."
+
+Render:
+- !user || authFail → Landing
+- !hydrated || !access → BootScreen
+- !licensed (no vendor, no active license) → ActivateScreen
+- licensed && 0 stores → LocalsWizard (forced)
+- gate wizard && remaining seats → LocalsWizard
+- gate activate → ActivateScreen
+- gate taller && vendor → VendorDashboardView
+- gate desk → Shell (the till)
+- else → HubScreen (pick local)
+
+While gate===desk and hydrated: subscribe Zustand DATA keys → saveLocalSnapshot (IndexedDB) debounce 400ms. If online, pushQuiet(events). NEVER saveKiosk blob on every change.
+
+enterLocal(id):
+- setActiveLocalStore
+- hydrate local snap if any
+- selectStore server
+- mergePayload(remote, local)
+- if network fails and local exists → open desk anyway
+
+==============================================================================
+SHELL
+==============================================================================
+src/components/shell.tsx
+PC nav: Mostrador | Inventario | Pedidos | Caja
+Phone nav (width < 640): Vender | Stock | Vence | Dueño
+Logo IMAN → requestOwner() → PIN dialog if locked → OwnerDesk overlay
+Sincronizar button in header
+City shown under store name
+Voice toggle hidden on phone
+
+==============================================================================
+STATE (Zustand src/lib/store.ts)
+==============================================================================
+products, categories, sales, settings, suppliers, shifts, drops, orders, movements, refunds, books, monthAggs, monthSheets, ticket, payMethod
+checkout / refundCliente / refundProveedor / saveProduct / adjustStock / setLedgerCell / receiveOrder all call recordEvent(...)
+hydrateKiosk(payload) loads a store
+snapshotKiosk(state) → KioskPayload
+
+==============================================================================
+KIOSK PAYLOAD
+==============================================================================
+{
+  products, categories, sales, settings, suppliers, shifts, drops,
+  orders, movements, refunds, ticket, payMethod, books, monthAggs, monthSheets
+}
+settings: name, rubro, city, onboarded, ownerPinHash, printerBaud, voice*, theme, cashFloat, cashThreshold, phrases, shifts, tasks, ledgerLabels, ledgerTints, mpFeePct, monthExpenses
+
+Product: id, name, barcode, price, cost, stock, stockMin, packQty, packBarcode, categoryId, active, expiresAt, priceUpdatedAt, onOffer
+
+==============================================================================
+EVENTS (10k spine)
+==============================================================================
+SQL: migrations/0008_events.sql table kiosk_event
+Client: src/lib/events.ts applyEvent
+Queue: src/lib/local-db.ts recordEvent pendingEvents markAcked
+Server: src/lib/kiosk.ts pushEvents pullEvents
+Sync: src/lib/sync.ts syncNow (button) pushQuiet (background)
+Types: sale | stock | ledger | product | product.delete | refund | receive | order | staff
+Cursor: seq del servidor (migrations/0015_event_seq.sql). pullEvents(afterSeq) → { events, cursor, hasMore }.
+  El reloj del aparato NO es cursor: un celu sin red subía con hora vieja y la PC no lo bajaba nunca.
+Push: en tandas de 200 (event-queue.ts chunk). Se marca como subido SOLO lo que vuelve en `accepted`.
+Sincronizar: push pending → pull por seq (hasta 20 páginas) → apply foreign events → saveLocalSnapshot → fotocopia con rev
+
+==============================================================================
+PACKS / REFUNDS
+==============================================================================
+src/lib/pack.ts findByScan: packBarcode → packQty units; barcode → 1 unit
+refundCliente: money back, stock++
+refundProveedor: NC, stock++, subtracts today's FAC X / FAC A / cigarrillos (ledger)
+
+==============================================================================
+LEDGER
+==============================================================================
+src/lib/ledger.ts LEDGER_ROWS
+DATO row opaque green, scroll to today
+Month rollover → monthSheets on dueño. Q1–Q4. CSV export. releaseMonth frees RAM except current month.
+Locked: saldo_inicial, total_proveedores, total_ventas
+Gasto rows 1–8 empty labels (not employee names)
+
+==============================================================================
+TICKET / USB
+==============================================================================
+printTicket (src/lib/print.ts): encode ESC/POS (src/lib/escpos.ts PC850) → Web Serial (src/lib/usb-print.ts) else window.print 80mm
+Header: IMAN, store, city, datetime, ticket id, lines, pay, total, change, slogan
+Connect printer: Dueño → Local y plan → Conectar impresora (user gesture). Baud 9600 default.
+
+==============================================================================
+CAMERA
+==============================================================================
+src/components/camera-scan.tsx BarcodeDetector + rear camera
+Phone: Vender, Stock, Vence. iPhone may lack detector → type the code.
+
+==============================================================================
+AUTH / LICENSE
+==============================================================================
+Better Auth email
+iman_licenses 12/24/36 months, seats 1/2/3
+Activate with code
+Path 2: Woo POST /api/woo/issue + shop secret mints code
+Vendor: phrase SOY EL VENDEDOR → Taller dashboard (capacity vs 10k)
+
+==============================================================================
+SQL MIGRATIONS
+==============================================================================
+0001_auth user/session
+0002_kiosk kiosk_store jsonb + kiosk_account
+0003_licenses
+0004_woo
+0005_stores multi-store
+0006_seats
+0007_scale rev
+0008_events kiosk_event tape
+
+==============================================================================
+KEY PATHS (in the original repo — read there, do not attach)
+==============================================================================
+src/components/app.tsx
+src/components/shell.tsx
+src/components/counter-view.tsx
+src/components/phone-floor.tsx
+src/components/owner-desk.tsx
+src/components/owner-pin-dialog.tsx
+src/components/ledger-grid.tsx
+src/components/vendor-dashboard.tsx
+src/lib/store.ts
+src/lib/types.ts
+src/lib/sync.ts
+src/lib/local-db.ts
+src/lib/events.ts
+src/lib/kiosk.ts
+src/lib/cap.ts
+src/lib/pack.ts
+src/lib/ledger.ts
+src/lib/print.ts
+src/lib/manuals.ts   seller | support | dev (Spanish, Taller)
+src/lib/event-queue.ts  cola local pura (append/ack/trim/chunk) + tests
+src/lib/key-lock.ts     turno por clave para IndexedDB
+src/lib/errors.ts       traduce fallas técnicas a lenguaje de piso
+
+ORPHAN / DO NOT REVIVE
+reports-view Hoy tab, pedido sugerido, app-data connectors, multiplayer P2P, starting from attachments/index.html PHP
+
+==============================================================================
+BUILT
+==============================================================================
+Multi-store licensed POS
+Local-first IndexedDB + event tape + Sincronizar + PWA
+Phone companion
+Camera scan
+Packs, NC, supplier CRUD, WhatsApp note pedidos, loose receive
+Planilla archive/export
+Complete ticket + USB serial ESC/POS
+City per local
+Owner PIN
+Manuals seller/support/dev-10k in Taller
+Vendor capacity dashboard
+
+==============================================================================
+NOT BUILT
+==============================================================================
+Tauri exe
+Proven 10k load
+PIN recovery when locked out
+Real NC PDF
+Separate encargado login
+PowerSync/CRDT
+React Native
+Full-blob auto backup
+WebUSB printer class 7 (serial only)
+
+==============================================================================
+NEXT AGENT
+==============================================================================
+Attach: IMAN_HANDOFF.txt and/or IMAN_HANDOFF.json
+Do not attach app.tsx or any .ts/.tsx — many tools reject them.
+Do not scaffold a new app. Continue the existing IMAN workspace.
+Verify with tsc. Keep the preview on 8080 if in App Builder.
+Speak to the founder in product Spanish/English, not engineering.
+Wait for GO unless the ask is already GO.
