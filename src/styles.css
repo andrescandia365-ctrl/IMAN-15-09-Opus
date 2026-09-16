@@ -218,19 +218,11 @@ html.light {
 }
 
 .iman-account button[type="button"] {
-  font-size: 0;
-  line-height: 0;
-  text-decoration: none;
-  flex-shrink: 0;
-}
-.iman-account button[type="button"]::after {
-  content: "Salir";
   font-size: 0.8125rem;
   line-height: 1.25;
   letter-spacing: -0.011em;
-}
-.iman-account button[type="button"]:disabled::after {
-  content: "Saliendo…";
+  text-decoration: none;
+  flex-shrink: 0;
 }
 .iman-account > div > span:not(.grid) {
   max-width: 12rem;

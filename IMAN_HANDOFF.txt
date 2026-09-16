@@ -55,7 +55,12 @@ Auth: Better Auth, email
 DB preview: PGLite | prod: Neon Postgres
 Local: IndexedDB name "iman-local" kv keys snap:{storeId} q:{storeId} session
 PWA: /manifest.webmanifest + /sw.js
-Dev: 0.0.0.0:8080  (npm run dev)
+Dev: 0.0.0.0:8080
+  npm run dev:local    arranca cargando .env.local (ahí va IMAN_ESTUDIO_PASSWORD)
+  npm run seed:prueba  deja el local de pruebas listo (la base local es de memoria
+                       y se borra en cada reinicio): prueba@iman.local / prueba1234,
+                       clave del dueño 1234, catálogo de ejemplo cargado.
+  .env.local NO se sube: git lo ignora.
 Typecheck: npx tsc --noEmit -p tsconfig.json
 Currency: ARS es-AR  src/lib/format.ts
 

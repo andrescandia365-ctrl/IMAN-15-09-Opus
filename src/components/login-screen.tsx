@@ -57,6 +57,13 @@ export function LoginScreen({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmMail, setConfirmMail] = useState<string | null>(null);
+  // Hasta que el navegador termina de arrancar la app, el formulario se enviaría
+  // solo y la pantalla no haría nada. Recién ahí se habilita el botón.
+  const [listo, setListo] = useState(false);
+
+  useEffect(() => {
+    setListo(true);
+  }, []);
 
   useEffect(() => {
     const code = readPendingCode();
@@ -232,7 +239,7 @@ export function LoginScreen({
                 />
               </div>
               {error ? <p className="text-sm text-danger">{error}</p> : null}
-              <Button type="submit" className="w-full" disabled={busy !== null}>
+              <Button type="submit" className="w-full" disabled={busy !== null || !listo}>
                 {busy === "email" ? "Entrando…" : mode === "up" ? "Registrar dueño" : "Entrar"}
               </Button>
             </form>

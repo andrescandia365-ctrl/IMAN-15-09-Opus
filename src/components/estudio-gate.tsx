@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { authClient, captureLanSessionToken } from "@/lib/auth/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,13 @@ export function EstudioGate() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Mismo cuidado que en el ingreso: sin la app arrancada el formulario se
+  // mandaría solo y la clave se perdería en pantalla.
+  const [listo, setListo] = useState(false);
+
+  useEffect(() => {
+    setListo(true);
+  }, []);
 
   async function enter(e: FormEvent) {
     e.preventDefault();
@@ -103,7 +110,7 @@ export function EstudioGate() {
             />
           </div>
           {error ? <p className="text-sm text-danger">{error}</p> : null}
-          <Button type="submit" className="w-full" disabled={busy}>
+          <Button type="submit" className="w-full" disabled={busy || !listo}>
             {busy ? "Abriendo…" : "Entrar al taller"}
           </Button>
         </form>

@@ -54,6 +54,11 @@ export function OwnerPinDialog({
       }
       unlockOwner();
       onOk();
+    } catch (err) {
+      // Sin esto la clave se borraba sola y no pasaba nada: el dueño no sabía
+      // si se equivocó o si el aparato falló.
+      console.error("[iman] clave del dueño", err);
+      toast.error("No se pudo comprobar la clave en este aparato.");
     } finally {
       setBusy(false);
       setPin("");
