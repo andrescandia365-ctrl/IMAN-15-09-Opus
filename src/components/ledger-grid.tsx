@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Maximize2, Minimize2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { formatARS, formatMiles, todayKey } from "@/lib/format";
 import {
   LEDGER_ROWS,
@@ -84,6 +85,7 @@ export function LedgerSheet({ ym, editable }: { ym: string; editable: boolean })
   const dates = useMemo(() => monthDates(ym), [ym]);
   const today = todayKey();
   const scroller = useDragScroll<HTMLDivElement>();
+  const [full, setFull] = useState(false);
   const live = useMemo(() => {
     const ofYm = books.filter((b) => b.date.startsWith(ym));
     if (ofYm.length) return books;
@@ -107,130 +109,177 @@ export function LedgerSheet({ ym, editable }: { ym: string; editable: boolean })
     saveSettings({ ledgerLabels: { ...(labels ?? {}), [rowId]: name } });
   }
 
+  /**
+   * Lo tipeado en una celda se guarda cuando el campo pierde el foco. Al salir
+   * de pantalla completa hay que soltarlo a mano: si no, el número se va con la
+   * pantalla sin haber llegado a la planilla.
+   */
+  function salirDePantallaCompleta() {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    setFull(false);
+  }
+
+  useEffect(() => {
+    if (!full) return;
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      salirDePantallaCompleta();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [full]);
+
+  // Al abrir, y al cambiar de tamaño la planilla, el día de hoy queda a la vista.
   useEffect(() => {
     const root = scroller.current;
     if (!root) return;
     const col = root.querySelector<HTMLElement>('[data-today="1"]');
     col?.scrollIntoView({ inline: "center", block: "nearest" });
-  }, [ym, dates]);
+  }, [ym, dates, full]);
 
   return (
-    <div
-      ref={scroller}
-      className="ledger-sheet no-scrollbar h-full min-h-0 cursor-grab touch-none overflow-auto rounded-lg bg-paper text-ink select-none active:cursor-grabbing"
-    >
-      <table className="min-w-max border-separate border-spacing-0">
-        <thead>
-          <tr>
-            <th className={cn(FECHA_CORNER, LINE)}>Fecha</th>
-            {dates.map((d) => {
-              const head = formatDayHead(d);
-              const isToday = d === today;
+    <div className={cn("flex h-full min-h-0 flex-col gap-2", full && "fixed inset-0 z-50 bg-surface p-3")}>
+      <div className="flex shrink-0 items-center justify-between gap-2">
+        {full ? (
+          <span className="font-display text-lg tracking-tight">{monthTitle(ym)}</span>
+        ) : (
+          <span />
+        )}
+        {full ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            aria-label="Salir de pantalla completa"
+            onClick={salirDePantallaCompleta}
+          >
+            <Minimize2 className="size-4" />
+            Salir
+          </Button>
+        ) : (
+          <Button size="sm" variant="secondary" onClick={() => setFull(true)}>
+            <Maximize2 className="size-4" />
+            Pantalla completa
+          </Button>
+        )}
+      </div>
+      <div
+        ref={scroller}
+        className="ledger-sheet no-scrollbar min-h-0 flex-1 cursor-grab touch-none overflow-auto rounded-lg bg-paper text-ink select-none active:cursor-grabbing"
+      >
+        <table className="min-w-max border-separate border-spacing-0">
+          <thead>
+            <tr>
+              <th className={cn(FECHA_CORNER, LINE)}>Fecha</th>
+              {dates.map((d) => {
+                const head = formatDayHead(d);
+                const isToday = d === today;
+                return (
+                  <th
+                    key={d}
+                    data-today={isToday ? "1" : undefined}
+                    className={cn(DATE_CELL, LINE, isToday && "bg-paper text-ink")}
+                  >
+                    <span className="block font-display text-base leading-none tracking-tight">{head.n}</span>
+                    <span className="mt-0.5 block text-xs uppercase leading-none tracking-[0.08em] opacity-80">
+                      {head.wd}
+                    </span>
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {LEDGER_ROWS.map((row) => {
+              if (row.kind === "spacer") {
+                return (
+                  <tr key={row.id} className="h-1.5">
+                    <td className={cn(RUBRO, LINE, "py-0")} />
+                    {dates.map((d) => (
+                      <td
+                        key={d}
+                        data-today-col={d === today ? "1" : undefined}
+                        className={cn(LINE, "bg-paper")}
+                      />
+                    ))}
+                  </tr>
+                );
+              }
+              const tint = tintOf(row.id);
+              const tintDef = LEDGER_TINTS.find((t) => t.id === tint)!;
+              const title = rowTitle(row, labels);
+              const locked = LOCKED_LEDGER.has(row.id);
               return (
-                <th
-                  key={d}
-                  data-today={isToday ? "1" : undefined}
-                  className={cn(DATE_CELL, LINE, isToday && "bg-paper text-ink")}
-                >
-                  <span className="block font-display text-base leading-none tracking-tight">{head.n}</span>
-                  <span className="mt-0.5 block text-xs uppercase leading-none tracking-[0.08em] opacity-80">
-                    {head.wd}
-                  </span>
-                </th>
-              );
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          {LEDGER_ROWS.map((row) => {
-            if (row.kind === "spacer") {
-              return (
-                <tr key={row.id} className="h-1.5">
-                  <td className={cn(RUBRO, LINE, "py-0")} />
-                  {dates.map((d) => (
-                    <td
-                      key={d}
-                      data-today-col={d === today ? "1" : undefined}
-                      className={cn(LINE, "bg-paper")}
-                    />
-                  ))}
-                </tr>
-              );
-            }
-            const tint = tintOf(row.id);
-            const tintDef = LEDGER_TINTS.find((t) => t.id === tint)!;
-            const title = rowTitle(row, labels);
-            const locked = LOCKED_LEDGER.has(row.id);
-            return (
-              <tr key={row.id}>
-                <th className={cn(RUBRO, LINE, "align-middle")}>
-                  {editable && !locked ? (
-                    <input
-                      className="w-full bg-transparent text-sm font-medium leading-tight tracking-tight text-ink outline-none placeholder:text-ink-muted"
-                      defaultValue={title}
-                      placeholder="Gasto"
-                      onBlur={(e) => setRowLabel(row.id, e.target.value.trim())}
-                    />
-                  ) : (
-                    <span className="block text-sm font-medium leading-tight tracking-tight">{title || "—"}</span>
-                  )}
-                </th>
-                {dates.map((d) => {
-                  const v = cellValue(live, d, row.id);
-                  const filled = v !== 0;
-                  const todayCol = d === today;
-                  const paint = filled ? tintDef.cell : "bg-paper";
-                  if (!editable || row.kind === "formula") {
+                <tr key={row.id}>
+                  <th className={cn(RUBRO, LINE, "align-middle")}>
+                    {editable && !locked ? (
+                      <input
+                        className="w-full bg-transparent text-sm font-medium leading-tight tracking-tight text-ink outline-none placeholder:text-ink-muted"
+                        defaultValue={title}
+                        placeholder="Gasto"
+                        onBlur={(e) => setRowLabel(row.id, e.target.value.trim())}
+                      />
+                    ) : (
+                      <span className="block text-sm font-medium leading-tight tracking-tight">{title || "—"}</span>
+                    )}
+                  </th>
+                  {dates.map((d) => {
+                    const v = cellValue(live, d, row.id);
+                    const filled = v !== 0;
+                    const todayCol = d === today;
+                    const paint = filled ? tintDef.cell : "bg-paper";
+                    if (!editable || row.kind === "formula") {
+                      return (
+                        <td
+                          key={d}
+                          data-today-col={todayCol ? "1" : undefined}
+                          data-fill={filled ? "1" : undefined}
+                          className={cn(
+                            LINE,
+                            "px-1.5 py-1 text-right font-mono text-sm leading-tight text-ink",
+                            paint,
+                          )}
+                        >
+                          {v ? formatARS(v) : ""}
+                        </td>
+                      );
+                    }
                     return (
                       <td
                         key={d}
                         data-today-col={todayCol ? "1" : undefined}
                         data-fill={filled ? "1" : undefined}
-                        className={cn(
-                          LINE,
-                          "px-1.5 py-1 text-right font-mono text-sm leading-tight text-ink",
-                          paint,
-                        )}
+                        className={cn(LINE, "p-0", paint)}
                       >
-                        {v ? formatARS(v) : ""}
+                        <input
+                          data-ld={`${row.id}:${d}`}
+                          className={cn(
+                            "h-8 w-full min-w-[4.25rem] cursor-text select-text bg-transparent px-1.5 text-right font-mono text-sm leading-tight text-ink outline-none",
+                            filled && "font-medium",
+                          )}
+                          inputMode="numeric"
+                          size={7}
+                          defaultValue={v ? formatMiles(v) : ""}
+                          onFocus={(e) => {
+                            // Se escribe en crudo y se lee con puntos de mil.
+                            e.currentTarget.value = v ? String(v) : "";
+                            e.currentTarget.select();
+                          }}
+                          onKeyDown={(e) => onLedgerKey(e, row.id, d, dates)}
+                          onBlur={(e) => {
+                            const n = Number(e.target.value.replace(/[^\d]/g, "")) || 0;
+                            e.currentTarget.value = n ? formatMiles(n) : "";
+                            setLedgerCell(d, row.id, n);
+                          }}
+                        />
                       </td>
                     );
-                  }
-                  return (
-                    <td
-                      key={d}
-                      data-today-col={todayCol ? "1" : undefined}
-                      data-fill={filled ? "1" : undefined}
-                      className={cn(LINE, "p-0", paint)}
-                    >
-                      <input
-                        data-ld={`${row.id}:${d}`}
-                        className={cn(
-                          "h-8 w-full min-w-[4.25rem] cursor-text select-text bg-transparent px-1.5 text-right font-mono text-sm leading-tight text-ink outline-none",
-                          filled && "font-medium",
-                        )}
-                        inputMode="numeric"
-                        defaultValue={v ? formatMiles(v) : ""}
-                        onFocus={(e) => {
-                          // Se escribe en crudo y se lee con puntos de mil.
-                          e.currentTarget.value = v ? String(v) : "";
-                          e.currentTarget.select();
-                        }}
-                        onKeyDown={(e) => onLedgerKey(e, row.id, d, dates)}
-                        onBlur={(e) => {
-                          const n = Number(e.target.value.replace(/[^\d]/g, "")) || 0;
-                          e.currentTarget.value = n ? formatMiles(n) : "";
-                          setLedgerCell(d, row.id, n);
-                        }}
-                      />
-                    </td>
-                  );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
