@@ -1,5 +1,5 @@
 import type { DayBook, MonthSheet } from "@/lib/types";
-import { todayKey } from "@/lib/format";
+import { todayKey } from "./format.ts";
 
 export type LedgerKind = "input" | "formula" | "spacer";
 

@@ -1119,14 +1119,17 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         if (draft) get().receiveOrder(draft.id);
       },
 
-      saveCategory: (c) =>
-        set((st) => {
-          const exists = st.categories.some((x) => x.id === c.id);
-          const categories = exists
-            ? st.categories.map((x) => (x.id === c.id ? c : x))
-            : [...st.categories, { ...c, sort: c.sort || st.categories.length + 1 }];
-          return { categories };
-        }),
+      saveCategory: (c) => {
+        const st = get();
+        const exists = st.categories.some((x) => x.id === c.id);
+        const cat = exists ? c : { ...c, sort: c.sort || st.categories.length + 1 };
+        set({
+          categories: exists
+            ? st.categories.map((x) => (x.id === c.id ? cat : x))
+            : [...st.categories, cat],
+        });
+        recordEvent("category", { op: "save", cat });
+      },
 
       deleteCategory: (id) => {
         const st = get();
@@ -1140,6 +1143,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
             categoryIds: (s.categoryIds ?? []).filter((x) => x !== id),
           })),
         });
+        recordEvent("category", { op: "delete", id });
         return { ok: true };
       },
 

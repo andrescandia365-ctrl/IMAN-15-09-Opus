@@ -1,6 +1,7 @@
-import { emptyBook, cellsOf } from "./ledger";
-import { packOf } from "./pack";
+import { emptyBook, cellsOf } from "./ledger.ts";
+import { packOf } from "./pack.ts";
 import type {
+  Category,
   DayBook,
   KioskPayload,
   OrderDraft,
@@ -11,7 +12,7 @@ import type {
   StaffPayout,
   RosterSlot,
 } from "./types";
-import { richerOrder } from "./cap";
+import { richerOrder } from "./cap.ts";
 
 export type Json =
   | string
@@ -26,7 +27,17 @@ export type ImanEvent = {
   at: string;
   deviceId: string;
   storeId: string;
-  type: "sale" | "stock" | "ledger" | "product" | "product.delete" | "refund" | "receive" | "order" | "staff";
+  type:
+    | "sale"
+    | "stock"
+    | "ledger"
+    | "product"
+    | "product.delete"
+    | "refund"
+    | "receive"
+    | "order"
+    | "staff"
+    | "category";
   body: Json;
   acked?: boolean;
 };
@@ -182,6 +193,32 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
         const payouts = payload.payouts ?? [];
         if (payouts.some((p) => p.id === b.pay!.id)) return payload;
         return { ...payload, payouts: [b.pay, ...payouts] };
+      }
+      return payload;
+    }
+    case "category": {
+      const b = ev.body as { op?: string; cat?: Category; id?: string };
+      const cat = b.cat;
+      if (b.op === "save" && cat?.id) {
+        const exists = payload.categories.some((c) => c.id === cat.id);
+        return {
+          ...payload,
+          categories: exists
+            ? payload.categories.map((c) => (c.id === cat.id ? cat : c))
+            : [...payload.categories, cat],
+        };
+      }
+      if (b.op === "delete" && b.id) {
+        // Igual que `deleteCategory` en el store: la categoría también sale de
+        // los proveedores que la tenían asignada.
+        return {
+          ...payload,
+          categories: payload.categories.filter((c) => c.id !== b.id),
+          suppliers: payload.suppliers.map((s) => ({
+            ...s,
+            categoryIds: (s.categoryIds ?? []).filter((x) => x !== b.id),
+          })),
+        };
       }
       return payload;
     }
