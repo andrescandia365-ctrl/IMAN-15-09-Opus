@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, Download, Hash, Layers, Minus, PackagePlus, Pencil, Plus, Printer, Search, Tags, Trash2, Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
+import { AlertTriangle, ChevronDown, Download, Hash, Minus, PackagePlus, Pencil, Plus, Printer, Search, Tags, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
 import { daysUntil, formatARS } from "@/lib/format";
 import {
@@ -61,7 +63,10 @@ export function InventoryView() {
   const [editItems, setEditItems] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [codesOpen, setCodesOpen] = useState(false);
-  const [categoriesOpen, setCategoriesOpen] = useState(false);
+  const [catsOpen, setCatsOpen] = useState(false);
+
+  const catActiva = cat === "all" ? null : (categories.find((c) => c.id === cat) ?? null);
+  const catActivaN = catActiva ? products.filter((p) => p.categoryId === catActiva.id).length : 0;
 
   const lowN = products.filter((p) => p.active && p.stock <= p.stockMin).length;
   const expN = products.filter((p) => {
@@ -127,10 +132,6 @@ export function InventoryView() {
           <Hash className="size-4" />
           Códigos personalizados
         </Button>
-        <Button variant="secondary" onClick={() => setCategoriesOpen(true)}>
-          <Layers className="size-4" />
-          Categorías
-        </Button>
         <Button variant="secondary" onClick={() => setImportOpen(true)}>
           <Download className="size-4" />
           Importar
@@ -160,9 +161,35 @@ export function InventoryView() {
           >
             Todos <span className="num">{products.length}</span>
           </FilterChip>
-          <FilterChip className="flex-1" active={filter === "cats"} onClick={() => setFilter("cats")}>
-            Categorías
-          </FilterChip>
+          <Popover open={catsOpen} onOpenChange={setCatsOpen}>
+            <PopoverTrigger asChild>
+              <FilterChip className="flex-1" active={filter === "cats"} onClick={() => setFilter("cats")}>
+                {catActiva ? (
+                  <>
+                    Categorías · {catActiva.name} <span className="num">{catActivaN}</span>
+                  </>
+                ) : (
+                  "Categorías"
+                )}
+                <ChevronDown className="size-4" />
+              </FilterChip>
+            </PopoverTrigger>
+            <CategoriesPopover
+              categories={categories}
+              products={products}
+              cat={cat}
+              onPick={(id) => {
+                setCat(id);
+                setCatsOpen(false);
+              }}
+              onSaveCategory={saveCategory}
+              onDeleteCategory={deleteCategory}
+              onSaveProduct={saveProduct}
+              onGone={(id) => {
+                if (cat === id) setCat("all");
+              }}
+            />
+          </Popover>
           <FilterChip className="flex-1" active={filter === "suggest"} onClick={() => setFilter("suggest")}>
             Sugerencias
           </FilterChip>
@@ -180,19 +207,6 @@ export function InventoryView() {
           </FilterChip>
         ) : null}
       </div>
-
-      {filter === "cats" ? (
-        <div className="flex w-full flex-wrap gap-2">
-          <FilterChip active={cat === "all"} onClick={() => setCat("all")}>
-            Todas <span className="num">{products.length}</span>
-          </FilterChip>
-          {categories.map((c) => (
-            <FilterChip key={c.id} active={cat === c.id} onClick={() => setCat(c.id)}>
-              {c.name} <span className="num">{products.filter((p) => p.categoryId === c.id).length}</span>
-            </FilterChip>
-          ))}
-        </div>
-      ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto rounded-xl bg-surface p-2 shadow-[var(--shadow-border)] sm:p-3">
         {filter === "suggest" ? (
@@ -338,18 +352,6 @@ export function InventoryView() {
           setExportOpen(false);
         }}
       />
-      <CategoriesDialog
-        open={categoriesOpen}
-        onOpenChange={setCategoriesOpen}
-        categories={categories}
-        products={products}
-        onSaveCategory={saveCategory}
-        onDeleteCategory={deleteCategory}
-        onSaveProduct={saveProduct}
-        onGone={(id) => {
-          if (cat === id) setCat("all");
-        }}
-      />
       <ShortCodesDialog
         open={codesOpen}
         onOpenChange={setCodesOpen}
@@ -430,27 +432,19 @@ function SuggestBoard({
 
 function FilterChip({
   active,
-  children,
-  onClick,
   className,
-}: {
-  active: boolean;
-  children: ReactNode;
-  onClick: () => void;
-  className?: string;
-}) {
+  ...props
+}: ComponentProps<"button"> & { active: boolean }) {
   return (
     <button
       type="button"
-      onClick={onClick}
       className={cn(
         "inline-flex h-11 items-center justify-center gap-1.5 rounded-full px-3 text-base font-medium",
         active ? "bg-accent text-accent-fg" : "bg-surface text-muted shadow-[var(--shadow-border)]",
         className,
       )}
-    >
-      {children}
-    </button>
+      {...props}
+    />
   );
 }
 
@@ -1172,65 +1166,71 @@ function cleanCatName(raw: string): string {
   return raw.replace(/\s+/g, " ").trim();
 }
 
-function joinNames(names: string[]): string {
-  if (names.length < 2) return names.join("");
-  return `${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}`;
-}
+const FILA = "flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm";
+const ICONO = "grid size-7 shrink-0 place-items-center rounded-md text-subtle hover:bg-elevated hover:text-fg";
+// El lápiz y el tacho ocupan lugar aunque estén ocultos, así las cuentas de
+// todas las filas quedan en la misma columna.
+const ACCIONES = "flex w-[3.625rem] shrink-0 justify-end gap-0.5";
 
-function CategoriesDialog({
-  open,
-  onOpenChange,
+function CategoriesPopover({
   categories,
   products,
+  cat,
+  onPick,
   onSaveCategory,
   onDeleteCategory,
   onSaveProduct,
   onGone,
 }: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
   categories: Category[];
   products: Product[];
+  cat: string | "all";
+  onPick: (id: string | "all") => void;
   onSaveCategory: (c: Category) => void;
   onDeleteCategory: (id: string) => { ok: boolean; error?: string };
   onSaveProduct: (p: Product) => void;
   onGone: (id: string) => void;
 }) {
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [renombrando, setRenombrando] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [borrando, setBorrando] = useState<string | null>(null);
+  const [destino, setDestino] = useState("");
   const [newCat, setNewCat] = useState("");
-  const [pending, setPending] = useState<{ fromId: string; toId: string } | null>(null);
+  const confirmacion = useRef<HTMLLIElement | null>(null);
+
+  // La fila que pregunta puede caer debajo del borde de la lista: sin esto, los
+  // botones quedan fuera de la vista y parece que no hay nada que responder.
+  useEffect(() => {
+    if (borrando) confirmacion.current?.scrollIntoView({ block: "nearest" });
+  }, [borrando]);
 
   const countOf = (id: string) => products.filter((p) => p.categoryId === id).length;
-  const nameOf = (id: string) => categories.find((c) => c.id === id)?.name ?? "";
 
-  // Las que quedaron repetidas de antes: mismo nombre salvo mayúsculas y acentos.
-  const repetidas = useMemo(() => {
-    const porClave = new Map<string, Category[]>();
-    for (const c of categories) {
-      const k = catKey(c.name);
-      porClave.set(k, [...(porClave.get(k) ?? []), c]);
-    }
-    return [...porClave.values()].find((g) => g.length > 1) ?? null;
-  }, [categories]);
+  function abrirRenombre(c: Category) {
+    setBorrando(null);
+    setRenombrando(c.id);
+    setDraft(c.name);
+  }
 
-  function renombrar(c: Category, raw: string) {
-    const name = cleanCatName(raw);
-    if (!name) {
-      setDrafts((d) => ({ ...d, [c.id]: c.name }));
-      return;
-    }
-    if (name !== c.name && categories.some((x) => x.id !== c.id && catKey(x.name) === catKey(name))) {
+  function guardarNombre(c: Category) {
+    const name = cleanCatName(draft);
+    setRenombrando(null);
+    if (!name || name === c.name) return;
+    if (categories.some((x) => x.id !== c.id && catKey(x.name) === catKey(name))) {
       toast.error("Ya existe una categoría con ese nombre");
-      setDrafts((d) => ({ ...d, [c.id]: c.name }));
       return;
     }
-    setDrafts((d) => ({ ...d, [c.id]: name }));
-    if (name === c.name) return;
     onSaveCategory({ ...c, name });
     toast.success("Nombre cambiado");
   }
 
-  function borrar(c: Category) {
+  function pedirBorrado(c: Category) {
+    setRenombrando(null);
+    if (countOf(c.id) > 0) {
+      setBorrando(c.id);
+      setDestino(categories.find((x) => x.id !== c.id)?.id ?? "");
+      return;
+    }
     const r = onDeleteCategory(c.id);
     if (!r.ok) {
       toast.error(r.error);
@@ -1241,155 +1241,170 @@ function CategoriesDialog({
   }
 
   /**
-   * Los productos se guardan de a uno con `saveProduct`: es lo que manda el
+   * Los productos se mudan de a uno con `saveProduct`: es lo que manda el
    * evento a la cinta de sync. Un `set` directo al store se perdería.
    */
-  function mover(fromId: string, toId: string) {
-    const mudanza = products.filter((p) => p.categoryId === fromId);
-    const destino = nameOf(toId);
-    for (const p of mudanza) onSaveProduct({ ...p, categoryId: toId });
-    const r = onDeleteCategory(fromId);
-    setPending(null);
+  function moverYBorrar(c: Category) {
+    if (!destino) return;
+    const mudanza = products.filter((p) => p.categoryId === c.id);
+    const nombreDestino = categories.find((x) => x.id === destino)?.name ?? "";
+    for (const p of mudanza) onSaveProduct({ ...p, categoryId: destino });
+    const r = onDeleteCategory(c.id);
+    setBorrando(null);
     if (!r.ok) {
       toast.error(r.error);
       return;
     }
-    onGone(fromId);
-    toast.success(mudanza.length ? `${mudanza.length} productos a ${destino}` : "Categoría quitada");
-  }
-
-  function unificar(grupo: Category[]) {
-    const ordenadas = [...grupo].sort((a, b) => countOf(b.id) - countOf(a.id));
-    const destino = ordenadas[0];
-    if (!destino) return;
-    const origen = ordenadas.find((c) => c.id !== destino.id);
-    if (!origen) return;
-    setPending({ fromId: origen.id, toId: destino.id });
+    onGone(c.id);
+    toast.success(`${mudanza.length} productos a ${nombreDestino}`);
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        onOpenChange(v);
-        if (!v) {
-          setPending(null);
-          setDrafts({});
-          setNewCat("");
+    <PopoverContent
+      align="start"
+      className="w-[280px]"
+      onEscapeKeyDown={(e) => {
+        // Radix escucha Escape en captura, antes que el campo. Si hay un nombre
+        // a medio escribir o un borrado preguntando, Escape cancela eso y el
+        // desplegable se queda abierto.
+        if (renombrando || borrando) {
+          e.preventDefault();
+          setRenombrando(null);
+          setBorrando(null);
         }
       }}
     >
-      <DialogContent className="w-[min(560px,calc(100vw-24px))]">
-        <DialogHeader>
-          <DialogTitle>Categorías</DialogTitle>
-          <DialogDescription>
-            Cambiales el nombre, mové los productos de una a otra y sacá las que sobran.
-          </DialogDescription>
-        </DialogHeader>
-
-        {repetidas ? (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg bg-elevated px-3 py-2 text-sm text-muted">
-            <span>Hay categorías repetidas: {joinNames(repetidas.map((c) => c.name))}</span>
-            <Button className="ml-auto" size="sm" variant="secondary" onClick={() => unificar(repetidas)}>
-              Unificar
-            </Button>
-          </div>
-        ) : null}
-
-        {pending ? (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg bg-accent/15 px-3 py-2 text-sm">
-            <span>
-              Mover {countOf(pending.fromId)} productos de {nameOf(pending.fromId)} a {nameOf(pending.toId)}.{" "}
-              {nameOf(pending.fromId)} se borra.
-            </span>
-            <div className="ml-auto flex gap-2">
-              <Button size="sm" variant="secondary" onClick={() => setPending(null)}>
-                Cancelar
-              </Button>
-              <Button size="sm" onClick={() => mover(pending.fromId, pending.toId)}>
-                Mover
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
-        <ul className="flex max-h-[50vh] flex-col overflow-y-auto">
+      <ScrollArea className="max-h-[380px]">
+        <ul className="flex flex-col gap-0.5">
+          <li className="flex items-center gap-1">
+            <button
+              type="button"
+              className={cn(FILA, cat === "all" ? "bg-accent text-accent-fg" : "hover:bg-elevated")}
+              onClick={() => onPick("all")}
+            >
+              <span className="truncate">Todas</span>
+              <span className={cn("num shrink-0 text-xs", cat === "all" ? "" : "text-muted")}>
+                {products.length}
+              </span>
+            </button>
+            <div className={ACCIONES} aria-hidden />
+          </li>
           {categories.map((c) => {
             const n = countOf(c.id);
-            return (
-              <li
-                key={c.id}
-                className="flex flex-col gap-1.5 border-t border-border px-1 py-2 first:border-t-0"
-              >
-                <div className="flex items-center gap-2">
-                  <Input
-                    className="h-9 min-w-0 flex-1"
-                    value={drafts[c.id] ?? c.name}
-                    aria-label={`Nombre de ${c.name}`}
-                    onChange={(e) => setDrafts((d) => ({ ...d, [c.id]: e.target.value }))}
-                    onBlur={(e) => renombrar(c, e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") e.currentTarget.blur();
+            const activa = cat === c.id;
+
+            if (renombrando === c.id) {
+              return (
+                <li key={c.id}>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      guardarNombre(c);
                     }}
-                  />
-                  <span className="num w-14 shrink-0 text-right text-sm text-muted">{n}</span>
-                  <Button size="sm" variant="secondary" disabled={n > 0} onClick={() => borrar(c)}>
-                    Borrar
-                  </Button>
-                </div>
-                {n > 0 ? (
-                  <div className="flex items-center gap-2 pl-1">
-                    <select
-                      className="h-9 min-w-0 flex-1 rounded-md bg-elevated px-3 text-sm text-fg shadow-[var(--shadow-border)]"
-                      value=""
-                      aria-label={`Mover productos de ${c.name}`}
-                      onChange={(e) => {
-                        if (e.target.value) setPending({ fromId: c.id, toId: e.target.value });
-                      }}
-                    >
-                      <option value="">Mover productos a…</option>
-                      {categories
-                        .filter((x) => x.id !== c.id)
-                        .map((x) => (
-                          <option key={x.id} value={x.id}>
-                            {x.name}
-                          </option>
-                        ))}
-                    </select>
-                    <span className="shrink-0 text-xs text-subtle">Mové los productos primero</span>
+                  >
+                    <Input
+                      autoFocus
+                      className="h-9"
+                      value={draft}
+                      aria-label={`Nombre de ${c.name}`}
+                      onChange={(e) => setDraft(e.target.value)}
+                    />
+                  </form>
+                </li>
+              );
+            }
+
+            if (borrando === c.id) {
+              return (
+                <li key={c.id} ref={confirmacion} className="rounded-lg bg-elevated p-2">
+                  <p className="text-xs text-muted">
+                    Tiene <span className="num">{n}</span> productos. Moverlos a:
+                  </p>
+                  <select
+                    className="mt-1.5 h-9 w-full rounded-md bg-surface px-2 text-sm text-fg shadow-[var(--shadow-border)]"
+                    value={destino}
+                    aria-label={`Mover los productos de ${c.name}`}
+                    onChange={(e) => setDestino(e.target.value)}
+                  >
+                    {categories
+                      .filter((x) => x.id !== c.id)
+                      .map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {x.name}
+                        </option>
+                      ))}
+                  </select>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <Button size="sm" className="flex-1" disabled={!destino} onClick={() => moverYBorrar(c)}>
+                      Mover y borrar
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => setBorrando(null)}>
+                      Cancelar
+                    </Button>
                   </div>
-                ) : null}
+                </li>
+              );
+            }
+
+            return (
+              <li key={c.id} className="group flex items-center gap-1">
+                <button
+                  type="button"
+                  className={cn(FILA, activa ? "bg-accent text-accent-fg" : "hover:bg-elevated")}
+                  onClick={() => onPick(c.id)}
+                >
+                  <span className="truncate">{c.name}</span>
+                  <span className={cn("num shrink-0 text-xs", activa ? "" : "text-muted")}>{n}</span>
+                </button>
+                <div className={cn(ACCIONES, "invisible group-focus-within:visible group-hover:visible")}>
+                  <button
+                    type="button"
+                    className={ICONO}
+                    aria-label={`Renombrar ${c.name}`}
+                    onClick={() => abrirRenombre(c)}
+                  >
+                    <Pencil className="size-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    className={cn(ICONO, "hover:text-danger")}
+                    aria-label={`Borrar ${c.name}`}
+                    onClick={() => pedirBorrado(c)}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </div>
               </li>
             );
           })}
         </ul>
-
-        <form
-          className="mt-1 flex items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const name = cleanCatName(newCat);
-            if (!name) return;
-            if (categories.some((x) => catKey(x.name) === catKey(name))) {
-              toast.error("Ya existe una categoría con ese nombre");
-              return;
-            }
-            onSaveCategory({ id: uid("c"), name, sort: categories.length + 1 });
-            setNewCat("");
-            toast.success("Categoría agregada");
-          }}
-        >
-          <Input
-            value={newCat}
-            onChange={(e) => setNewCat(e.target.value)}
-            placeholder="Nueva categoría"
-            className="h-9 min-w-0 flex-1"
-          />
-          <Button type="submit" variant="secondary">
-            Agregar
-          </Button>
-        </form>
-      </DialogContent>
-    </Dialog>
+      </ScrollArea>
+      <div className="my-2 h-px bg-border" />
+      <form
+        className="flex items-center gap-1.5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const name = cleanCatName(newCat);
+          if (!name) return;
+          if (categories.some((x) => catKey(x.name) === catKey(name))) {
+            toast.error("Ya existe una categoría con ese nombre");
+            return;
+          }
+          onSaveCategory({ id: uid("c"), name, sort: categories.length + 1 });
+          setNewCat("");
+          toast.success("Categoría agregada");
+        }}
+      >
+        <Input
+          value={newCat}
+          onChange={(e) => setNewCat(e.target.value)}
+          placeholder="Nueva categoría"
+          className="h-9 min-w-0 flex-1"
+        />
+        <Button type="submit" size="sm" variant="secondary">
+          Agregar
+        </Button>
+      </form>
+    </PopoverContent>
   );
 }
