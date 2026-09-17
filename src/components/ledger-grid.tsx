@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { ChevronDown, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PriceCalcButton } from "@/components/price-calc";
 import { formatARS, formatMiles, todayKey } from "@/lib/format";
 import {
   LEDGER_ROWS,
@@ -56,17 +57,20 @@ export function EncargadoBook({ defaultOpen = false }: { defaultOpen?: boolean }
   const ym = currentYm();
   return (
     <section className="rounded-xl bg-surface shadow-[var(--shadow-border)]">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between px-5 py-4 text-left"
-      >
-        <span>
-          <span className="block text-xs font-medium uppercase tracking-[0.14em] text-subtle">Encargado</span>
-          <span className="mt-0.5 block font-display text-xl tracking-tight">Asientos · {monthTitle(ym)}</span>
-        </span>
-        <ChevronDown className={cn("size-4 text-muted transition-transform", open && "rotate-180")} />
-      </button>
+      <div className="flex items-center gap-2 px-5 py-4">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
+        >
+          <span>
+            <span className="block text-xs font-medium uppercase tracking-[0.14em] text-subtle">Encargado</span>
+            <span className="mt-0.5 block font-display text-xl tracking-tight">Asientos · {monthTitle(ym)}</span>
+          </span>
+          <ChevronDown className={cn("size-4 text-muted transition-transform", open && "rotate-180")} />
+        </button>
+        <PriceCalcButton />
+      </div>
       {open ? (
         <div className="h-[min(36rem,70dvh)] min-h-0 border-t border-border px-3 pb-3 pt-2">
           <LedgerSheet ym={ym} editable />
