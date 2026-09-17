@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, Download, Hash, Minus, PackagePlus, Pencil, Plus, Printer, Search, Tags, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, Download, Hash, Layers, Minus, PackagePlus, Pencil, Plus, Printer, Search, Tags, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,7 +30,7 @@ import { CameraScan } from "@/components/camera-scan";
 import { findByScan, packOf, productMatchesQuery, shortCodeOf, stockBreakdown } from "@/lib/pack";
 import { buildSuggestions } from "@/lib/suggest";
 import { useImanStore } from "@/lib/store";
-import type { Product } from "@/lib/types";
+import type { Category, Product } from "@/lib/types";
 import { cn, uid } from "@/lib/utils";
 
 type Filter = "all" | "cats" | "suggest" | "low" | "expire";
@@ -55,14 +55,13 @@ export function InventoryView() {
   const [cat, setCat] = useState<string | "all">("all");
   const [editing, setEditing] = useState<Product | null>(null);
   const [open, setOpen] = useState(false);
-  const [newCat, setNewCat] = useState("");
-  const [editCats, setEditCats] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
   const [camOpen, setCamOpen] = useState(false);
   const [editItems, setEditItems] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [codesOpen, setCodesOpen] = useState(false);
+  const [categoriesOpen, setCategoriesOpen] = useState(false);
 
   const lowN = products.filter((p) => p.active && p.stock <= p.stockMin).length;
   const expN = products.filter((p) => {
@@ -128,6 +127,10 @@ export function InventoryView() {
           <Hash className="size-4" />
           Códigos personalizados
         </Button>
+        <Button variant="secondary" onClick={() => setCategoriesOpen(true)}>
+          <Layers className="size-4" />
+          Categorías
+        </Button>
         <Button variant="secondary" onClick={() => setImportOpen(true)}>
           <Download className="size-4" />
           Importar
@@ -179,64 +182,15 @@ export function InventoryView() {
       </div>
 
       {filter === "cats" ? (
-        <div className="flex flex-col gap-2">
-          <div className="flex w-full flex-wrap gap-2">
-            <FilterChip className="min-w-0 flex-1" active={cat === "all"} onClick={() => setCat("all")}>
-              Todas
+        <div className="flex w-full flex-wrap gap-2">
+          <FilterChip active={cat === "all"} onClick={() => setCat("all")}>
+            Todas <span className="num">{products.length}</span>
+          </FilterChip>
+          {categories.map((c) => (
+            <FilterChip key={c.id} active={cat === c.id} onClick={() => setCat(c.id)}>
+              {c.name} <span className="num">{products.filter((p) => p.categoryId === c.id).length}</span>
             </FilterChip>
-            {categories.map((c) => (
-              <span key={c.id} className="inline-flex min-w-0 flex-1 items-center">
-                <FilterChip className="min-w-0 flex-1" active={cat === c.id} onClick={() => setCat(c.id)}>
-                  {c.name}
-                </FilterChip>
-                {editCats ? (
-                  <button
-                    type="button"
-                    className="ml-0.5 grid size-8 shrink-0 place-items-center rounded-full text-subtle hover:bg-elevated hover:text-danger"
-                    aria-label={`Quitar ${c.name}`}
-                    onClick={() => {
-                      const r = deleteCategory(c.id);
-                      if (!r.ok) toast.error(r.error);
-                      else {
-                        if (cat === c.id) setCat("all");
-                        toast.success("Categoría quitada");
-                      }
-                    }}
-                  >
-                    <Trash2 className="size-3" />
-                  </button>
-                ) : null}
-              </span>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="ghost" onClick={() => setEditCats((v) => !v)}>
-              {editCats ? "Listo" : "Editar categorías"}
-            </Button>
-            {editCats ? (
-              <form
-                className="flex items-center gap-1"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const name = newCat.trim();
-                  if (!name) return;
-                  saveCategory({ id: uid("c"), name, sort: categories.length + 1 });
-                  setNewCat("");
-                  toast.success("Categoría agregada");
-                }}
-              >
-                <Input
-                  value={newCat}
-                  onChange={(e) => setNewCat(e.target.value)}
-                  placeholder="Nueva categoría"
-                  className="h-8 w-40"
-                />
-                <Button type="submit" size="sm" variant="secondary">
-                  Agregar
-                </Button>
-              </form>
-            ) : null}
-          </div>
+          ))}
         </div>
       ) : null}
 
@@ -382,6 +336,18 @@ export function InventoryView() {
           downloadCatalogXlsx(products, categories, settings.name);
           toast.success("Excel listo");
           setExportOpen(false);
+        }}
+      />
+      <CategoriesDialog
+        open={categoriesOpen}
+        onOpenChange={setCategoriesOpen}
+        categories={categories}
+        products={products}
+        onSaveCategory={saveCategory}
+        onDeleteCategory={deleteCategory}
+        onSaveProduct={saveProduct}
+        onGone={(id) => {
+          if (cat === id) setCat("all");
         }}
       />
       <ShortCodesDialog
@@ -1186,6 +1152,243 @@ function LabelsDialog({
             Lista
           </Button>
         </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** "Almacén" y "ALmacen" son la misma categoría para el dueño. */
+function catKey(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/** Sin espacios de más: ni en las puntas ni dobles adentro. */
+function cleanCatName(raw: string): string {
+  return raw.replace(/\s+/g, " ").trim();
+}
+
+function joinNames(names: string[]): string {
+  if (names.length < 2) return names.join("");
+  return `${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}`;
+}
+
+function CategoriesDialog({
+  open,
+  onOpenChange,
+  categories,
+  products,
+  onSaveCategory,
+  onDeleteCategory,
+  onSaveProduct,
+  onGone,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  categories: Category[];
+  products: Product[];
+  onSaveCategory: (c: Category) => void;
+  onDeleteCategory: (id: string) => { ok: boolean; error?: string };
+  onSaveProduct: (p: Product) => void;
+  onGone: (id: string) => void;
+}) {
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [newCat, setNewCat] = useState("");
+  const [pending, setPending] = useState<{ fromId: string; toId: string } | null>(null);
+
+  const countOf = (id: string) => products.filter((p) => p.categoryId === id).length;
+  const nameOf = (id: string) => categories.find((c) => c.id === id)?.name ?? "";
+
+  // Las que quedaron repetidas de antes: mismo nombre salvo mayúsculas y acentos.
+  const repetidas = useMemo(() => {
+    const porClave = new Map<string, Category[]>();
+    for (const c of categories) {
+      const k = catKey(c.name);
+      porClave.set(k, [...(porClave.get(k) ?? []), c]);
+    }
+    return [...porClave.values()].find((g) => g.length > 1) ?? null;
+  }, [categories]);
+
+  function renombrar(c: Category, raw: string) {
+    const name = cleanCatName(raw);
+    if (!name) {
+      setDrafts((d) => ({ ...d, [c.id]: c.name }));
+      return;
+    }
+    if (name !== c.name && categories.some((x) => x.id !== c.id && catKey(x.name) === catKey(name))) {
+      toast.error("Ya existe una categoría con ese nombre");
+      setDrafts((d) => ({ ...d, [c.id]: c.name }));
+      return;
+    }
+    setDrafts((d) => ({ ...d, [c.id]: name }));
+    if (name === c.name) return;
+    onSaveCategory({ ...c, name });
+    toast.success("Nombre cambiado");
+  }
+
+  function borrar(c: Category) {
+    const r = onDeleteCategory(c.id);
+    if (!r.ok) {
+      toast.error(r.error);
+      return;
+    }
+    onGone(c.id);
+    toast.success("Categoría quitada");
+  }
+
+  /**
+   * Los productos se guardan de a uno con `saveProduct`: es lo que manda el
+   * evento a la cinta de sync. Un `set` directo al store se perdería.
+   */
+  function mover(fromId: string, toId: string) {
+    const mudanza = products.filter((p) => p.categoryId === fromId);
+    const destino = nameOf(toId);
+    for (const p of mudanza) onSaveProduct({ ...p, categoryId: toId });
+    const r = onDeleteCategory(fromId);
+    setPending(null);
+    if (!r.ok) {
+      toast.error(r.error);
+      return;
+    }
+    onGone(fromId);
+    toast.success(mudanza.length ? `${mudanza.length} productos a ${destino}` : "Categoría quitada");
+  }
+
+  function unificar(grupo: Category[]) {
+    const ordenadas = [...grupo].sort((a, b) => countOf(b.id) - countOf(a.id));
+    const destino = ordenadas[0];
+    if (!destino) return;
+    const origen = ordenadas.find((c) => c.id !== destino.id);
+    if (!origen) return;
+    setPending({ fromId: origen.id, toId: destino.id });
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        onOpenChange(v);
+        if (!v) {
+          setPending(null);
+          setDrafts({});
+          setNewCat("");
+        }
+      }}
+    >
+      <DialogContent className="w-[min(560px,calc(100vw-24px))]">
+        <DialogHeader>
+          <DialogTitle>Categorías</DialogTitle>
+          <DialogDescription>
+            Cambiales el nombre, mové los productos de una a otra y sacá las que sobran.
+          </DialogDescription>
+        </DialogHeader>
+
+        {repetidas ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg bg-elevated px-3 py-2 text-sm text-muted">
+            <span>Hay categorías repetidas: {joinNames(repetidas.map((c) => c.name))}</span>
+            <Button className="ml-auto" size="sm" variant="secondary" onClick={() => unificar(repetidas)}>
+              Unificar
+            </Button>
+          </div>
+        ) : null}
+
+        {pending ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg bg-accent/15 px-3 py-2 text-sm">
+            <span>
+              Mover {countOf(pending.fromId)} productos de {nameOf(pending.fromId)} a {nameOf(pending.toId)}.{" "}
+              {nameOf(pending.fromId)} se borra.
+            </span>
+            <div className="ml-auto flex gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setPending(null)}>
+                Cancelar
+              </Button>
+              <Button size="sm" onClick={() => mover(pending.fromId, pending.toId)}>
+                Mover
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        <ul className="flex max-h-[50vh] flex-col overflow-y-auto">
+          {categories.map((c) => {
+            const n = countOf(c.id);
+            return (
+              <li
+                key={c.id}
+                className="flex flex-col gap-1.5 border-t border-border px-1 py-2 first:border-t-0"
+              >
+                <div className="flex items-center gap-2">
+                  <Input
+                    className="h-9 min-w-0 flex-1"
+                    value={drafts[c.id] ?? c.name}
+                    aria-label={`Nombre de ${c.name}`}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [c.id]: e.target.value }))}
+                    onBlur={(e) => renombrar(c, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                    }}
+                  />
+                  <span className="num w-14 shrink-0 text-right text-sm text-muted">{n}</span>
+                  <Button size="sm" variant="secondary" disabled={n > 0} onClick={() => borrar(c)}>
+                    Borrar
+                  </Button>
+                </div>
+                {n > 0 ? (
+                  <div className="flex items-center gap-2 pl-1">
+                    <select
+                      className="h-9 min-w-0 flex-1 rounded-md bg-elevated px-3 text-sm text-fg shadow-[var(--shadow-border)]"
+                      value=""
+                      aria-label={`Mover productos de ${c.name}`}
+                      onChange={(e) => {
+                        if (e.target.value) setPending({ fromId: c.id, toId: e.target.value });
+                      }}
+                    >
+                      <option value="">Mover productos a…</option>
+                      {categories
+                        .filter((x) => x.id !== c.id)
+                        .map((x) => (
+                          <option key={x.id} value={x.id}>
+                            {x.name}
+                          </option>
+                        ))}
+                    </select>
+                    <span className="shrink-0 text-xs text-subtle">Mové los productos primero</span>
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+
+        <form
+          className="mt-1 flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const name = cleanCatName(newCat);
+            if (!name) return;
+            if (categories.some((x) => catKey(x.name) === catKey(name))) {
+              toast.error("Ya existe una categoría con ese nombre");
+              return;
+            }
+            onSaveCategory({ id: uid("c"), name, sort: categories.length + 1 });
+            setNewCat("");
+            toast.success("Categoría agregada");
+          }}
+        >
+          <Input
+            value={newCat}
+            onChange={(e) => setNewCat(e.target.value)}
+            placeholder="Nueva categoría"
+            className="h-9 min-w-0 flex-1"
+          />
+          <Button type="submit" variant="secondary">
+            Agregar
+          </Button>
+        </form>
       </DialogContent>
     </Dialog>
   );
