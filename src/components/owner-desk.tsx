@@ -1,6 +1,5 @@
-import { useMemo, useState } from "react";
-import { FileText, MapPin, Settings2, Tag, Ticket, Users, Wallet } from "lucide-react";
-import { Pie, PieChart, Cell, ResponsiveContainer, Tooltip as RTooltip } from "recharts";
+import { useMemo, useState, type ReactNode } from "react";
+import { ChevronDown, FileText, MapPin, Settings2, Tag, Ticket, Users, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { LedgerSheet } from "@/components/ledger-grid";
 import {
@@ -12,10 +11,12 @@ import {
 } from "@/components/ui/dialog";
 import {
   booksForYm,
+  cellValue,
   currentYm,
   downloadText,
   ledgerCsv,
   monthCc,
+  monthDates,
   monthTitle,
   monthsOfQuarter,
   monthsOfYear,
@@ -27,9 +28,10 @@ import { OwnerPrices } from "@/components/owner-prices";
 import { OwnerTicket } from "@/components/owner-ticket";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { formatARS } from "@/lib/format";
+import { PAY_LABEL, formatARS, todayKey } from "@/lib/format";
 import type { StoreMeta, StoreRollup } from "@/lib/kiosk";
 import type { MyAccess } from "@/lib/license";
+import type { MonthAgg, PayMethod, Sale } from "@/lib/types";
 import { useImanStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { usePhoneUi } from "@/lib/device";
@@ -73,37 +75,46 @@ export function OwnerDesk({
   const qMonths = monthsOfQuarter(year, q);
   const viewBooks = useMemo(() => booksForYm(books, sheets, ym), [books, sheets, ym]);
   const cc = useMemo(() => monthCc(viewBooks, ym), [viewBooks, ym]);
-  const qCc = useMemo(() => {
-    return qMonths.reduce(
-      (acc, m) => {
-        const c = monthCc(booksForYm(books, sheets, m), m);
-        return {
-          ingresoCaja: acc.ingresoCaja + c.ingresoCaja,
-          ingresoMp: acc.ingresoMp + c.ingresoMp,
-          proveedores: acc.proveedores + c.proveedores,
-          ganancias: acc.ganancias + c.ganancias,
-        };
-      },
-      { ingresoCaja: 0, ingresoMp: 0, proveedores: 0, ganancias: 0 },
-    );
-  }, [books, sheets, qMonths]);
   const current = ym === nowYm;
   const phone = usePhoneUi();
   const sales = useImanStore((s) => s.sales);
-  const pie = useMemo(() => {
-    const map = { efectivo: 0, mercadopago: 0, debito: 0 };
-    for (const s of sales) {
-      if (!s.createdAt.startsWith(String(year))) continue;
-      map[s.paymentMethod] += s.total;
-    }
-    return [
-      { name: "Efectivo", value: map.efectivo },
-      { name: "Mercado Pago", value: map.mercadopago },
-      { name: "Débito", value: map.debito },
-    ].filter((d) => d.value > 0);
-  }, [sales, year]);
-  const pieTotal = pie.reduce((a, d) => a + d.value, 0);
-  const PIE_COLORS = ["#7d9a7e", "#d4a84b", "#c45c4a", "#6b8cae", "#c4b49a", "#8a7a68"];
+  const monthAggs = useImanStore((s) => s.monthAggs);
+  const payouts = useImanStore((s) => s.payouts);
+  const monthExpenses = useImanStore((s) => s.settings.monthExpenses);
+  const [salidaOpen, setSalidaOpen] = useState(false);
+
+  const anterior = prevYm(ym);
+  const mes = useMemo(() => ventasDelMes(ym, sales, monthAggs), [ym, sales, monthAggs]);
+  const mesPasado = useMemo(() => ventasDelMes(anterior, sales, monthAggs), [anterior, sales, monthAggs]);
+  const ccPasado = useMemo(
+    () => monthCc(booksForYm(books, sheets, anterior), anterior),
+    [books, sheets, anterior],
+  );
+  // Un mes viejo puede haber perdido sus tickets y conservar la planilla.
+  const ventasMes = mes?.ventas ?? (cc.totalVentas > 0 ? cc.totalVentas : null);
+  const ventasPasado = mesPasado?.ventas ?? (ccPasado.totalVentas > 0 ? ccPasado.totalVentas : null);
+  const dif = ventasMes != null && ventasPasado != null ? ventasMes - ventasPasado : null;
+  const difPct = dif != null && ventasPasado ? (dif / ventasPasado) * 100 : null;
+
+  const retiros = useMemo(
+    () => monthDates(ym).reduce((a, d) => a + cellValue(viewBooks, d, "retiros"), 0),
+    [viewBooks, ym],
+  );
+  const gastosFijos = (monthExpenses ?? []).reduce((a, r) => a + (r.amount || 0), 0);
+  const sueldos = useMemo(
+    () => payouts.filter((x) => ymLocal(x.createdAt) === ym).reduce((a, x) => a + x.amount, 0),
+    [payouts, ym],
+  );
+  const salio = cc.proveedores + cc.gastos + gastosFijos + sueldos;
+  // Un mes al que nunca se le cargó nada no tuvo cero de gastos: no tuvo datos.
+  const hayEgresos = salio > 0 || retiros > 0;
+
+  // La app y la planilla se cargan por separado: si no cierran, el dueño quiere saberlo.
+  const descuadre =
+    mes != null &&
+    mes.ventas > 0 &&
+    cc.totalVentas > 0 &&
+    Math.abs(mes.ventas - cc.totalVentas) / Math.max(mes.ventas, cc.totalVentas) > 0.05;
   const tabs = (
     [
       ["precios", "Precios", Tag],
@@ -303,42 +314,132 @@ export function OwnerDesk({
                 </Button>
               </div>
             </div>
-            <div className="grid shrink-0 grid-cols-2 gap-2 lg:grid-cols-5">
-              <Kpi k="Fac X" v={formatARS(cc.facX)} />
-              <Kpi k="Fac A" v={formatARS(cc.facA)} />
-              <Kpi k="Cigarrillos" v={formatARS(cc.cigarrillos)} />
-              <Kpi k="Ganancias" v={formatARS(cc.ganancias)} />
-              <div className="col-span-2 flex items-center gap-3 rounded-xl bg-surface px-4 py-3 shadow-[var(--shadow-border)] lg:col-span-1">
-                {pie.length ? (
-                  <>
-                    <div className="h-16 w-16 shrink-0">
-                      <ResponsiveContainer>
-                        <PieChart>
-                          <Pie data={pie} dataKey="value" nameKey="name" innerRadius={18} outerRadius={30}>
-                            {pie.map((_, i) => (
-                              <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <RTooltip formatter={(v) => formatARS(Number(v) || 0)} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <ul className="min-w-0 flex-1 space-y-0.5 text-xs">
-                      {pie.map((d, i) => (
-                        <li key={d.name} className="flex justify-between gap-2">
-                          <span className="truncate text-muted">{d.name}</span>
-                          <span className="num text-fg">
-                            {pieTotal ? Math.round((d.value / pieTotal) * 100) : 0}%
+            <div className="flex shrink-0 flex-col gap-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <Tarjeta titulo="Ventas del mes">
+                  {ventasMes == null ? (
+                    <Vacio>Sin ventas registradas este mes</Vacio>
+                  ) : (
+                    <>
+                      <Grande>{formatARS(ventasMes)}</Grande>
+                      {mes == null ? (
+                        <p className="mt-1 text-xs text-muted">
+                          Según la planilla. De ese mes ya no quedan tickets.
+                        </p>
+                      ) : null}
+                    </>
+                  )}
+                </Tarjeta>
+
+                <div className="rounded-xl bg-surface px-4 py-3 shadow-[var(--shadow-border)]">
+                  <button type="button" className="w-full text-left" onClick={() => setSalidaOpen((v) => !v)}>
+                    <span className="flex items-center gap-1 text-xs font-medium uppercase tracking-[0.12em] text-subtle">
+                      Plata que salió
+                      <ChevronDown className={cn("size-3.5 transition-transform", salidaOpen && "rotate-180")} />
+                    </span>
+                    {salio > 0 ? (
+                      <Grande>{formatARS(salio)}</Grande>
+                    ) : (
+                      <Vacio>Sin pagos ni gastos cargados</Vacio>
+                    )}
+                  </button>
+                  {salidaOpen ? (
+                    <ul className="mt-2 space-y-0.5 border-t border-border pt-2 text-xs">
+                      <Linea k="Proveedores" v={cc.proveedores} />
+                      <Linea k="Gastos de la planilla" v={cc.gastos} />
+                      <Linea k="Gastos fijos" v={gastosFijos} />
+                      <Linea k="Sueldos y adelantos" v={sueldos} />
+                    </ul>
+                  ) : null}
+                </div>
+
+                <Tarjeta titulo="Contra el mes pasado">
+                  {dif == null ? (
+                    <Vacio>Sin datos del mes pasado</Vacio>
+                  ) : (
+                    <>
+                      <Grande className={dif >= 0 ? "text-sage" : "text-warn"}>
+                        {dif > 0 ? "+" : ""}
+                        {formatARS(dif)}
+                      </Grande>
+                      <p className="mt-1 text-xs text-muted">
+                        {difPct != null ? `${difPct > 0 ? "+" : ""}${Math.round(difPct)}% · ` : ""}
+                        {monthTitle(anterior)} {formatARS(ventasPasado ?? 0)}
+                      </p>
+                    </>
+                  )}
+                </Tarjeta>
+              </div>
+
+              {descuadre && mes ? (
+                <p className="px-1 text-xs text-subtle">
+                  La app registró <span className="num">{formatARS(mes.ventas)}</span> y la planilla dice{" "}
+                  <span className="num">{formatARS(cc.totalVentas)}</span>.
+                </p>
+              ) : null}
+
+              <div className="grid grid-cols-1 gap-2 lg:grid-cols-3">
+                <Tarjeta titulo="Por medio de pago">
+                  {mes == null ? (
+                    <Vacio>De este mes no quedan tickets</Vacio>
+                  ) : (
+                    <ul className="mt-2 space-y-1">
+                      {(["efectivo", "mercadopago", "debito"] as PayMethod[]).map((k) => (
+                        <li key={k} className="flex items-baseline justify-between gap-2 text-sm">
+                          <span className="text-muted">{PAY_LABEL[k]}</span>
+                          <span className="flex items-baseline gap-2">
+                            <span className="num">{formatARS(mes[k])}</span>
+                            <span className="num w-9 text-right text-xs text-subtle">
+                              {mes.ventas > 0 ? Math.round((mes[k] / mes.ventas) * 100) : 0}%
+                            </span>
                           </span>
                         </li>
                       ))}
                     </ul>
-                  </>
-                ) : (
-                  <p className="text-xs text-subtle">
-                    Q{q} {year} · caja {formatARS(qCc.ingresoCaja)}
-                  </p>
-                )}
+                  )}
+                </Tarjeta>
+
+                <Tarjeta titulo="Egresos">
+                  {!hayEgresos ? (
+                    <Vacio>Sin movimientos cargados en la planilla</Vacio>
+                  ) : (
+                  <ul className="mt-2 space-y-1 text-sm">
+                    <Linea k="Proveedores" v={cc.proveedores} grande />
+                    <li className="flex flex-wrap gap-x-3 gap-y-0.5 pl-3 text-xs text-subtle">
+                      <span>
+                        Fac X <span className="num">{formatARS(cc.facX)}</span>
+                      </span>
+                      <span>
+                        Fac A <span className="num">{formatARS(cc.facA)}</span>
+                      </span>
+                      <span>
+                        Cigarrillos <span className="num">{formatARS(cc.cigarrillos)}</span>
+                      </span>
+                    </li>
+                    <Linea k="Gastos de la planilla" v={cc.gastos} grande />
+                    <Linea k="Gastos fijos" v={gastosFijos} grande />
+                    <Linea k="Sueldos y adelantos" v={sueldos} grande />
+                    <Linea k="Retiros del dueño" v={retiros} grande />
+                  </ul>
+                  )}
+                </Tarjeta>
+
+                <Tarjeta titulo="Tickets">
+                  {mes == null || mes.tickets === 0 ? (
+                    <Vacio>De este mes no quedan tickets</Vacio>
+                  ) : (
+                    <ul className="mt-2 space-y-1 text-sm">
+                      <li className="flex items-baseline justify-between gap-2">
+                        <span className="text-muted">Ventas</span>
+                        <span className="num">{mes.tickets}</span>
+                      </li>
+                      <li className="flex items-baseline justify-between gap-2">
+                        <span className="text-muted">Ticket promedio</span>
+                        <span className="num">{formatARS(mes.ventas / mes.tickets)}</span>
+                      </li>
+                    </ul>
+                  )}
+                </Tarjeta>
               </div>
             </div>
             {sheets
@@ -439,12 +540,80 @@ export function OwnerDesk({
   );
 }
 
-function Kpi({ k, v }: { k: string; v: string }) {
+/** El mes local de un sello ISO: la zona horaria no puede correr una venta de mes. */
+function ymLocal(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : todayKey(d).slice(0, 7);
+}
+
+function prevYm(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(y ?? 2000, (m ?? 1) - 2, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+type MesVentas = {
+  ventas: number;
+  tickets: number;
+  efectivo: number;
+  mercadopago: number;
+  debito: number;
+};
+
+/**
+ * Lo vendido en un mes: los tickets que siguen vivos más lo que ya se plegó en
+ * `monthAggs` al podar el bulto. Un ticket está en uno o en el otro, nunca en
+ * los dos, así que se suman. `null` es "de ese mes no quedó nada", que no es lo
+ * mismo que cero.
+ */
+function ventasDelMes(ym: string, sales: Sale[], aggs: MonthAgg[]): MesVentas | null {
+  let vivos = 0;
+  const t: MesVentas = { ventas: 0, tickets: 0, efectivo: 0, mercadopago: 0, debito: 0 };
+  for (const s of sales) {
+    if (ymLocal(s.createdAt) !== ym) continue;
+    vivos += 1;
+    t.ventas += s.total;
+    t.tickets += 1;
+    t[s.paymentMethod] += s.total;
+  }
+  const agg = aggs.find((a) => a.ym === ym);
+  if (agg) {
+    t.ventas += agg.ventas;
+    t.tickets += agg.tickets;
+    t.efectivo += agg.efectivo;
+    t.mercadopago += agg.mp;
+    t.debito += agg.debito;
+  }
+  return vivos || agg ? t : null;
+}
+
+function Tarjeta({ titulo, children }: { titulo: string; children: ReactNode }) {
   return (
     <div className="rounded-xl bg-surface px-4 py-3 shadow-[var(--shadow-border)]">
-      <p className="text-xs font-medium uppercase tracking-[0.12em] text-subtle">{k}</p>
-      <p className="num mt-1 text-xl text-sage">{v}</p>
+      <p className="text-xs font-medium uppercase tracking-[0.12em] text-subtle">{titulo}</p>
+      {children}
     </div>
+  );
+}
+
+function Grande({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <span className={cn("num mt-1 block font-display text-4xl leading-none tracking-tight", className)}>
+      {children}
+    </span>
+  );
+}
+
+function Vacio({ children }: { children: ReactNode }) {
+  return <span className="mt-2 block text-sm text-muted">{children}</span>;
+}
+
+function Linea({ k, v, grande }: { k: string; v: number; grande?: boolean }) {
+  return (
+    <li className={cn("flex items-baseline justify-between gap-2", grande && "text-sm")}>
+      <span className="text-muted">{k}</span>
+      <span className="num">{formatARS(v)}</span>
+    </li>
   );
 }
 
