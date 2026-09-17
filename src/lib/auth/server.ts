@@ -106,7 +106,17 @@ const LOCAL_DEV_ORIGINS: string[] = [
 // Phone on the LAN (same `npm run dev` server). Loopback-only trustedOrigins
 // rejects `http://192.168.1.47:8080` as Invalid origin on Estudio / email sign-in.
 const LAN_DEV_ORIGINS: string[] = ["http://192.168.1.47:8080"];
-const LAN_DEV_HOSTS: string[] = ["192.168.1.47", "192.168.1.47:8080", "192.168.*.*:8080"];
+// `*.local` is the machine's mDNS name (`andres-x510uq.local`), which the phone
+// can use when the router hands out a different IP tomorrow. mDNS names resolve
+// on the local link only — they are never reachable from the internet, and this
+// whole branch is dev-only (deploys set BETTER_AUTH_URL).
+const LAN_DEV_HOSTS: string[] = [
+  "192.168.1.47",
+  "192.168.1.47:8080",
+  "192.168.*.*:8080",
+  "*.local",
+  "*.local:8080",
+];
 
 function isLanDevOrigin(origin: string): boolean {
   try {
@@ -116,7 +126,11 @@ function isLanDevOrigin(origin: string): boolean {
     return (
       /^192\.168\.\d{1,3}\.\d{1,3}$/.test(h) ||
       /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h) ||
-      /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(h)
+      /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(h) ||
+      // mDNS name of a machine on this link (`andres-x510uq.local`), one label
+      // deep — `.local` is reserved for link-local names, so it can never be a
+      // public origin.
+      /^[a-z0-9-]+\.local$/i.test(h)
     );
   } catch {
     return false;

@@ -150,6 +150,11 @@ export default defineConfig(({ command, isPreview }) => ({
     host: "0.0.0.0",
     port: 8080,
     strictPort: true,
+    // El celular entra por la wifi. Vite corta cualquier Host que no sea una IP
+    // ni localhost, así que el nombre mDNS de la máquina (andres-x510uq.local)
+    // daba "Blocked request". Con el punto adelante vale ese nombre y nada
+    // afuera de la red: las direcciones de internet no terminan en .local.
+    allowedHosts: [".local"],
   },
   preview: {
     host: "127.0.0.1",
