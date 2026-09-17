@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Tag } from "lucide-react";
+import { Search, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,7 +10,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatARS, formatMiles } from "@/lib/format";
+import { productMatchesQuery } from "@/lib/pack";
 import { factorFor, quotedPrice, roundPrice, unitCost, type InvoiceKind } from "@/lib/pricing";
 import { useImanStore } from "@/lib/store";
 import type { Category } from "@/lib/types";
@@ -59,6 +61,7 @@ function PriceCalc() {
 
   const [modo, setModo] = useState<"producto" | "costo">("producto");
   const [productId, setProductId] = useState("");
+  const [q, setQ] = useState("");
   const [catId, setCatId] = useState("");
   const [costo, setCosto] = useState("");
 
@@ -71,6 +74,9 @@ function PriceCalc() {
     [products],
   );
   const producto = lista.find((p) => p.id === productId) ?? null;
+  const encontrados = useMemo(() => lista.filter((p) => productMatchesQuery(p, q)), [lista, q]);
+  const MUESTRA = 40;
+  const sobran = Math.max(0, encontrados.length - MUESTRA);
   const rubroDe = (id: string): Category =>
     categories.find((c) => c.id === id) ?? { id, name: "", sort: 0 };
 
@@ -112,16 +118,51 @@ function PriceCalc() {
       {modo === "producto" ? (
         <div className="mt-3">
           <Label>Producto</Label>
-          <select className={SELECT} value={productId} onChange={(e) => setProductId(e.target.value)}>
-            <option value="">Elegí un producto</option>
-            {lista.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
+            <Input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Buscar por nombre o código"
+              className="pl-10"
+            />
+          </div>
+          {encontrados.length === 0 ? (
+            <p className="mt-2 px-1 text-sm text-muted">No hay productos con esa búsqueda.</p>
+          ) : (
+            <ScrollArea className="mt-2 max-h-[13rem]">
+              <ul className="flex flex-col gap-0.5">
+                {encontrados.slice(0, MUESTRA).map((x) => {
+                  const c = unitCost(x);
+                  const elegido = x.id === productId;
+                  return (
+                    <li key={x.id}>
+                      <button
+                        type="button"
+                        className={cn(
+                          "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm",
+                          elegido ? "bg-accent text-accent-fg" : "hover:bg-elevated",
+                        )}
+                        onClick={() => setProductId(x.id)}
+                      >
+                        <span className="truncate">{x.name}</span>
+                        <span className={cn("num shrink-0 text-xs", elegido ? "" : "text-muted")}>
+                          {c == null ? "sin costo" : formatARS(c)}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </ScrollArea>
+          )}
+          {sobran ? (
+            <p className="mt-1 px-1 text-xs text-subtle">
+              Hay <span className="num">{sobran}</span> más. Afiná la búsqueda.
+            </p>
+          ) : null}
           {producto ? (
-            <p className="mt-2 text-sm text-muted">
+            <p className="mt-2 px-1 text-sm text-muted">
               {rubro?.name || "Sin rubro"} ·{" "}
               {cost == null ? "sin costo cargado" : <>costo <span className="num">{formatARS(cost)}</span></>}
             </p>
