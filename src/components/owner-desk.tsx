@@ -12,6 +12,7 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
+import { Bar, BarChart, Cell, LabelList, ResponsiveContainer, XAxis, YAxis, type LabelProps } from "recharts";
 import { toast } from "sonner";
 import { LedgerSheet } from "@/components/ledger-grid";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -235,7 +236,7 @@ export function OwnerDesk({
         ) : null}
 
         {tab === "mes" ? (
-          <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+          <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto">
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               <PeriodoPicker ym={ym} nowYm={nowYm} onYm={setYm} />
               <div className="ml-auto flex items-center gap-2">
@@ -305,7 +306,7 @@ export function OwnerDesk({
                     <Vacio>Sin datos del mes pasado</Vacio>
                   ) : (
                     <>
-                      <Grande className={dif >= 0 ? "text-sage" : "text-warn"}>
+                      <Grande className={dif > 0 ? "text-accent" : dif < 0 ? "text-warn" : undefined}>
                         {dif > 0 ? "+" : ""}
                         {formatARS(dif)}
                       </Grande>
@@ -325,27 +326,21 @@ export function OwnerDesk({
                 </p>
               ) : null}
 
-              <div className="grid grid-cols-1 gap-2 lg:grid-cols-3">
-                <Tarjeta titulo="Por medio de pago">
-                  {mes == null ? (
-                    <Vacio>De este mes no quedan tickets</Vacio>
-                  ) : (
-                    <ul className="mt-2 space-y-1">
-                      {(["efectivo", "mercadopago", "debito"] as PayMethod[]).map((k) => (
-                        <li key={k} className="flex items-baseline justify-between gap-2 text-sm">
-                          <span className="text-muted">{PAY_LABEL[k]}</span>
-                          <span className="flex items-baseline gap-2">
-                            <span className="num">{formatARS(mes[k])}</span>
-                            <span className="num w-9 text-right text-xs text-subtle">
-                              {mes.ventas > 0 ? Math.round((mes[k] / mes.ventas) * 100) : 0}%
-                            </span>
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+              <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+                <Tarjeta titulo="Ventas, últimos seis meses">
+                  <VentasSeisMeses ym={ym} sales={sales} aggs={monthAggs} acostado={phone} />
                 </Tarjeta>
 
+                <Tarjeta titulo="Cómo te pagaron">
+                  {mes == null || mes.ventas <= 0 ? (
+                    <Vacio>De este mes no quedan tickets</Vacio>
+                  ) : (
+                    <ComoTePagaron mes={mes} />
+                  )}
+                </Tarjeta>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
                 <Tarjeta
                   titulo="Egresos"
                   accion={
@@ -363,7 +358,7 @@ export function OwnerDesk({
                   {!hayEgresos ? (
                     <Vacio>Sin movimientos cargados en la planilla</Vacio>
                   ) : (
-                  <ul className="mt-2 space-y-1 text-sm">
+                  <ul className="mt-1.5 space-y-0.5 text-sm">
                     <Linea k="Proveedores" v={cc.proveedores} grande />
                     <li className="flex flex-wrap gap-x-3 gap-y-0.5 pl-3 text-xs text-subtle">
                       <span>
@@ -388,16 +383,16 @@ export function OwnerDesk({
                   {mes == null || mes.tickets === 0 ? (
                     <Vacio>De este mes no quedan tickets</Vacio>
                   ) : (
-                    <ul className="mt-2 space-y-1 text-sm">
-                      <li className="flex items-baseline justify-between gap-2">
-                        <span className="text-muted">Ventas</span>
-                        <span className="num">{mes.tickets}</span>
-                      </li>
-                      <li className="flex items-baseline justify-between gap-2">
-                        <span className="text-muted">Ticket promedio</span>
-                        <span className="num">{formatARS(mes.ventas / mes.tickets)}</span>
-                      </li>
-                    </ul>
+                    <dl className="mt-1.5 grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <dt className="text-muted">Ventas</dt>
+                        <dd className="num font-mono text-lg">{mes.tickets}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted">Ticket promedio</dt>
+                        <dd className="num font-mono text-lg">{formatARS(mes.ventas / mes.tickets)}</dd>
+                      </div>
+                    </dl>
                   )}
                 </Tarjeta>
               </div>
@@ -414,7 +409,8 @@ export function OwnerDesk({
                   {monthTitle(s.ym)} se borra en 30 días.
                 </p>
               ))}
-            <div className="min-h-0 flex-1 overflow-hidden rounded-xl bg-surface p-3 shadow-[var(--shadow-border)]">
+            {/* Alta como lo que se ve: al bajar hasta ella entra entera, con las fechas arriba. */}
+            <div className="h-full min-h-[22rem] shrink-0 overflow-hidden rounded-xl bg-surface p-3 shadow-[var(--shadow-border)]">
               <LedgerSheet ym={ym} editable={current} />
             </div>
             <Dialog open={resultadoOpen} onOpenChange={setResultadoOpen}>
@@ -769,11 +765,170 @@ function BajarCsv({
   );
 }
 
+/** Los tres números de arriba se tienen que leer desde dos metros. */
 function Grande({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <span className={cn("num mt-1 block font-display text-4xl leading-none tracking-tight", className)}>
+    <span
+      className={cn(
+        "num mt-2 block font-mono text-[clamp(2.25rem,3.4vw,3.5rem)] font-medium leading-none tracking-tight",
+        className,
+      )}
+    >
       {children}
     </span>
+  );
+}
+
+const MEDIOS: { k: PayMethod; color: string }[] = [
+  { k: "efectivo", color: "var(--color-accent)" },
+  { k: "mercadopago", color: "var(--color-info)" },
+  { k: "debito", color: "var(--color-warn)" },
+];
+
+/**
+ * Una barra por mes, el que se está mirando en accent. Los meses cerrados
+ * vienen de monthAggs y el que corre de los tickets vivos: ventasDelMes suma
+ * los dos. Sin dos meses con datos no hay nada que comparar y no se dibuja.
+ * En el celu va acostado para que los montos no se pisen.
+ */
+function VentasSeisMeses({
+  ym,
+  sales,
+  aggs,
+  acostado,
+}: {
+  ym: string;
+  sales: Sale[];
+  aggs: MonthAgg[];
+  acostado: boolean;
+}) {
+  const datos = useMemo(
+    () =>
+      [-5, -4, -3, -2, -1, 0].map((d) => {
+        const m = moverMes(ym, d);
+        const v = ventasDelMes(m, sales, aggs)?.ventas ?? null;
+        return { ym: m, mes: MESES[Number(m.slice(5, 7)) - 1]!.slice(0, 3), ventas: v ?? 0, sinDatos: v == null };
+      }),
+    [ym, sales, aggs],
+  );
+  if (datos.filter((d) => !d.sinDatos).length < 2) return <Vacio>Todavía no hay meses para comparar</Vacio>;
+
+  const pintar = datos.map((d) => (
+    <Cell
+      key={d.ym}
+      fill={d.ym === ym ? "var(--color-accent)" : "var(--color-muted)"}
+      fillOpacity={d.ym === ym ? 1 : 0.45}
+    />
+  ));
+  // Los montos van escritos: nada de tooltips. Un mes sin datos dice "sin datos", no $0.
+  const monto = (p: LabelProps) => {
+    const d = datos[Number(p.index)];
+    if (!d) return null;
+    const x = Number(p.x);
+    const y = Number(p.y);
+    const w = Number(p.width);
+    const h = Number(p.height);
+    const texto = d.sinDatos ? "sin datos" : formatARS(d.ventas);
+    const clase = cn(
+      "text-xs",
+      d.sinDatos ? "fill-muted" : "font-mono",
+      !d.sinDatos && (d.ym === ym ? "fill-fg font-medium" : "fill-muted"),
+    );
+    return acostado ? (
+      <text x={x + w + 6} y={y + h / 2} dominantBaseline="central" className={clase}>
+        {texto}
+      </text>
+    ) : (
+      <text x={x + w / 2} y={y - 8} textAnchor="middle" className={clase}>
+        {texto}
+      </text>
+    );
+  };
+
+  return acostado ? (
+    <div className="mt-2 h-48">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={datos} layout="vertical" margin={{ top: 0, right: 92, bottom: 0, left: 0 }} barCategoryGap="22%">
+          <XAxis type="number" hide domain={[0, "dataMax"]} />
+          <YAxis
+            type="category"
+            dataKey="mes"
+            width={34}
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: "var(--color-muted)", fontSize: 12 }}
+          />
+          <Bar dataKey="ventas" radius={[0, 4, 4, 0]} isAnimationActive={false}>
+            {pintar}
+            <LabelList dataKey="ventas" content={monto} />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  ) : (
+    <div className="mt-2 h-52">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={datos} margin={{ top: 24, right: 4, bottom: 0, left: 4 }} barCategoryGap="22%">
+          <XAxis
+            dataKey="mes"
+            interval={0}
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: "var(--color-muted)", fontSize: 12 }}
+          />
+          <YAxis hide domain={[0, "dataMax"]} />
+          <Bar dataKey="ventas" radius={[4, 4, 0, 0]} isAnimationActive={false}>
+            {pintar}
+            <LabelList dataKey="ventas" content={monto} />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/**
+ * Una sola barra partida en efectivo, Mercado Pago y débito. El porcentaje va
+ * arriba de cada parte y los montos abajo, con la misma muestra de color: el
+ * color nunca es lo único que dice qué es cada parte.
+ */
+function ComoTePagaron({ mes }: { mes: MesVentas }) {
+  const partes = MEDIOS.map((m) => ({ ...m, monto: mes[m.k], pct: (mes[m.k] / mes.ventas) * 100 }));
+  const conPlata = partes.filter((p) => p.monto > 0);
+  return (
+    <div className="mt-3">
+      <div className="flex gap-0.5">
+        {conPlata.map((p) => (
+          <span
+            key={p.k}
+            className="num min-w-[3.25rem] font-mono text-2xl font-medium leading-none"
+            style={{ flex: `${p.monto} 1 0%` }}
+          >
+            {Math.round(p.pct)}%
+          </span>
+        ))}
+      </div>
+      <div
+        className="mt-2 flex h-9 gap-0.5"
+        role="img"
+        aria-label={partes.map((p) => `${PAY_LABEL[p.k]} ${Math.round(p.pct)}%`).join(", ")}
+      >
+        {conPlata.map((p) => (
+          <div key={p.k} className="rounded-[4px]" style={{ flex: `${p.monto} 0 0%`, background: p.color }} />
+        ))}
+      </div>
+      <dl className="mt-3 grid grid-cols-3 gap-3">
+        {partes.map((p) => (
+          <div key={p.k} className="min-w-0">
+            <dt className="flex items-center gap-1.5 text-xs text-muted">
+              <span className="size-2.5 shrink-0 rounded-[3px]" style={{ background: p.color }} />
+              {PAY_LABEL[p.k]}
+            </dt>
+            <dd className="num mt-0.5 truncate font-mono text-base">{formatARS(p.monto)}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }
 

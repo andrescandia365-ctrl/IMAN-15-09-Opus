@@ -158,11 +158,16 @@ export function LedgerSheet({
   }, [full, salirDePantallaCompleta]);
 
   // Al abrir, y al cambiar de tamaño la planilla, el día de hoy queda a la vista.
+  // Se corre solo la planilla y solo de costado: scrollIntoView movía también las
+  // cajas de afuera, y la planilla quedaba cortada por arriba.
   useEffect(() => {
     const root = scroller.current;
     if (!root) return;
     const col = root.querySelector<HTMLElement>('[data-today="1"]');
-    col?.scrollIntoView({ inline: "center", block: "nearest" });
+    if (!col) return;
+    const caja = root.getBoundingClientRect();
+    const dia = col.getBoundingClientRect();
+    root.scrollLeft += dia.left - caja.left - (caja.width - dia.width) / 2;
   }, [ym, dates, full]);
 
   return (
