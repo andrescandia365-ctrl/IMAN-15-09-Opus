@@ -7,7 +7,7 @@ import { archiveClosedMonths, emptyBook, cellsOf, currentYm, type FacLine } from
 import { lineUnits, orderNote, packOf, suggestPacks } from "./pack";
 import { nextCadenceDates } from "./supplier-cadence";
 import { addLot, consumeFifo } from "./lots";
-import { factorFor, quotedPrice, unitCost } from "./pricing";
+import { factorFor, quotedPrice, repriceProducts, unitCost } from "./pricing";
 import { uid } from "./utils";
 import {
   CATEGORY_SUPPLIER,
@@ -668,32 +668,26 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         const factor = factorFor(cat, "X", st.settings);
         const step = st.settings.roundStep && st.settings.roundStep > 0 ? st.settings.roundStep : 100;
         const mode = st.settings.roundMode === "down" ? "down" : "up";
-        let n = 0;
-        const products = st.products.map((p) => {
-          if (p.categoryId !== categoryId) return p;
-          const price = quotedPrice(p, factor, step, mode);
-          if (price == null || price === p.price) return p;
-          n += 1;
-          return { ...p, price, priceUpdatedAt: new Date().toISOString() };
-        });
-        set({ products });
-        return n;
+        const r = repriceProducts(
+          st.products,
+          (p) => (p.categoryId === categoryId ? quotedPrice(p, factor, step, mode) : null),
+          new Date().toISOString(),
+        );
+        if (!r.changed.length) return 0;
+        set({ products: r.products });
+        // Uno por producto, como saveProduct: sin esto el celu seguía vendiendo al precio viejo.
+        for (const p of r.changed) recordEvent("product", p);
+        return r.changed.length;
       },
 
       setProductPrices: (updates) => {
         if (!updates.length) return 0;
         const map = new Map(updates.map((u) => [u.id, u.price]));
-        let n = 0;
-        set((st) => ({
-          products: st.products.map((p) => {
-            if (!map.has(p.id)) return p;
-            const price = map.get(p.id)!;
-            if (price === p.price) return p;
-            n += 1;
-            return { ...p, price, priceUpdatedAt: new Date().toISOString() };
-          }),
-        }));
-        return n;
+        const r = repriceProducts(get().products, (p) => map.get(p.id) ?? null, new Date().toISOString());
+        if (!r.changed.length) return 0;
+        set({ products: r.products });
+        for (const p of r.changed) recordEvent("product", p);
+        return r.changed.length;
       },
 
       importCatalog: (products, categories) => set({ products, categories }),

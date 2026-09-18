@@ -99,6 +99,27 @@ export function quotedPrice(
   return roundPrice(c * factor, step, mode);
 }
 
+/**
+ * Pone precios nuevos y separa los productos que de verdad cambiaron: esos son
+ * los que van a la cinta de sync, uno por uno, igual que un `saveProduct`. Un
+ * `null` o el mismo precio deja el producto como estaba y no genera nada.
+ */
+export function repriceProducts(
+  products: Product[],
+  priceFor: (p: Product) => number | null,
+  at: string,
+): { products: Product[]; changed: Product[] } {
+  const changed: Product[] = [];
+  const next = products.map((p) => {
+    const price = priceFor(p);
+    if (price == null || price === p.price) return p;
+    const updated = { ...p, price, priceUpdatedAt: at };
+    changed.push(updated);
+    return updated;
+  });
+  return { products: next, changed };
+}
+
 export function productsForCross(
   products: Product[],
   categoryId: string,
