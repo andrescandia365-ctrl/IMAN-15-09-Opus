@@ -231,6 +231,28 @@ export function applyEvents(payload: KioskPayload, events: ImanEvent[]): KioskPa
   return events.reduce(applyEvent, payload);
 }
 
+/**
+ * Lo que syncNow escribe al store después de aplicar los eventos de otro
+ * aparato. Una clave que falte acá se aplica y se tira: le pasó a categories,
+ * que bajaba el renombre y no lo guardaba nunca.
+ */
+export function pulledPatch(next: KioskPayload) {
+  return {
+    products: next.products,
+    categories: next.categories,
+    sales: next.sales,
+    books: next.books ?? [],
+    refunds: next.refunds ?? [],
+    orders: next.orders,
+    movements: next.movements,
+    monthAggs: next.monthAggs ?? [],
+    monthSheets: next.monthSheets ?? [],
+    staff: next.staff ?? [],
+    roster: next.roster ?? [],
+    payouts: next.payouts ?? [],
+  };
+}
+
 export function receiveBody(
   orderId: string,
   lines: { productId: string; qty: number; asUnit?: boolean }[],

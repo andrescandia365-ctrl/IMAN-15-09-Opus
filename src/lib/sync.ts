@@ -1,4 +1,4 @@
-import { applyEvents } from "@/lib/events";
+import { applyEvents, pulledPatch } from "@/lib/events";
 import {
   appendSyncLog,
   clearCopy,
@@ -83,19 +83,7 @@ export async function syncNow(
     if (fresh.length) {
       const snap = prunePayload(snapshotKiosk(useImanStore.getState()));
       const next = applyEvents(snap, fresh);
-      useImanStore.setState({
-        products: next.products,
-        sales: next.sales,
-        books: next.books ?? [],
-        refunds: next.refunds ?? [],
-        orders: next.orders,
-        movements: next.movements,
-        monthAggs: next.monthAggs ?? [],
-        monthSheets: next.monthSheets ?? [],
-        staff: next.staff ?? [],
-        roster: next.roster ?? [],
-        payouts: next.payouts ?? [],
-      });
+      useImanStore.setState(pulledPatch(next));
       await saveLocalSnapshot(storeId, next);
     }
     await rememberPulled(storeId, pulled, cursor);

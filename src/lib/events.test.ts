@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { applyEvent, type ImanEvent } from "./events.ts";
+import { applyEvent, applyEvents, pulledPatch, type ImanEvent } from "./events.ts";
 import type { Category, KioskPayload, Settings, Supplier } from "./types.ts";
 
 const settings = { name: "Kiosco de Prueba", city: "Rosario", onboarded: true } as Settings;
@@ -93,4 +93,26 @@ test("un sobre incompleto no toca nada", () => {
     const next = applyEvent(antes, ev(body));
     assert.equal(next, antes);
   }
+});
+
+// syncNow aplica los eventos ajenos y escribe al store lo que devuelve pulledPatch.
+test("syncNow guarda el renombre de categoría que bajó de otro aparato", () => {
+  const renombre = ev({ op: "save", cat: { id: "c-bebidas", name: "Bebidas frías", sort: 1 } });
+  const alStore = pulledPatch(applyEvents(payload(), [renombre]));
+  assert.deepEqual(
+    alStore.categories.map((c) => c.name),
+    ["Bebidas frías", "Almacén"],
+  );
+});
+
+test("syncNow guarda el borrado de categoría que bajó de otro aparato", () => {
+  const vacia: Category = { id: "c-vacia", name: "Vacía", sort: 3 };
+  const antes = payload({
+    categories: [...payload().categories, vacia],
+  });
+  const alStore = pulledPatch(applyEvents(antes, [ev({ op: "delete", id: "c-vacia" })]));
+  assert.deepEqual(
+    alStore.categories.map((c) => c.id),
+    ["c-bebidas", "c-almacen"],
+  );
 });
