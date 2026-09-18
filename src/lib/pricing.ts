@@ -63,6 +63,20 @@ export function factorFor(category: Category, kind: InvoiceKind, settings: Setti
   return defaultFactor(category.name, kind) ?? 1;
 }
 
+/** Sin margen propio ni uno conocido, factorFor da 1: se vendería al costo. */
+export function hasFactor(category: Category, kind: InvoiceKind, settings: Settings): boolean {
+  const map = kind === "A" ? settings.priceMarkupsA : settings.priceMarkups;
+  const stored = map?.[category.id];
+  if (typeof stored === "number" && stored > 0) return true;
+  return defaultFactor(category.name, kind) != null;
+}
+
+/** Un dedazo en el costo se ve en el precio: más de 40% arriba o abajo se pregunta. */
+export function isBigPriceJump(before: number, after: number): boolean {
+  if (!(before > 0)) return false;
+  return Math.abs(after - before) / before > 0.4;
+}
+
 export function unitCost(p: Product): number | null {
   if (p.cost == null || !(p.cost > 0)) return null;
   return p.cost;
@@ -117,4 +131,9 @@ export function invoiceForProduct(
   const invoice = invoiceOf(s);
   if (!invoice) return null;
   return { supplier: s, invoice };
+}
+
+/** La Fac que va a góndola: la del proveedor que trae el rubro; si nadie con factura lo trae, la X. */
+export function shelfInvoice(p: Product, suppliers: Supplier[]): InvoiceKind {
+  return invoiceForProduct(p, suppliers)?.invoice ?? "X";
 }

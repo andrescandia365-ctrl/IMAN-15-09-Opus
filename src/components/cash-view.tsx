@@ -16,7 +16,7 @@ import { formatARS, formatTime } from "@/lib/format";
 import { useCashSnapshot, useImanStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { EncargadoBook } from "@/components/ledger-grid";
-import { PriceCalcCard } from "@/components/price-calc";
+import { PriceUpdateCard } from "@/components/price-calc";
 import { onShiftNow } from "@/lib/team";
 
 export function CashView() {
@@ -186,7 +186,7 @@ export function CashView() {
 
       <EncargadoBook defaultOpen />
 
-      <PriceCalcCard />
+      <PriceUpdateCard />
 
       <Dialog open={dropOpen} onOpenChange={setDropOpen}>
         <DialogContent>
