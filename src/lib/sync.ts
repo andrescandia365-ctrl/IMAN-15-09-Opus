@@ -9,12 +9,15 @@ import {
   markAcked,
   pendingEvents,
   queueCopy,
+  readPullStart,
   rememberPulled,
   resolvePendingLogs,
   saveLocalSnapshot,
   syncMeta,
   touchSync,
+  writePullStart,
 } from "@/lib/local-db";
+import { pullMode, pullStartAfter } from "@/lib/pull-start";
 import { pullEvents, pushEvents, saveKiosk, selectStore } from "@/lib/kiosk";
 import { snapshotKiosk, useImanStore } from "@/lib/store";
 import { incomingCopy, mergePayload, prunePayload } from "@/lib/cap";
@@ -57,29 +60,54 @@ async function saveBlob(storeId: string, payload: KioskPayload, rev?: number): P
   await saveKiosk({ data: { storeId, payload: merged, rev: res.rev } });
 }
 
-export async function syncNow(
-  storeId: string,
-  rev?: number,
-): Promise<{ ok: boolean; pushed: number; pulled: number; error?: string }> {
+export type SyncResult = {
+  ok: boolean;
+  pushed: number;
+  pulled: number;
+  error?: string;
+  /** Quedó cinta sin bajar por el tope de páginas: el próximo toque sigue desde ahí. */
+  more?: boolean;
+  /** Esta vez el aparato tomó su estado como punto de partida (ver pull-start.ts). */
+  started?: boolean;
+};
+
+export async function syncNow(storeId: string, rev?: number): Promise<SyncResult> {
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     return { ok: false, pushed: 0, pulled: 0, error: "Sin red. Los tickets siguen en este aparato." };
   }
   try {
     const pushed = await pushPending(storeId);
     const meta = await syncMeta(storeId);
+    const saved = await readPullStart(storeId);
+    const { mode, arranca } = pullMode(saved, meta.lastPullSeq);
+    const now = new Date().toISOString();
+    if (arranca) {
+      // Antes de bajar: si se corta a mitad de camino, la próxima vez sigue salteando.
+      await writePullStart(storeId, { mode: "skip", at: now });
+      await appendSyncLog(storeId, {
+        kind: "pull",
+        title: "Primera sincronización",
+        detail: "se toma el estado actual como punto de partida",
+        status: "done",
+        keep: true,
+      });
+    }
     const mine = getDeviceId();
     const known = await knownEventIds(storeId);
     const pulled: ImanEvent[] = [];
     let cursor = meta.lastPullSeq;
+    let more = false;
     for (let page = 0; page < MAX_PULL_PAGES; page += 1) {
       const remote = await pullEvents({
         data: { storeId, after: meta.lastPullAt, afterSeq: cursor || undefined },
       });
       pulled.push(...remote.events);
       cursor = remote.cursor;
-      if (!remote.hasMore) break;
+      more = remote.hasMore;
+      if (!more) break;
     }
-    const fresh = pulled.filter((e) => e.deviceId !== mine && !known.has(e.id));
+    // Salteando, la historia se da por vista sin aplicarla.
+    const fresh = mode === "skip" ? [] : pulled.filter((e) => e.deviceId !== mine && !known.has(e.id));
     if (fresh.length) {
       const snap = prunePayload(snapshotKiosk(useImanStore.getState()));
       const next = applyEvents(snap, fresh);
@@ -87,10 +115,11 @@ export async function syncNow(
       await saveLocalSnapshot(storeId, next);
     }
     await rememberPulled(storeId, pulled, cursor);
+    await writePullStart(storeId, pullStartAfter(mode, more, saved, now));
     const payload = prunePayload(snapshotKiosk(useImanStore.getState()));
     await saveLocalSnapshot(storeId, payload);
     await saveBlob(storeId, payload, rev);
-    return { ok: true, pushed, pulled: fresh.length };
+    return { ok: true, pushed, pulled: fresh.length, more, started: mode === "skip" };
   } catch (err) {
     return {
       ok: false,
@@ -194,15 +223,22 @@ export async function pullCopy(storeId: string): Promise<CloudReview> {
   }
 }
 
-/** Celu: mira Neon. PC: sube lo pendiente. */
+const QUEDAN_MAS = "Quedan más, tocá de nuevo.";
+
+function cambios(n: number): string {
+  return `${n} ${n === 1 ? "cambio" : "cambios"}`;
+}
+
+/** Celu: mira Neon y baja. PC: sube la fotocopia, después baja, aplica y vuelve a subir. */
 export async function reviewCloud(
   storeId: string,
   opts: { phone: boolean; rev?: number },
 ): Promise<CloudReview> {
   if (opts.phone) {
     const pulled = await pullCopy(storeId);
+    let sync: SyncResult | null = null;
     try {
-      await syncNow(storeId, opts.rev);
+      sync = await syncNow(storeId, opts.rev);
     } catch {
       /* el pull ya habló con Neon */
     }
@@ -217,33 +253,60 @@ export async function reviewCloud(
             : pulled.message,
       status: pulled.ok ? "done" : "fail",
     });
-    return pulled;
+    return sync?.more ? { ...pulled, message: `${pulled.message}. ${QUEDAN_MAS}` } : pulled;
   }
 
-  const pushed = await pushCopy(storeId, undefined, opts.rev);
-  try {
-    await pushQuiet(storeId);
-  } catch {
-    /* la fotocopia es lo que viaja el pedido */
-  }
-  if (pushed.ok) {
-    await resolvePendingLogs(storeId, {
-      status: "done",
-      hint: "El celu ya lo puede tener",
+  // PC. Primero la fotocopia: si la bajada se corta, el respaldo y los pedidos
+  // ya subieron, y una fotocopia vieja que quedó en cola no puede pisar lo que
+  // sube syncNow al final, que es lo más completo (lo de la caja más lo que bajó).
+  const copia = await pushCopy(storeId, undefined, opts.rev);
+  const sync = await syncNow(storeId, opts.rev);
+
+  if (!sync.ok) {
+    const error = sync.error || copia.error || "No pude sincronizar";
+    await appendSyncLog(storeId, {
+      kind: "empty",
+      title: "No pude bajar de la nube",
+      detail: error,
+      status: "fail",
     });
-    await touchSync(storeId);
     return {
-      ok: true,
+      ok: false,
       newOrders: 0,
       emptyRemote: false,
-      message: "Subido. El celu ya lo puede tener.",
+      error,
+      message: copia.ok ? `Subió el respaldo, pero no pude bajar: ${error}` : error,
     };
   }
+
+  const sube =
+    sync.pushed === 1 ? "Subió 1 cambio" : sync.pushed > 1 ? `Subieron ${cambios(sync.pushed)}` : "Subió todo";
+  const baja = sync.started
+    ? "Primera sincronización: se toma el estado actual como punto de partida"
+    : sync.pulled === 1
+      ? "Bajó 1 cambio de otro aparato"
+      : sync.pulled > 1
+        ? `Bajaron ${cambios(sync.pulled)} de otros aparatos`
+        : "No había nada nuevo para bajar";
+  await appendSyncLog(storeId, {
+    kind: "catalog",
+    title: "Subido a la nube",
+    detail: sync.pushed > 0 ? cambios(sync.pushed) : "listo",
+    status: "done",
+    hint: "El celu ya lo puede tener",
+  });
+  if (!sync.started) {
+    await appendSyncLog(storeId, {
+      kind: sync.pulled > 0 ? "pull" : "empty",
+      title: sync.pulled > 0 ? "Bajado de otros aparatos" : "Nada nuevo en la nube",
+      detail: sync.pulled > 0 ? cambios(sync.pulled) : "listo",
+      status: "done",
+    });
+  }
   return {
-    ok: false,
+    ok: true,
     newOrders: 0,
     emptyRemote: false,
-    error: pushed.error,
-    message: pushed.error || "No pude subir",
+    message: `${sube}. ${baja}.${sync.more ? ` ${QUEDAN_MAS}` : ""}`,
   };
 }

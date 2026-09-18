@@ -90,7 +90,7 @@ export function SyncButton({ storeId, rev }: { storeId: string; rev?: number }) 
         <Icon className={cn("size-4", busy && "animate-spin")} />
       </button>
       {open ? (
-        <div className="fixed right-3 top-20 z-50 w-[min(18rem,calc(100vw-1.5rem))] rounded-xl bg-surface p-3 text-fg shadow-[var(--shadow-border)]">
+        <div className="fixed right-3 top-20 z-50 w-[min(18rem,calc(100vw-1.5rem))] whitespace-normal rounded-xl bg-surface p-3 text-fg shadow-[var(--shadow-border)]">
           <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-subtle">Nube</p>
           {checking && phone ? (
             <p className="mt-2 text-sm">Revisando si hay trabajo en la nube</p>
@@ -99,7 +99,8 @@ export function SyncButton({ storeId, rev }: { storeId: string; rev?: number }) 
           ) : null}
           {items.length ? (
             <ul className="mt-2 max-h-56 space-y-2 overflow-y-auto">
-              {items.slice(0, 12).map((it) => (
+              {/* Las líneas que no vencen (el punto de partida) van siempre, al final. */}
+              {[...items.filter((it) => !it.keep).slice(0, 12), ...items.filter((it) => it.keep)].map((it) => (
                 <li key={it.id} className="text-sm leading-snug">
                   <span className="font-medium">{it.title}</span>
                   {it.status === "pending" ? (
@@ -126,7 +127,11 @@ export function SyncButton({ storeId, rev }: { storeId: string; rev?: number }) 
           ) : !checking && !live ? (
             <p className="mt-2 text-sm text-muted">Todavía no hay eventos.</p>
           ) : null}
-          <p className="mt-2 text-[11px] text-subtle">Se borran solos a los 2 días.</p>
+          <p className="mt-2 text-[11px] text-subtle">
+            {items.some((it) => it.keep)
+              ? "Se borran solos a los 2 días, menos el punto de partida."
+              : "Se borran solos a los 2 días."}
+          </p>
         </div>
       ) : null}
     </div>

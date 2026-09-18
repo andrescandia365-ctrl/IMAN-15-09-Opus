@@ -13,7 +13,8 @@ import type { ImanEvent } from "@/lib/events";
 import type { MyAccess } from "@/lib/license";
 import type { StoreMeta } from "@/lib/kiosk";
 import type { SyncLogItem, SyncLogStatus } from "./sync-log";
-import { pruneSyncLog } from "./sync-log";
+import { pruneSyncLog, trimSyncLog } from "./sync-log";
+import type { PullStart } from "./pull-start";
 
 const DB_NAME = "iman-local";
 const STORE = "kv";
@@ -208,7 +209,7 @@ async function readLog(storeId: string): Promise<SyncLogItem[]> {
 }
 
 async function writeLog(storeId: string, items: SyncLogItem[]): Promise<void> {
-  await idbSet(logKey(storeId), pruneSyncLog(items).slice(0, 40));
+  await idbSet(logKey(storeId), trimSyncLog(items));
   queueListeners.forEach((fn) => fn());
 }
 
@@ -224,6 +225,7 @@ export async function appendSyncLog(
     detail: row.detail,
     status: row.status,
     hint: row.hint,
+    ...(row.keep ? { keep: true } : {}),
   };
   await withKeyLock(logKey(storeId), async () => {
     await writeLog(storeId, [item, ...(await readLog(storeId))]);
@@ -257,6 +259,19 @@ export async function resolvePendingLogs(
     });
     if (changed) await writeLog(storeId, next);
   });
+}
+
+function startKey(storeId: string) {
+  return `pstart:${storeId}`;
+}
+
+/** El punto de partida de este aparato en la cinta del local (ver pull-start.ts). */
+export async function readPullStart(storeId: string): Promise<PullStart | null> {
+  return (await idbGet<PullStart>(startKey(storeId))) ?? null;
+}
+
+export async function writePullStart(storeId: string, start: PullStart): Promise<void> {
+  await idbSet(startKey(storeId), start);
 }
 
 export async function knownEventIds(storeId: string): Promise<Set<string>> {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { incomingCopy, mergeOrders, richerOrder } from "./cap.ts";
-import { pruneSyncLog, type SyncLogItem } from "./sync-log.ts";
+import { pruneSyncLog, trimSyncLog, type SyncLogItem } from "./sync-log.ts";
 import type { KioskPayload, OrderDraft, Settings } from "./types.ts";
 
 const settings = { name: "Faro", city: "", onboarded: true } as Settings;
@@ -102,5 +102,34 @@ describe("pruneSyncLog", () => {
       kept.map((x) => x.id),
       ["a"],
     );
+  });
+});
+
+describe("líneas que no vencen", () => {
+  const now = Date.parse("2026-09-18T12:00:00.000Z");
+  const linea = (id: string, at: string, keep = false): SyncLogItem => ({
+    id,
+    at,
+    kind: "pull",
+    title: id,
+    detail: "listo",
+    status: "done",
+    ...(keep ? { keep: true } : {}),
+  });
+
+  it("el punto de partida sigue ahí meses después; lo común se borra a los 2 días", () => {
+    const rows = [linea("nuevo", "2026-09-18T11:00:00.000Z"), linea("viejo", "2026-09-01T12:00:00.000Z"), linea("arranque", "2026-03-18T12:00:00.000Z", true)];
+    assert.deepEqual(
+      pruneSyncLog(rows, now).map((x) => x.id),
+      ["nuevo", "arranque"],
+    );
+  });
+
+  it("el tope de 40 líneas no se come al punto de partida", () => {
+    const muchas = Array.from({ length: 45 }, (_, i) => linea(`l${i}`, "2026-09-18T11:00:00.000Z"));
+    const rows = [...muchas, linea("arranque", "2026-03-18T12:00:00.000Z", true)];
+    const quedan = trimSyncLog(rows, now);
+    assert.equal(quedan.length, 41);
+    assert.equal(quedan.at(-1)?.id, "arranque");
   });
 });
