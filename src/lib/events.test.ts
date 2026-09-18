@@ -1,7 +1,8 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { applyEvent, applyEvents, pulledPatch, type ImanEvent } from "./events.ts";
-import type { Category, KioskPayload, Settings, Supplier } from "./types.ts";
+import { consumeFifo } from "./lots.ts";
+import type { Category, KioskPayload, Product, Sale, Settings, Supplier } from "./types.ts";
 
 const settings = { name: "Kiosco de Prueba", city: "Rosario", onboarded: true } as Settings;
 
@@ -115,4 +116,99 @@ test("syncNow guarda el borrado de categoría que bajó de otro aparato", () => 
     alStore.categories.map((c) => c.id),
     ["c-bebidas", "c-almacen"],
   );
+});
+
+// Lotes: el aparato que recibe la venta tiene que quedar con los mismos lotes que la caja.
+function conLotes(): Product {
+  return {
+    id: "yogur",
+    name: "Yogur",
+    barcode: "7790001",
+    price: 1400,
+    cost: 900,
+    stock: 10,
+    stockMin: 2,
+    categoryId: "c-almacen",
+    active: true,
+    expiresAt: "2026-09-20",
+    lots: [
+      { id: "lt_b", expiresAt: "2026-09-25", units: 5 },
+      { id: "lt_a", expiresAt: "2026-09-20", units: 3 },
+    ],
+    priceUpdatedAt: "2026-09-01T00:00:00.000Z",
+  };
+}
+
+function venta(id: string, qty: number, productId = "yogur"): ImanEvent {
+  const sale: Sale = {
+    id,
+    createdAt: "2026-09-18T12:00:00.000Z",
+    paymentMethod: "efectivo",
+    note: "",
+    total: 1400 * qty,
+    paid: null,
+    items: [{ productId, name: "Yogur", price: 1400, qty }],
+  };
+  return ev(sale, { id: `ev_${id}`, type: "sale" });
+}
+
+test("una venta con lotes deja en el otro aparato los mismos lotes que en la caja", () => {
+  const enLaCaja = consumeFifo(conLotes(), 4);
+  const enElCelu = applyEvent(payload({ products: [conLotes()] }), venta("v1", 4)).products[0];
+  assert.deepEqual(enElCelu, enLaCaja);
+  // Se comió el lote del 20 entero y 1 del 25.
+  assert.deepEqual(enElCelu?.lots, [{ id: "lt_b", expiresAt: "2026-09-25", units: 4 }]);
+  assert.equal(enElCelu?.stock, 6);
+  assert.equal(enElCelu?.expiresAt, "2026-09-25");
+});
+
+test("dos ventas llegan en cualquier orden y los lotes quedan iguales", () => {
+  const antes = payload({ products: [conLotes()] });
+  const unOrden = applyEvents(antes, [venta("v1", 2), venta("v2", 3)]).products[0];
+  const otroOrden = applyEvents(antes, [venta("v2", 3), venta("v1", 2)]).products[0];
+  assert.deepEqual(unOrden, otroOrden);
+  assert.deepEqual(unOrden, consumeFifo(conLotes(), 5));
+});
+
+test("un ajuste de stock para abajo se come los lotes igual que en el origen", () => {
+  const baja = ev({ productId: "yogur", delta: -3, reason: "ajuste" }, { type: "stock" });
+  const sube = ev({ productId: "yogur", delta: 2, reason: "ajuste" }, { type: "stock" });
+  const antes = payload({ products: [conLotes()] });
+  assert.deepEqual(applyEvent(antes, baja).products[0], consumeFifo(conLotes(), 3));
+  // Para arriba es stock sin fecha: los lotes no se tocan.
+  const subido = applyEvent(antes, sube).products[0];
+  assert.equal(subido?.stock, 12);
+  assert.deepEqual(subido?.lots, conLotes().lots);
+});
+
+test("una venta guardada antes de este cambio se sigue aplicando igual", () => {
+  // Como venían antes: sin costo en el renglón y un producto con fecha pero sin lotes.
+  const viejo = ev(
+    {
+      id: "v_vieja",
+      createdAt: "2026-09-10T12:00:00.000Z",
+      paymentMethod: "debito",
+      note: "",
+      total: 2800,
+      paid: null,
+      items: [
+        { productId: "leche", name: "Leche", price: 1400, qty: 2 },
+        { productId: "no-existe", name: "Borrado", price: 100, qty: 1 },
+      ],
+    },
+    { id: "ev_vieja", type: "sale" },
+  );
+  const leche = { ...conLotes(), id: "leche", lots: undefined, expiresAt: "2026-09-22" };
+  const next = applyEvent(payload({ products: [leche] }), viejo);
+  assert.equal(next.sales.length, 1);
+  assert.equal(next.products[0]?.stock, 8);
+  assert.equal(next.products[0]?.expiresAt, "2026-09-22");
+  assert.equal(next.products[0]?.lots, undefined);
+});
+
+test("vender de un producto con fecha pero sin lotes no le borra la fecha", () => {
+  const sinLotes = { ...conLotes(), lots: [], expiresAt: "2026-09-22" };
+  const vendido = consumeFifo(sinLotes, 1);
+  assert.equal(vendido.expiresAt, "2026-09-22");
+  assert.equal(vendido.stock, 9);
 });

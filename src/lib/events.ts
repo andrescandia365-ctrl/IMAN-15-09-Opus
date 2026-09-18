@@ -1,4 +1,5 @@
 import { emptyBook, cellsOf } from "./ledger.ts";
+import { consumeFifo } from "./lots.ts";
 import { packOf } from "./pack.ts";
 import type {
   Category,
@@ -59,19 +60,21 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
       return {
         ...payload,
         sales: [sale, ...payload.sales],
+        // La misma cuenta que hizo checkout en la caja: descuenta stock y lotes.
         products: payload.products.map((p) => {
           const q = qty.get(p.id);
-          return q ? { ...p, stock: Math.max(0, p.stock - q) } : p;
+          return q ? consumeFifo(p, q) : p;
         }),
       };
     }
     case "stock": {
       const b = ev.body as { productId: string; delta: number; reason?: string };
       if (!b?.productId || !b.delta) return payload;
+      // Igual que adjustStock: para abajo se come los lotes, para arriba es stock sin fecha.
       return {
         ...payload,
         products: payload.products.map((p) =>
-          p.id === b.productId ? { ...p, stock: Math.max(0, p.stock + b.delta) } : p,
+          p.id !== b.productId ? p : b.delta < 0 ? consumeFifo(p, -b.delta) : { ...p, stock: p.stock + b.delta },
         ),
       };
     }

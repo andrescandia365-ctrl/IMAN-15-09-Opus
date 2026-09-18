@@ -1,4 +1,4 @@
-import { uid } from "@/lib/utils";
+import { uid } from "./utils.ts";
 import type { Product } from "@/lib/types";
 
 export type StockLot = {
@@ -21,12 +21,21 @@ export function soonestExpiry(p: Product): string | null {
   return lots[0]?.expiresAt ?? p.expiresAt ?? null;
 }
 
+/**
+ * Descuenta del lote que vence primero. Es una cuenta pura: con los mismos
+ * lotes y la misma cantidad da lo mismo en cualquier aparato, y dos ventas dan
+ * lo mismo en cualquier orden. Por eso applyEvent la vuelve a correr en el
+ * aparato que recibe la venta, en lugar de mandar los lotes en el evento.
+ */
 export function consumeFifo(p: Product, qty: number): Product {
   const take = Math.max(0, Math.floor(qty));
   if (take <= 0) return p;
+  const lots = lotsOf(p);
+  // Sin lotes, la fecha es la del producto entero: vender una unidad no la borra.
+  if (!lots.length) return { ...p, stock: Math.max(0, p.stock - take) };
   let left = take;
   const next: StockLot[] = [];
-  for (const l of lotsOf(p).slice().sort((a, b) => a.expiresAt.localeCompare(b.expiresAt))) {
+  for (const l of lots.slice().sort((a, b) => a.expiresAt.localeCompare(b.expiresAt))) {
     if (left <= 0) {
       next.push(l);
       continue;
