@@ -29,6 +29,8 @@ import {
 } from "@/lib/catalog-io";
 import { printGondolaLabels, printListaLabels, printShortCodeSheet } from "@/lib/print";
 import { CameraScan } from "@/components/camera-scan";
+import { VenceField } from "@/components/vence-field";
+import { lotsOf } from "@/lib/lots";
 import { stockCorrection } from "@/lib/events";
 import { findByScan, packOf, productMatchesQuery, shortCodeOf, stockBreakdown } from "@/lib/pack";
 import { buildSuggestions } from "@/lib/suggest";
@@ -383,7 +385,8 @@ export function InventoryView() {
             setStockAlAbrir(hit.product.stock);
             setOpen(true);
             setCamOpen(false);
-            toast.success("Anotá la fecha de vencimiento");
+            if (lotsOf(hit.product).length) toast("Tiene fechas por lote. Se cargan desde Vence, en el celu.");
+            else toast.success("Anotá la fecha de vencimiento");
           }}
         />
       ) : null}
@@ -598,14 +601,7 @@ function ProductDialog({
                 placeholder="Pistola del bulto"
               />
             </div>
-            <div>
-              <Label>Vence</Label>
-              <Input
-                type="date"
-                value={product.expiresAt ?? ""}
-                onChange={(e) => set({ expiresAt: e.target.value || null })}
-              />
-            </div>
+            <VenceField product={product} onChange={(expiresAt) => set({ expiresAt })} />
             <div className="flex items-end pb-1">
               <label className="flex items-center gap-2 text-sm text-muted">
                 <input

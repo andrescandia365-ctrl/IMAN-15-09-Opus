@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CameraScan } from "@/components/camera-scan";
+import { VenceField } from "@/components/vence-field";
 import { daysUntil, formatARS } from "@/lib/format";
 import { lotsOf, soonestExpiry, unallocated } from "@/lib/lots";
 import { findByScan, packOf, productMatchesQuery, stockBreakdown } from "@/lib/pack";
@@ -342,10 +343,7 @@ function ProductPhoneDialog({
               <Label>Mínimo</Label>
               <Input inputMode="numeric" value={product.stockMin} onChange={(e) => set({ stockMin: Number(e.target.value) || 0 })} />
             </div>
-            <div>
-              <Label>Vence</Label>
-              <Input type="date" value={product.expiresAt ?? ""} onChange={(e) => set({ expiresAt: e.target.value || null })} />
-            </div>
+            <VenceField product={product} onChange={(expiresAt) => set({ expiresAt })} />
             <div className="col-span-2 flex items-center gap-2 text-sm text-muted">
               <input type="checkbox" checked={Boolean(product.onOffer)} onChange={(e) => set({ onOffer: e.target.checked })} />
               Oferta
