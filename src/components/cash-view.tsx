@@ -184,10 +184,9 @@ export function CashView() {
         ) : null}
       </section>
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)]">
-        <EncargadoBook defaultOpen />
-        <PriceCalcCard />
-      </div>
+      <EncargadoBook defaultOpen />
+
+      <PriceCalcCard />
 
       <Dialog open={dropOpen} onOpenChange={setDropOpen}>
         <DialogContent>

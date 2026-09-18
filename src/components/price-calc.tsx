@@ -25,15 +25,15 @@ function verFactor(n: number): string {
  */
 export function PriceCalcCard() {
   return (
-    <section className="flex min-h-0 flex-col rounded-xl bg-surface shadow-[var(--shadow-border)]">
-      <div className="shrink-0 px-5 py-4">
+    <section className="rounded-xl bg-surface shadow-[var(--shadow-border)]">
+      <div className="px-5 py-4">
         <span className="block text-xs font-medium uppercase tracking-[0.14em] text-subtle">Herramienta</span>
         <span className="mt-0.5 block font-display text-xl tracking-tight">Precios</span>
         <p className="mt-1 text-xs leading-snug text-muted">
           A cuánto vender. Los márgenes los pone el dueño; acá solo se consulta.
         </p>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto border-t border-border px-4 pb-4">
+      <div className="border-t border-border px-5 pb-5 pt-4">
         <PriceCalc />
       </div>
     </section>
@@ -83,8 +83,8 @@ function PriceCalc() {
   }
 
   return (
-    <div className="mt-1">
-      <div className="flex gap-1.5">
+    <div className="flex flex-wrap items-start gap-4">
+      <div className="flex shrink-0 flex-col gap-1.5">
         <button
           type="button"
           className={cn(PILL, modo === "producto" ? "bg-accent text-accent-fg" : "bg-elevated text-muted")}
@@ -102,7 +102,7 @@ function PriceCalc() {
       </div>
 
       {modo === "producto" ? (
-        <div className="mt-3">
+        <div className="min-w-[17rem] flex-1">
           <Label>Producto</Label>
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
@@ -116,7 +116,7 @@ function PriceCalc() {
           {encontrados.length === 0 ? (
             <p className="mt-2 px-1 text-sm text-muted">No hay productos con esa búsqueda.</p>
           ) : (
-            <ScrollArea className="mt-2 max-h-[13rem]">
+            <ScrollArea className="mt-2 max-h-[11rem]">
               <ul className="flex flex-col gap-0.5">
                 {encontrados.slice(0, MUESTRA).map((x) => {
                   const c = unitCost(x);
@@ -155,7 +155,7 @@ function PriceCalc() {
           ) : null}
         </div>
       ) : (
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className="grid min-w-[17rem] flex-1 grid-cols-2 gap-3">
           <div>
             <Label>Rubro</Label>
             <select className={SELECT} value={catId} onChange={(e) => setCatId(e.target.value)}>
@@ -179,13 +179,7 @@ function PriceCalc() {
         </div>
       )}
 
-      {modo === "producto" && producto && cost == null ? (
-        <p className="mt-4 rounded-lg bg-elevated p-3 text-sm text-muted">
-          Este producto no tiene costo cargado.
-        </p>
-      ) : null}
-
-      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+      <div className="grid min-w-[19rem] flex-1 grid-cols-2 gap-2">
         {(["X", "A"] as InvoiceKind[]).map((kind) => {
           const r = sugerido(kind);
           return (
@@ -193,15 +187,13 @@ function PriceCalc() {
               <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-subtle">
                 Fac {kind}
               </span>
-              <p className="num mt-1 text-2xl font-medium leading-none">
-                {r ? formatARS(r.precio) : "—"}
-              </p>
+              <p className="num mt-1 text-2xl font-medium leading-none">{r ? formatARS(r.precio) : "—"}</p>
               <p className="mt-1.5 text-xs leading-snug text-muted">
                 {r && cost != null
                   ? `costo ${formatARS(cost)} × ${verFactor(r.factor)}, ${redondeo}`
                   : modo === "producto"
                     ? producto
-                      ? ""
+                      ? "Este producto no tiene costo cargado"
                       : "Elegí un producto"
                     : rubro?.name
                       ? "Poné el costo"
