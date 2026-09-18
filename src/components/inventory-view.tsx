@@ -29,6 +29,7 @@ import {
 } from "@/lib/catalog-io";
 import { printGondolaLabels, printListaLabels, printShortCodeSheet } from "@/lib/print";
 import { CameraScan } from "@/components/camera-scan";
+import { stockCorrection } from "@/lib/events";
 import { findByScan, packOf, productMatchesQuery, shortCodeOf, stockBreakdown } from "@/lib/pack";
 import { buildSuggestions } from "@/lib/suggest";
 import { useImanStore } from "@/lib/store";
@@ -56,6 +57,8 @@ export function InventoryView() {
   const [filter, setFilter] = useState<Filter>("all");
   const [cat, setCat] = useState<string | "all">("all");
   const [editing, setEditing] = useState<Product | null>(null);
+  /** El stock que mostraba el editor al abrirse: sirve para saber si alguien lo corrigió a mano. */
+  const [stockAlAbrir, setStockAlAbrir] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
@@ -109,6 +112,7 @@ export function InventoryView() {
       priceUpdatedAt: new Date().toISOString(),
       onOffer: false,
     });
+    setStockAlAbrir(null);
     setOpen(true);
   }
 
@@ -277,6 +281,7 @@ export function InventoryView() {
                       className="grid size-9 place-items-center rounded-sm hover:bg-bg"
                       onClick={() => {
                         setEditing({ ...p });
+                        setStockAlAbrir(p.stock);
                         setOpen(true);
                       }}
                       aria-label="Editar"
@@ -313,6 +318,11 @@ export function InventoryView() {
             toast.error("Nombre y precio son obligatorios");
             return;
           }
+          // La corrección a mano viaja como diferencia, antes del producto: el total
+          // pisaría las ventas que otro aparato hizo en el medio.
+          const ahora = useImanStore.getState().products.find((x) => x.id === editing.id);
+          const delta = ahora ? stockCorrection(stockAlAbrir, editing.stock, ahora.stock) : 0;
+          if (delta) adjustStock(editing.id, delta, "corrección manual");
           saveProduct({
             ...editing,
             name: editing.name.trim(),
@@ -370,6 +380,7 @@ export function InventoryView() {
               return;
             }
             setEditing({ ...hit.product });
+            setStockAlAbrir(hit.product.stock);
             setOpen(true);
             setCamOpen(false);
             toast.success("Anotá la fecha de vencimiento");

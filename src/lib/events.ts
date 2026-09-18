@@ -1,5 +1,5 @@
 import { emptyBook, cellsOf } from "./ledger.ts";
-import { consumeFifo } from "./lots.ts";
+import { consumeFifo, insertLot, lotsOf } from "./lots.ts";
 import { packOf } from "./pack.ts";
 import type {
   Category,
@@ -38,10 +38,41 @@ export type ImanEvent = {
     | "receive"
     | "order"
     | "staff"
-    | "category";
+    | "category"
+    | "lot";
   body: Json;
   acked?: boolean;
 };
+
+/**
+ * Un `product` trae el catálogo. Stock y lotes se mueven solo con eventos de
+ * cantidad (sale, stock, refund, receive, lot): si el producto ya está, se
+ * quedan los de este aparato. Antes cualquier `product` (aplicar precios,
+ * marcar oferta, fechar) arrastraba el stock de quien lo mandó y pisaba las
+ * ventas que ese aparato todavía no había visto. La fecha también se queda
+ * cuando sale de los lotes; si ninguno de los dos tiene lotes, es la fecha
+ * del producto y viaja como catálogo.
+ */
+export function keepStockAndLots(local: Product, incoming: Product): Product {
+  const fechaDeLotes = lotsOf(local).length > 0 || lotsOf(incoming).length > 0;
+  return {
+    ...incoming,
+    stock: local.stock,
+    lots: local.lots,
+    expiresAt: fechaDeLotes ? local.expiresAt : incoming.expiresAt,
+  };
+}
+
+/**
+ * Cuánto corrigió a mano el campo Stock del editor. Si nadie lo tocó da 0,
+ * aunque una venta haya movido el stock con el diálogo abierto: comparar con
+ * el stock de ahora devolvería esa venta. Si lo tocaron, la diferencia es
+ * contra el stock de ahora, así el número que quedó escrito es el que queda.
+ */
+export function stockCorrection(alAbrir: number | null, escrito: number, ahora: number): number {
+  if (alAbrir == null || escrito === alAbrir) return 0;
+  return escrito - ahora;
+}
 
 function upsertBook(books: DayBook[], row: DayBook): DayBook[] {
   const i = books.findIndex((b) => b.date === row.date);
@@ -99,9 +130,22 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
       const p = ev.body as unknown as Product;
       if (!p?.id) return payload;
       const exists = payload.products.some((x) => x.id === p.id);
+      // Un alta se toma entera, con su stock inicial; uno que ya está solo cambia el catálogo.
       return {
         ...payload,
-        products: exists ? payload.products.map((x) => (x.id === p.id ? p : x)) : [...payload.products, p],
+        products: exists
+          ? payload.products.map((x) => (x.id === p.id ? keepStockAndLots(x, p) : x))
+          : [...payload.products, p],
+      };
+    }
+    case "lot": {
+      const b = ev.body as { productId?: string; lotId?: string; expiresAt?: string; units?: number };
+      const units = Math.floor(Number(b?.units) || 0);
+      if (!b?.productId || !b.lotId || !b.expiresAt || units <= 0) return payload;
+      const lot = { id: b.lotId, expiresAt: b.expiresAt, units };
+      return {
+        ...payload,
+        products: payload.products.map((p) => (p.id === b.productId ? insertLot(p, lot) : p)),
       };
     }
     case "product.delete": {

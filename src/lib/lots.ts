@@ -52,20 +52,32 @@ export function consumeFifo(p: Product, qty: number): Product {
   };
 }
 
-export function addLot(p: Product, expiresAt: string, units: number): { ok: true; product: Product } | { ok: false; error: string } {
+/**
+ * Pone un lote ya armado en su lugar, ordenado por vencimiento. La usan fechar
+ * (addLot) y el evento `lot` que llega de otro aparato, así los dos quedan
+ * iguales. Si ese lote ya está, no hace nada: el mismo evento dos veces no lo
+ * duplica.
+ */
+export function insertLot(p: Product, lot: StockLot): Product {
+  if ((p.lots ?? []).some((l) => l.id === lot.id)) return p;
+  const lots = [...lotsOf(p), lot];
+  lots.sort((a, b) => a.expiresAt.localeCompare(b.expiresAt));
+  return { ...p, lots, expiresAt: lots[0]?.expiresAt ?? lot.expiresAt };
+}
+
+export function addLot(
+  p: Product,
+  expiresAt: string,
+  units: number,
+): { ok: true; product: Product; lot: StockLot } | { ok: false; error: string } {
   const date = expiresAt.trim();
   const want = Math.max(0, Math.floor(Number(units) || 0));
   if (!date) return { ok: false, error: "Falta la fecha" };
   if (want <= 0) return { ok: false, error: "Cuántas unidades" };
   const free = unallocated(p);
   if (free <= 0) return { ok: false, error: "No hay stock sin fecha para ese lote" };
-  const n = Math.min(want, free);
-  const lots = [...lotsOf(p), { id: uid("lt"), expiresAt: date, units: n }];
-  lots.sort((a, b) => a.expiresAt.localeCompare(b.expiresAt));
-  return {
-    ok: true,
-    product: { ...p, lots, expiresAt: lots[0]?.expiresAt ?? date },
-  };
+  const lot: StockLot = { id: uid("lt"), expiresAt: date, units: Math.min(want, free) };
+  return { ok: true, product: insertLot(p, lot), lot };
 }
 
 export function setLot(p: Product, lotId: string, patch: Partial<Pick<StockLot, "expiresAt" | "units">>): Product {

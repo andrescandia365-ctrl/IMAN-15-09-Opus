@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { prunePayload } from "./cap";
 import { todayKey } from "./format";
-import { receiveBody } from "./events";
+import { keepStockAndLots, receiveBody } from "./events";
 import { appendSyncLog, lastKnownStore, queueCopy, recordEvent, saveLocalSnapshot } from "./local-db";
 import { archiveClosedMonths, emptyBook, cellsOf, currentYm, type FacLine } from "./ledger";
 import { lineUnits, orderNote, packOf, suggestPacks } from "./pack";
@@ -380,7 +380,9 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         const r = addLot(p, expiresAt, units);
         if (!r.ok) return r;
         set({ products: st.products.map((x) => (x.id === productId ? r.product : x)) });
-        recordEvent("product", r.product);
+        // Cuánto y para cuándo, con el id del lote: no el producto entero, que
+        // arrastraba el stock de este aparato y pisaba las ventas de la caja.
+        recordEvent("lot", { productId, lotId: r.lot.id, expiresAt: r.lot.expiresAt, units: r.lot.units });
         return { ok: true };
       },
       setDeskStoreId: (deskStoreId) => set({ deskStoreId }),
@@ -617,14 +619,17 @@ export const useImanStore = create<ImanState>()((set, get) => ({
       },
 
       saveProduct: (p) => {
-        set((st) => {
-          const exists = st.products.some((x) => x.id === p.id);
-          const products = exists
-            ? st.products.map((x) => (x.id === p.id ? p : x))
-            : [...st.products, p];
-          return { products };
+        const st = get();
+        const cur = st.products.find((x) => x.id === p.id);
+        // Del editor se toma el catálogo. Stock y lotes son los del store ahora, no
+        // los de la copia que hizo el diálogo al abrirse: si entró una venta en el
+        // medio, guardar la devolvía. La corrección a mano del stock viaja aparte,
+        // como evento `stock` (ver stockCorrection).
+        const next = cur ? keepStockAndLots(cur, p) : p;
+        set({
+          products: cur ? st.products.map((x) => (x.id === p.id ? next : x)) : [...st.products, next],
         });
-        recordEvent("product", p);
+        recordEvent("product", next);
       },
 
       deleteProduct: (id) => {

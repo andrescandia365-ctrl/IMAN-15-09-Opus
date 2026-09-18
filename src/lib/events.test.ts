@@ -1,7 +1,14 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { applyEvent, applyEvents, pulledPatch, type ImanEvent } from "./events.ts";
-import { consumeFifo } from "./lots.ts";
+import {
+  applyEvent,
+  applyEvents,
+  keepStockAndLots,
+  pulledPatch,
+  stockCorrection,
+  type ImanEvent,
+} from "./events.ts";
+import { addLot, consumeFifo } from "./lots.ts";
 import type { Category, KioskPayload, Product, Sale, Settings, Supplier } from "./types.ts";
 
 const settings = { name: "Kiosco de Prueba", city: "Rosario", onboarded: true } as Settings;
@@ -211,4 +218,118 @@ test("vender de un producto con fecha pero sin lotes no le borra la fecha", () =
   const vendido = consumeFifo(sinLotes, 1);
   assert.equal(vendido.expiresAt, "2026-09-22");
   assert.equal(vendido.stock, 9);
+});
+
+// El evento `product` trae catálogo; stock y lotes solo se mueven por cantidad.
+function yogurSuelto(stock = 10): Product {
+  return { ...conLotes(), lots: [], expiresAt: null, stock };
+}
+
+test("carrera: la caja vende 2 y el celu fecha sin saberlo; la caja no recupera los 2", () => {
+  // Caja: vendió 2 de 10.
+  let caja = applyEvent(payload({ products: [yogurSuelto()] }), venta("v_caja", 2));
+  assert.equal(caja.products[0]?.stock, 8);
+
+  // Celu: no vio la venta y fecha 4 al 25/09.
+  const fechado = addLot(yogurSuelto(), "2026-09-25", 4);
+  assert.ok(fechado.ok);
+  if (!fechado.ok) return;
+  const loteNuevo = ev(
+    { productId: "yogur", lotId: fechado.lot.id, expiresAt: "2026-09-25", units: 4 },
+    { id: "ev_lote", type: "lot", deviceId: "dev_celu" },
+  );
+  // Como mandaba antes el celu: el producto entero, con su stock viejo.
+  const productoViejo = ev(fechado.product, { id: "ev_prod_viejo", type: "product", deviceId: "dev_celu" });
+
+  caja = applyEvents(caja, [loteNuevo, productoViejo]);
+  assert.equal(caja.products[0]?.stock, 8);
+  assert.deepEqual(caja.products[0]?.lots, [{ id: fechado.lot.id, expiresAt: "2026-09-25", units: 4 }]);
+
+  // Celu: le llega la venta de la caja y queda con el mismo stock.
+  const celu = applyEvent(payload({ products: [fechado.product] }), venta("v_caja", 2));
+  assert.equal(celu.products[0]?.stock, 8);
+});
+
+test("editor abierto durante una venta: guardar no devuelve el stock viejo", () => {
+  const alAbrir = yogurSuelto(10);
+  const copiaDelDialogo = { ...alAbrir, name: "Yogur frutilla" };
+  // Mientras el diálogo estaba abierto entró una venta de 2.
+  const ahora = consumeFifo(alAbrir, 2);
+
+  // Nadie tocó el campo Stock: no hay corrección y queda la venta descontada.
+  assert.equal(stockCorrection(alAbrir.stock, copiaDelDialogo.stock, ahora.stock), 0);
+  const guardado = keepStockAndLots(ahora, copiaDelDialogo);
+  assert.equal(guardado.stock, 8);
+  assert.equal(guardado.name, "Yogur frutilla");
+});
+
+test("la corrección a mano viaja como diferencia y no pisa las ventas del otro aparato", () => {
+  const alAbrir = yogurSuelto(10);
+  const ahora = consumeFifo(alAbrir, 2); // 8 en la PC
+  const delta = stockCorrection(alAbrir.stock, 15, ahora.stock);
+  assert.equal(delta, 7); // queda escrito 15
+
+  const correccion = ev({ productId: "yogur", delta, reason: "corrección manual" }, { id: "ev_corr", type: "stock" });
+  const producto = ev({ ...ahora, stock: 15 }, { id: "ev_prod", type: "product" });
+
+  // Un aparato que estaba en 8 queda en 15, como la PC.
+  const igual = applyEvents(payload({ products: [yogurSuelto(8)] }), [correccion, producto]);
+  assert.equal(igual.products[0]?.stock, 15);
+  // Uno que ya había vendido 1 más queda con esa venta descontada: 14, no 15.
+  const otro = applyEvents(payload({ products: [yogurSuelto(7)] }), [correccion, producto]);
+  assert.equal(otro.products[0]?.stock, 14);
+  // Sin tocar el campo, nunca hay corrección.
+  assert.equal(stockCorrection(null, 15, 8), 0);
+});
+
+test("aplicar precios no toca el stock del que recibe", () => {
+  const desdeLaPc = { ...conLotes(), stock: 40, price: 1600, lots: [] };
+  const celu = applyEvent(payload({ products: [conLotes()] }), ev(desdeLaPc, { id: "ev_precio", type: "product" }));
+  assert.equal(celu.products[0]?.price, 1600);
+  assert.equal(celu.products[0]?.stock, 10);
+  assert.deepEqual(celu.products[0]?.lots, conLotes().lots);
+  assert.equal(celu.products[0]?.expiresAt, "2026-09-20");
+});
+
+test("la fecha de un producto sin lotes viaja como catálogo", () => {
+  const editado = { ...yogurSuelto(10), expiresAt: "2026-10-01" };
+  const otro = applyEvent(payload({ products: [yogurSuelto(6)] }), ev(editado, { id: "ev_fecha", type: "product" }));
+  assert.equal(otro.products[0]?.expiresAt, "2026-10-01");
+  assert.equal(otro.products[0]?.stock, 6);
+});
+
+test("fechar el mismo lote dos veces no lo duplica", () => {
+  const lote = ev(
+    { productId: "yogur", lotId: "lt_nuevo", expiresAt: "2026-09-30", units: 2 },
+    { id: "ev_lote_x", type: "lot" },
+  );
+  const una = applyEvent(payload({ products: [conLotes()] }), lote);
+  const dos = applyEvent(una, lote);
+  assert.equal(dos.products[0]?.lots?.length, 3);
+  assert.deepEqual(dos.products[0], una.products[0]);
+  // Fechar no mueve el stock.
+  assert.equal(dos.products[0]?.stock, 10);
+});
+
+test("un alta llega entera, con su stock inicial", () => {
+  const nuevo = { ...yogurSuelto(5), id: "nuevo", name: "Flan" };
+  const otro = applyEvent(payload({ products: [conLotes()] }), ev(nuevo, { id: "ev_alta", type: "product" }));
+  assert.deepEqual(otro.products.find((p) => p.id === "nuevo"), nuevo);
+});
+
+test("los eventos con el formato viejo se aplican sin error", () => {
+  const antes = payload({ products: [conLotes()] });
+  // Un `product` viejo de fechar: producto entero con stock y lotes adentro.
+  const viejo = ev(
+    { ...conLotes(), stock: 99, lots: [{ id: "lt_z", expiresAt: "2026-12-01", units: 99 }], expiresAt: "2026-12-01" },
+    { id: "ev_viejo", type: "product" },
+  );
+  const next = applyEvent(antes, viejo);
+  assert.equal(next.products[0]?.stock, 10);
+  assert.deepEqual(next.products[0]?.lots, conLotes().lots);
+  assert.equal(next.products[0]?.expiresAt, "2026-09-20");
+  // Un `lot` incompleto no toca nada.
+  for (const body of [{}, { productId: "yogur" }, { productId: "yogur", lotId: "x", expiresAt: "2026-10-01", units: 0 }]) {
+    assert.equal(applyEvent(antes, ev(body, { type: "lot" })), antes);
+  }
 });
