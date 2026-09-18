@@ -307,21 +307,24 @@ export function ProveedorRefundDialog({
                 inputMode="numeric"
                 value={nc}
                 onChange={(e) => setNc(e.target.value.replace(/[^\d]/g, ""))}
-                placeholder={String((pick.cost ?? Math.round(pick.price * 0.7)) * (packOf(pick) > 1 ? packs * packOf(pick) : packs))}
+                placeholder={
+                  pick.cost && pick.cost > 0
+                    ? String(pick.cost * (packOf(pick) > 1 ? packs * packOf(pick) : packs))
+                    : "Poné el monto de la nota de crédito"
+                }
               />
             </div>
             <Button
               className="w-full"
               onClick={() => {
                 const units = packOf(pick) > 1 ? packs * packOf(pick) : packs;
-                const guess = (pick.cost ?? Math.round(pick.price * 0.7)) * units;
                 const r = refundProveedor({
                   supplierId: supplier!.id,
                   productId: pick.id,
                   packs: packOf(pick) > 1 ? packs : 0,
                   units,
                   facLine,
-                  amount: Number(nc) || guess,
+                  amount: Number(nc) || undefined,
                 });
                 if (!r.ok) toast.error(r.error);
                 else {

@@ -560,8 +560,15 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         if (qtyUnits <= 0) return { ok: false, error: "Cantidad inválida" };
         if (p.stock < qtyUnits) return { ok: false, error: `Hay ${p.stock} u. No alcanza para devolver.` };
         const nPacks = pack > 1 ? Math.floor(qtyUnits / pack) : 0;
-        const unitCost = p.cost ?? Math.round(p.price * 0.7);
-        const credit = amount && amount > 0 ? amount : unitCost * qtyUnits;
+        const nc = amount && amount > 0 ? amount : null;
+        const unit = unitCost(p);
+        if (nc == null && unit == null) {
+          return {
+            ok: false,
+            error: "Este producto no tiene costo cargado. Poné el monto de la nota de crédito.",
+          };
+        }
+        const credit = nc ?? unit! * qtyUnits;
         const line: FacLine = facLine ?? "fac_x";
         const date = todayKey();
         const cur = st.books.find((b) => b.date === date) ?? emptyBook(date);
