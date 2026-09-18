@@ -1,7 +1,20 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, FileText, MapPin, Settings2, Tag, Ticket, Users, Wallet } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  FileText,
+  MapPin,
+  Settings2,
+  Tag,
+  Ticket,
+  Users,
+  Wallet,
+} from "lucide-react";
 import { toast } from "sonner";
 import { LedgerSheet } from "@/components/ledger-grid";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Dialog,
   DialogContent,
@@ -20,7 +33,6 @@ import {
   monthTitle,
   monthsOfQuarter,
   monthsOfYear,
-  quarterOf,
 } from "@/lib/ledger";
 import { SettingsView } from "@/components/settings-view";
 import { TeamView } from "@/components/team-view";
@@ -70,10 +82,8 @@ export function OwnerDesk({
   const labels = useImanStore((s) => s.settings.ledgerLabels);
   const releaseMonth = useImanStore((s) => s.releaseMonth);
   const nowYm = currentYm();
-  const [year, setYear] = useState(() => Number(nowYm.slice(0, 4)));
-  const [q, setQ] = useState<1 | 2 | 3 | 4>(() => quarterOf(nowYm));
   const [ym, setYm] = useState(nowYm);
-  const qMonths = monthsOfQuarter(year, q);
+  const year = Number(ym.slice(0, 4));
   const viewBooks = useMemo(() => booksForYm(books, sheets, ym), [books, sheets, ym]);
   const cc = useMemo(() => monthCc(viewBooks, ym), [viewBooks, ym]);
   const current = ym === nowYm;
@@ -226,100 +236,29 @@ export function OwnerDesk({
 
         {tab === "mes" ? (
           <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
-            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-              <button
-                type="button"
-                className="grid size-11 place-items-center rounded-full bg-elevated text-sm text-muted hover:text-fg"
-                onClick={() => setYear((y) => y - 1)}
-              >
-                ←
-              </button>
-              <span className="num px-1 text-sm">{year}</span>
-              <button
-                type="button"
-                className="grid size-11 place-items-center rounded-full bg-elevated text-sm text-muted hover:text-fg"
-                onClick={() => setYear((y) => y + 1)}
-              >
-                →
-              </button>
-              {([1, 2, 3, 4] as const).map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => {
-                    setQ(n);
-                    const months = monthsOfQuarter(year, n);
-                    setYm(months.includes(nowYm) && nowYm.startsWith(String(year)) ? nowYm : months[0]!);
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <PeriodoPicker ym={ym} nowYm={nowYm} onYm={setYm} />
+              <div className="ml-auto flex items-center gap-2">
+                <BajarCsv
+                  ym={ym}
+                  onBajar={(label, yms) => {
+                    const text = yms
+                      .map((mo) => ledgerCsv(mo, booksForYm(books, sheets, mo), labels))
+                      .join("\n\n");
+                    downloadText(`iman-planilla-${label.toLowerCase()}-${year}.csv`, text);
+                    toast.success("CSV descargado");
                   }}
-                  className={cn(
-                    "h-11 rounded-full px-3 text-sm font-medium",
-                    q === n ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
-                  )}
-                >
-                  Q{n}
-                </button>
-              ))}
-              {qMonths.map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setYm(m)}
-                  className={cn(
-                    "h-11 rounded-full px-3 text-sm font-medium capitalize",
-                    ym === m ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
-                  )}
-                >
-                  {monthTitle(m).split(" ")[0]}
-                </button>
-              ))}
-              <div className="ml-auto flex flex-wrap items-center gap-1.5">
-                <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-subtle">
-                  Bajar CSV
-                </span>
-                {(
-                  [
-                    ["Mes", [ym]],
-                    ["Año", monthsOfYear(year)],
-                    ["Q1", monthsOfQuarter(year, 1)],
-                    ["Q2", monthsOfQuarter(year, 2)],
-                    ["Q3", monthsOfQuarter(year, 3)],
-                    ["Q4", monthsOfQuarter(year, 4)],
-                  ] as const
-                ).map(([label, yms]) => (
-                  <Button
-                    key={label}
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      const text = yms
-                        .map((mo) => ledgerCsv(mo, booksForYm(books, sheets, mo), labels))
-                        .join("\n\n");
-                      downloadText(`iman-planilla-${label.toLowerCase()}-${year}.csv`, text);
-                      toast.success("CSV descargado");
-                    }}
-                  >
-                    {label}
-                  </Button>
-                ))}
-                {!current ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      const r = releaseMonth(ym);
-                      if (!r.ok) toast.error(r.error);
-                      else toast.success(`Liberadas ${r.freed} filas del mes. Queda el archivo del dueño.`);
-                    }}
-                  >
-                    Liberar memoria
-                  </Button>
-                ) : null}
-                <Button variant="secondary" size="sm" onClick={() => setGastosOpen(true)}>
-                  Gastos fijos
-                </Button>
-                <Button size="sm" onClick={() => setResultadoOpen(true)}>
-                  Calcular el mes
-                </Button>
+                  onLiberar={
+                    current
+                      ? undefined
+                      : () => {
+                          const r = releaseMonth(ym);
+                          if (!r.ok) toast.error(r.error);
+                          else toast.success(`Liberadas ${r.freed} filas del mes. Queda el archivo del dueño.`);
+                        }
+                  }
+                />
+                <Button onClick={() => setResultadoOpen(true)}>Calcular el mes</Button>
               </div>
             </div>
             <div className="flex shrink-0 flex-col gap-2">
@@ -407,7 +346,20 @@ export function OwnerDesk({
                   )}
                 </Tarjeta>
 
-                <Tarjeta titulo="Egresos">
+                <Tarjeta
+                  titulo="Egresos"
+                  accion={
+                    <button
+                      type="button"
+                      aria-label="Gastos fijos"
+                      title="Gastos fijos"
+                      onClick={() => setGastosOpen(true)}
+                      className="-my-1.5 -mr-1.5 grid size-8 place-items-center rounded-md text-muted hover:bg-elevated hover:text-fg"
+                    >
+                      <Settings2 className="size-4" />
+                    </button>
+                  }
+                >
                   {!hayEgresos ? (
                     <Vacio>Sin movimientos cargados en la planilla</Vacio>
                   ) : (
@@ -575,10 +527,14 @@ function ymLocal(iso: string): string {
   return Number.isNaN(d.getTime()) ? "" : todayKey(d).slice(0, 7);
 }
 
-function prevYm(ym: string): string {
+function moverMes(ym: string, delta: number): string {
   const [y, m] = ym.split("-").map(Number);
-  const d = new Date(y ?? 2000, (m ?? 1) - 2, 1);
+  const d = new Date(y ?? 2000, (m ?? 1) - 1 + delta, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function prevYm(ym: string): string {
+  return moverMes(ym, -1);
 }
 
 type MesVentas = {
@@ -616,12 +572,200 @@ function ventasDelMes(ym: string, sales: Sale[], aggs: MonthAgg[]): MesVentas | 
   return vivos || agg ? t : null;
 }
 
-function Tarjeta({ titulo, children }: { titulo: string; children: ReactNode }) {
+function Tarjeta({ titulo, accion, children }: { titulo: string; accion?: ReactNode; children: ReactNode }) {
   return (
     <div className="rounded-xl bg-surface px-4 py-3 shadow-[var(--shadow-border)]">
-      <p className="text-xs font-medium uppercase tracking-[0.12em] text-subtle">{titulo}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium uppercase tracking-[0.12em] text-subtle">{titulo}</p>
+        {accion}
+      </div>
       {children}
     </div>
+  );
+}
+
+const MESES = [
+  "Enero",
+  "Febrero",
+  "Marzo",
+  "Abril",
+  "Mayo",
+  "Junio",
+  "Julio",
+  "Agosto",
+  "Septiembre",
+  "Octubre",
+  "Noviembre",
+  "Diciembre",
+];
+
+/** "Septiembre 2026", sin el "de" que pone el navegador. */
+function nombreMes(ym: string): string {
+  return `${MESES[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
+}
+
+/**
+ * Las flechas mueven de a un mes, que es lo que se hace casi siempre. El resto
+ * de la fecha (otro mes, otro año, un trimestre) vive en el popover del nombre.
+ */
+function PeriodoPicker({ ym, nowYm, onYm }: { ym: string; nowYm: string; onYm: (ym: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const year = Number(ym.slice(0, 4));
+  const [vista, setVista] = useState(year);
+  const flecha = "grid size-11 shrink-0 place-items-center rounded-full text-muted hover:text-fg";
+  const flechaAnio = "grid size-9 place-items-center rounded-md text-muted hover:bg-elevated hover:text-fg";
+
+  function ir(next: string) {
+    onYm(next);
+    setOpen(false);
+  }
+
+  return (
+    <div className="flex items-center rounded-full bg-elevated shadow-[var(--shadow-border)]">
+      <button type="button" aria-label="Mes anterior" className={flecha} onClick={() => onYm(moverMes(ym, -1))}>
+        <ChevronLeft className="size-4" />
+      </button>
+      <Popover
+        open={open}
+        onOpenChange={(v) => {
+          setOpen(v);
+          if (v) setVista(year);
+        }}
+      >
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex h-11 min-w-[11.5rem] items-center justify-center gap-1.5 px-2 text-base font-medium"
+          >
+            {nombreMes(ym)}
+            <ChevronDown className="size-3.5 text-muted" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-[18rem] p-3">
+          <div className="flex items-center justify-between">
+            <button type="button" aria-label="Año anterior" className={flechaAnio} onClick={() => setVista((v) => v - 1)}>
+              <ChevronLeft className="size-4" />
+            </button>
+            <span className="num text-sm font-medium">{vista}</span>
+            <button type="button" aria-label="Año siguiente" className={flechaAnio} onClick={() => setVista((v) => v + 1)}>
+              <ChevronRight className="size-4" />
+            </button>
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-1">
+            {MESES.map((nombre, i) => {
+              const m = `${vista}-${String(i + 1).padStart(2, "0")}`;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => ir(m)}
+                  className={cn(
+                    "h-10 rounded-md text-sm",
+                    m === ym ? "bg-accent font-medium text-accent-fg" : "hover:bg-elevated",
+                    m === nowYm && m !== ym && "font-medium text-accent",
+                  )}
+                >
+                  {nombre.slice(0, 3)}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-3 text-[11px] font-medium uppercase tracking-[0.12em] text-subtle">
+            Ver el trimestre completo
+          </p>
+          <div className="mt-1.5 grid grid-cols-4 gap-1">
+            {([1, 2, 3, 4] as const).map((n) => {
+              const months = monthsOfQuarter(vista, n);
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => ir(months.includes(nowYm) ? nowYm : months[0]!)}
+                  className={cn(
+                    "h-10 rounded-md text-sm font-medium",
+                    months.includes(ym) ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
+                  )}
+                >
+                  Q{n}
+                </button>
+              );
+            })}
+          </div>
+        </PopoverContent>
+      </Popover>
+      <button type="button" aria-label="Mes siguiente" className={flecha} onClick={() => onYm(moverMes(ym, 1))}>
+        <ChevronRight className="size-4" />
+      </button>
+    </div>
+  );
+}
+
+/** Las seis descargas en un solo botón. Liberar memoria va acá porque se hace después de bajar el mes. */
+function BajarCsv({
+  ym,
+  onBajar,
+  onLiberar,
+}: {
+  ym: string;
+  onBajar: (label: string, yms: string[]) => void;
+  onLiberar?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const year = Number(ym.slice(0, 4));
+  const corto = (m: string) => MESES[Number(m.slice(5, 7)) - 1]!.slice(0, 3).toLowerCase();
+  const opciones: [string, string, string[]][] = [
+    ["Mes", nombreMes(ym), [ym]],
+    ["Año", String(year), monthsOfYear(year)],
+    ...([1, 2, 3, 4] as const).map((n): [string, string, string[]] => {
+      const months = monthsOfQuarter(year, n);
+      return [`Q${n}`, `${corto(months[0]!)} a ${corto(months[2]!)} ${year}`, months];
+    }),
+  ];
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="secondary">
+          <Download className="size-4" />
+          Bajar CSV
+          <ChevronDown className="size-4 text-muted" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 p-1.5">
+        <ul>
+          {opciones.map(([label, detalle, yms]) => (
+            <li key={label}>
+              <button
+                type="button"
+                className="flex h-10 w-full items-center justify-between gap-3 rounded-md px-3 text-sm hover:bg-elevated"
+                onClick={() => {
+                  onBajar(label, yms);
+                  setOpen(false);
+                }}
+              >
+                <span className="font-medium">{label}</span>
+                <span className="text-xs text-muted">{detalle}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        {onLiberar ? (
+          <div className="mt-1 border-t border-border pt-1">
+            <button
+              type="button"
+              className="flex w-full flex-col items-start rounded-md px-3 py-2 text-left text-sm hover:bg-elevated"
+              onClick={() => {
+                onLiberar();
+                setOpen(false);
+              }}
+            >
+              <span className="font-medium">Liberar memoria</span>
+              <span className="text-xs text-muted">Borra el detalle del mes. Queda el archivo del dueño.</span>
+            </button>
+          </div>
+        ) : null}
+      </PopoverContent>
+    </Popover>
   );
 }
 
