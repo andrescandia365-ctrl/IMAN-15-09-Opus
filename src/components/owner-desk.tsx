@@ -31,7 +31,8 @@ import { Input } from "@/components/ui/input";
 import { PAY_LABEL, formatARS, todayKey } from "@/lib/format";
 import type { StoreMeta, StoreRollup } from "@/lib/kiosk";
 import type { MyAccess } from "@/lib/license";
-import type { MonthAgg, PayMethod, Sale } from "@/lib/types";
+import { unitCost } from "@/lib/pricing";
+import type { MonthAgg, PayMethod, Product, Sale } from "@/lib/types";
 import { useImanStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { usePhoneUi } from "@/lib/device";
@@ -81,7 +82,10 @@ export function OwnerDesk({
   const monthAggs = useImanStore((s) => s.monthAggs);
   const payouts = useImanStore((s) => s.payouts);
   const monthExpenses = useImanStore((s) => s.settings.monthExpenses);
+  const mpFeePct = useImanStore((s) => s.settings.mpFeePct);
+  const products = useImanStore((s) => s.products);
   const [salidaOpen, setSalidaOpen] = useState(false);
+  const [resultadoOpen, setResultadoOpen] = useState(false);
 
   const anterior = prevYm(ym);
   const mes = useMemo(() => ventasDelMes(ym, sales, monthAggs), [ym, sales, monthAggs]);
@@ -312,6 +316,9 @@ export function OwnerDesk({
                 <Button variant="secondary" size="sm" onClick={() => setGastosOpen(true)}>
                   Gastos fijos
                 </Button>
+                <Button size="sm" onClick={() => setResultadoOpen(true)}>
+                  Calcular el mes
+                </Button>
               </div>
             </div>
             <div className="flex shrink-0 flex-col gap-2">
@@ -457,6 +464,26 @@ export function OwnerDesk({
             <div className="min-h-0 flex-1 overflow-hidden rounded-xl bg-surface p-3 shadow-[var(--shadow-border)]">
               <LedgerSheet ym={ym} editable={current} />
             </div>
+            <Dialog open={resultadoOpen} onOpenChange={setResultadoOpen}>
+              <DialogContent className="w-[min(34rem,calc(100vw-24px))]">
+                <DialogHeader>
+                  <DialogTitle>El resultado del mes</DialogTitle>
+                  <DialogDescription>
+                    {monthTitle(ym)} · se calcula acá y no se guarda en ningún lado.
+                  </DialogDescription>
+                </DialogHeader>
+                <ResultadoDelMes
+                  ym={ym}
+                  sales={sales}
+                  aggs={monthAggs}
+                  products={products}
+                  mpFeePct={mpFeePct ?? 0.06}
+                  gastosPlanilla={cc.gastos}
+                  gastosFijos={gastosFijos}
+                  retiros={retiros}
+                />
+              </DialogContent>
+            </Dialog>
             <Dialog open={gastosOpen} onOpenChange={setGastosOpen}>
               <DialogContent className="w-[min(36rem,calc(100vw-48px))] max-w-none p-6">
                 <DialogHeader className="mb-4 pr-10">
@@ -706,5 +733,178 @@ function OwnerFactura() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+const HACE_60_DIAS = 60 * 86_400_000;
+
+function plural(n: number, uno: string, varios: string): string {
+  return n === 1 ? uno : varios;
+}
+
+/**
+ * La resta del mes. Se calcula cuando el dueño la pide y muere con el diálogo:
+ * no se guarda, no se escribe en la planilla, no viaja a ningún lado.
+ *
+ * El costo de cada línea sale del costo que guardó la venta; las ventas viejas
+ * que no lo traen caen al costo de hoy del producto, y si tampoco hay, la línea
+ * se cuenta como faltante y avisa. De un mes ya plegado se usa lo que quedó en
+ * el resumen, que puede venir del método viejo — por eso el aviso.
+ */
+function ResultadoDelMes({
+  ym,
+  sales,
+  aggs,
+  products,
+  mpFeePct,
+  gastosPlanilla,
+  gastosFijos,
+  retiros,
+}: {
+  ym: string;
+  sales: Sale[];
+  aggs: MonthAgg[];
+  products: Product[];
+  mpFeePct: number;
+  gastosPlanilla: number;
+  gastosFijos: number;
+  retiros: number;
+}) {
+  const r = useMemo(() => {
+    const byId = new Map(products.map((x) => [x.id, x]));
+    const viejo = Date.now() - HACE_60_DIAS;
+    const sinCosto = new Set<string>();
+    const precioViejo = new Set<string>();
+    let ventas = 0;
+    let ventasMp = 0;
+    let costo = 0;
+    let faltantes = 0;
+    let vivas = 0;
+    for (const s of sales) {
+      if (ymLocal(s.createdAt) !== ym) continue;
+      vivas += 1;
+      ventas += s.total;
+      if (s.paymentMethod === "mercadopago") ventasMp += s.total;
+      for (const it of s.items) {
+        const p = byId.get(it.productId);
+        const c = typeof it.cost === "number" && it.cost > 0 ? it.cost : p ? unitCost(p) : null;
+        if (c == null) {
+          faltantes += it.qty;
+          sinCosto.add(it.name);
+        } else {
+          costo += c * it.qty;
+        }
+        if (p && new Date(p.priceUpdatedAt).getTime() < viejo) precioViejo.add(p.name);
+      }
+    }
+    const agg = aggs.find((a) => a.ym === ym);
+    if (agg) {
+      ventas += agg.ventas;
+      ventasMp += agg.mp;
+      costo += agg.cogs;
+      faltantes += agg.cogsMissing ?? 0;
+    }
+    const comision = ventasMp * mpFeePct;
+    const gastos = gastosPlanilla + gastosFijos;
+    const margen = ventas - costo - comision - gastos;
+    return {
+      ventas,
+      ventasMp,
+      costo,
+      faltantes,
+      comision,
+      gastos,
+      margen,
+      quedo: margen - retiros,
+      confiable: agg ? agg.cogsTrusted === true : true,
+      fuente: vivas && agg ? "mixto" : agg ? "agregado" : "vivo",
+      sinCosto: [...sinCosto],
+      precioViejo: [...precioViejo],
+    };
+  }, [ym, sales, aggs, products, mpFeePct, gastosPlanilla, gastosFijos, retiros]);
+
+  const fuenteVentas =
+    r.fuente === "vivo"
+      ? "Suma de los tickets de este mes"
+      : r.fuente === "agregado"
+        ? "Del resumen guardado del mes: ya no quedan los tickets"
+        : "Tickets de este mes más el resumen de lo que ya se plegó";
+
+  return (
+    <div className="mt-1">
+      {!r.confiable ? (
+        <Aviso>El costo de este mes se calculó con un método viejo. El margen no es confiable.</Aviso>
+      ) : null}
+      {r.sinCosto.length ? (
+        <Aviso nombres={r.sinCosto}>
+          {r.sinCosto.length} {plural(r.sinCosto.length, "producto vendido no tiene", "productos vendidos no tienen")}{" "}
+          costo cargado. El margen sale más alto de lo real.
+        </Aviso>
+      ) : null}
+      {r.precioViejo.length ? (
+        <Aviso nombres={r.precioViejo}>
+          {r.precioViejo.length} {plural(r.precioViejo.length, "producto tiene", "productos tienen")} el precio sin
+          tocar hace más de 60 días.
+        </Aviso>
+      ) : null}
+
+      <ul className="mt-3 flex flex-col">
+        <Renglon k="Ventas del mes" v={r.ventas} fuente={fuenteVentas} />
+        <Renglon
+          k="Costo de lo vendido"
+          v={-r.costo}
+          fuente={
+            r.faltantes
+              ? `Costo guardado en cada venta · ${r.faltantes} ${plural(r.faltantes, "unidad", "unidades")} sin costo, que no suman`
+              : "Costo guardado en cada venta; si falta, el del catálogo de hoy"
+          }
+        />
+        <Renglon
+          k="Comisión Mercado Pago"
+          v={-r.comision}
+          fuente={`${(mpFeePct * 100).toLocaleString("es-AR", { maximumFractionDigits: 2 })}% sobre ${formatARS(r.ventasMp)} en Mercado Pago`}
+        />
+        <Renglon
+          k="Gastos"
+          v={-r.gastos}
+          fuente="Filas de gasto de la planilla del mes más los gastos fijos"
+        />
+        <Subtotal k="Margen del negocio" v={r.margen} />
+        <Renglon k="Lo que se llevó el dueño" v={-retiros} fuente="Fila RETIROS de la planilla" />
+        <Subtotal k="Quedó en el negocio" v={r.quedo} />
+      </ul>
+    </div>
+  );
+}
+
+function Aviso({ children, nombres }: { children: ReactNode; nombres?: string[] }) {
+  return (
+    <p className="mt-2 rounded-lg bg-elevated px-3 py-2 text-xs leading-snug text-warn">
+      {children}
+      {nombres?.length ? <span className="mt-0.5 block text-subtle">{nombres.join(" · ")}</span> : null}
+    </p>
+  );
+}
+
+function Renglon({ k, v, fuente }: { k: string; v: number; fuente: string }) {
+  return (
+    <li className="flex items-baseline justify-between gap-3 border-b border-border py-2">
+      <span className="min-w-0">
+        <span className="block text-sm">{k}</span>
+        <span className="mt-0.5 block text-[11px] leading-snug text-subtle">{fuente}</span>
+      </span>
+      <span className="num shrink-0 text-sm">{formatARS(v)}</span>
+    </li>
+  );
+}
+
+function Subtotal({ k, v }: { k: string; v: number }) {
+  return (
+    <li className="flex items-baseline justify-between gap-3 border-b border-border py-2.5">
+      <span className="text-xs font-medium uppercase tracking-[0.12em] text-subtle">{k}</span>
+      <span className={cn("num font-display text-2xl leading-none tracking-tight", v >= 0 ? "text-sage" : "text-warn")}>
+        {formatARS(v)}
+      </span>
+    </li>
   );
 }

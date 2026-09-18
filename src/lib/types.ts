@@ -43,6 +43,12 @@ export interface SaleItem {
   name: string;
   price: number;
   qty: number;
+  /**
+   * Lo que costaba la unidad el día que se vendió. Sin costo cargado va
+   * `undefined`: nunca 0 ni estimado, así el margen no miente. Las ventas
+   * guardadas antes de esto no lo traen.
+   */
+  cost?: number;
 }
 
 export interface Sale {
@@ -220,6 +226,10 @@ export interface MonthAgg {
   efectivo: number;
   debito: number;
   cogs: number;
+  /** Unidades vendidas de las que no se supo el costo: `cogs` queda corto. */
+  cogsMissing?: number;
+  /** Ausente o `false` = plegado con el método viejo, que estimaba el costo. */
+  cogsTrusted?: boolean;
 }
 
 export interface MonthSheet {

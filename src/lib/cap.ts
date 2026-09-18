@@ -1,4 +1,5 @@
-import type { DayBook, KioskPayload, MonthAgg, MonthSheet, OrderDraft, Sale } from "@/lib/types";
+import type { DayBook, KioskPayload, MonthAgg, MonthSheet, OrderDraft, Product, Sale, SaleItem } from "@/lib/types";
+import { unitCost } from "./pricing.ts";
 
 /** Live tickets we keep in the blob. Older ones fold into monthAggs. */
 export const SALES_KEEP = 1500;
@@ -16,7 +17,20 @@ function ymOf(iso: string): string {
   return iso.slice(0, 7);
 }
 
-function foldSale(map: Map<string, MonthAgg>, s: Sale): void {
+/**
+ * Lo que costó una línea vendida: primero el costo que guardó la venta, y si es
+ * una venta vieja que no lo trae, el costo de hoy del producto. Sin ninguno de
+ * los dos, `null`: la línea se cuenta como faltante y no suma nada. Nunca un
+ * porcentaje del precio — eso hacía el método viejo y por eso los meses
+ * plegados así vienen marcados como no confiables.
+ */
+function lineCost(it: SaleItem, byId: Map<string, Product>): number | null {
+  if (typeof it.cost === "number" && it.cost > 0) return it.cost;
+  const p = byId.get(it.productId);
+  return p ? unitCost(p) : null;
+}
+
+function foldSale(map: Map<string, MonthAgg>, s: Sale, byId: Map<string, Product>): void {
   const ym = ymOf(s.createdAt);
   const cur = map.get(ym) ?? {
     ym,
@@ -26,13 +40,19 @@ function foldSale(map: Map<string, MonthAgg>, s: Sale): void {
     efectivo: 0,
     debito: 0,
     cogs: 0,
+    cogsMissing: 0,
+    cogsTrusted: true,
   };
   cur.ventas += s.total;
   cur.tickets += 1;
   if (s.paymentMethod === "mercadopago") cur.mp += s.total;
   else if (s.paymentMethod === "efectivo") cur.efectivo += s.total;
   else cur.debito += s.total;
-  cur.cogs += s.items.reduce((a, it) => a + it.price * it.qty * 0.7, 0);
+  for (const it of s.items) {
+    const c = lineCost(it, byId);
+    if (c == null) cur.cogsMissing = (cur.cogsMissing ?? 0) + it.qty;
+    else cur.cogs += c * it.qty;
+  }
   map.set(ym, cur);
 }
 
@@ -52,6 +72,9 @@ export function mergeAggs(a: MonthAgg[], b: MonthAgg[]): MonthAgg[] {
       efectivo: cur.efectivo + row.efectivo,
       debito: cur.debito + row.debito,
       cogs: cur.cogs + row.cogs,
+      cogsMissing: (cur.cogsMissing ?? 0) + (row.cogsMissing ?? 0),
+      // Basta con que una mitad venga del método viejo para no poder confiar.
+      cogsTrusted: cur.cogsTrusted === true && row.cogsTrusted === true,
     });
   }
   return [...map.values()].sort((x, y) => y.ym.localeCompare(x.ym)).slice(0, 36);
@@ -75,7 +98,8 @@ export function prunePayload(p: KioskPayload): KioskPayload {
   }
   const extra: MonthAgg[] = [];
   const map = new Map<string, MonthAgg>();
-  for (const s of folded) foldSale(map, s);
+  const byId = new Map(p.products.map((x) => [x.id, x]));
+  for (const s of folded) foldSale(map, s, byId);
   extra.push(...map.values());
 
   const bookCut = Date.now() - BOOKS_KEEP * 86_400_000;

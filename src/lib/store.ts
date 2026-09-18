@@ -7,7 +7,7 @@ import { archiveClosedMonths, emptyBook, cellsOf, currentYm, type FacLine } from
 import { lineUnits, orderNote, packOf, suggestPacks } from "./pack";
 import { nextCadenceDates } from "./supplier-cadence";
 import { addLot, consumeFifo } from "./lots";
-import { factorFor, quotedPrice } from "./pricing";
+import { factorFor, quotedPrice, unitCost } from "./pricing";
 import { uid } from "./utils";
 import {
   CATEGORY_SUPPLIER,
@@ -183,7 +183,7 @@ function upsertBookRow(books: DayBook[], row: DayBook): DayBook[] {
 function seedSales(): Sale[] {
   const pick = (id: string, qty: number) => {
     const p = SEED_PRODUCTS.find((x) => x.id === id)!;
-    return { productId: p.id, name: p.name, price: p.price, qty };
+    return { productId: p.id, name: p.name, price: p.price, qty, cost: unitCost(p) ?? undefined };
   };
   const rows: { items: ReturnType<typeof pick>[]; method: PayMethod; h: number }[] = [
     { items: [pick("p6", 1), pick("p14", 2)], method: "efectivo", h: 0.15 },
@@ -399,6 +399,13 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         const open = st.shifts.find((s) => s.status === "open");
         if (!open) return { ok: false, error: "Abrí la caja para vender" };
 
+        // El costo del momento: si mañana cambia el catálogo, esta venta ya sabe
+        // lo que le costó. Sin costo cargado va undefined, nunca 0.
+        const costOf = (id: string): number | undefined => {
+          const p = st.products.find((x) => x.id === id);
+          return p ? (unitCost(p) ?? undefined) : undefined;
+        };
+
         const sale: Sale = {
           id: uid("sa"),
           createdAt: new Date().toISOString(),
@@ -416,6 +423,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
             name: l.name,
             price: l.price,
             qty: l.qty,
+            cost: costOf(l.productId),
           })),
         };
 
