@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import {
   factorFor,
   invoiceForProduct,
   invoiceOf,
+  misalignedProducts,
   productsForCross,
   quotedPrice,
   type InvoiceKind,
@@ -82,6 +83,7 @@ export function OwnerPrices() {
   const saveSettings = useImanStore((s) => s.saveSettings);
   const saveCategory = useImanStore((s) => s.saveCategory);
   const setProductPrices = useImanStore((s) => s.setProductPrices);
+  const applyCategoryPrices = useImanStore((s) => s.applyCategoryPrices);
 
   const [factorX, setFactorX] = useState<Record<string, string>>(() =>
     Object.fromEntries(categories.map((c) => [c.id, shownFactor(c.id, c.name, "X", settings.priceMarkups)])),
@@ -97,6 +99,30 @@ export function OwnerPrices() {
   const [productIds, setProductIds] = useState<string[]>([]);
   const [previewed, setPreviewed] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  /** El rubro cuyo margen se acaba de tocar y todavía no se aplicó ni se dejó para después. */
+  const [aviso, setAviso] = useState<string | null>(null);
+  const alEntrar = useRef<{ id: string; raw: string } | null>(null);
+
+  // Misma cuenta que usa applyCategoryPrices: alinear un rubro deja su número en cero.
+  const desalineados = useMemo(
+    () => new Map(categories.map((c) => [c.id, misalignedProducts(products, c, suppliers, settings).length])),
+    [categories, products, suppliers, settings],
+  );
+  const totalDesalineados = [...desalineados.values()].reduce((a, n) => a + n, 0);
+
+  function alSalirDelMargen(id: string, raw: string) {
+    const antes = alEntrar.current;
+    alEntrar.current = null;
+    if (!antes || antes.id !== id || antes.raw === raw) return;
+    setAviso((desalineados.get(id) ?? 0) > 0 ? id : null);
+  }
+
+  function alinear(ids: string[]) {
+    let n = 0;
+    for (const id of ids) n += applyCategoryPrices(id);
+    setAviso(null);
+    toast.success(n ? `${n} ${n === 1 ? "precio" : "precios"} de góndola` : "Sin cambios");
+  }
 
   const step = settings.roundStep && settings.roundStep > 0 ? settings.roundStep : 100;
   const mode = settings.roundMode === "down" ? "down" : "up";
@@ -275,6 +301,23 @@ export function OwnerPrices() {
               </button>
             </div>
           </div>
+          {totalDesalineados > 0 ? (
+            <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg bg-warn/10 px-3 py-2">
+              <p className="text-sm">
+                <span className="num font-medium text-warn">{totalDesalineados}</span>{" "}
+                {totalDesalineados === 1
+                  ? "producto tiene el precio desalineado del margen"
+                  : "productos tienen el precio desalineado del margen"}
+              </p>
+              <Button
+                size="sm"
+                className="ml-auto"
+                onClick={() => alinear(categories.filter((c) => (desalineados.get(c.id) ?? 0) > 0).map((c) => c.id))}
+              >
+                Alinear todo
+              </Button>
+            </div>
+          ) : null}
           <div className="min-h-0 flex-1 overflow-y-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-surface">
@@ -282,38 +325,85 @@ export function OwnerPrices() {
                   <th className="py-2 text-left">Rubro</th>
                   <th className="py-2 text-right">Fac X</th>
                   <th className="py-2 text-right">Fac A</th>
+                  <th className="py-2">
+                    <span className="sr-only">Desalineados</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {categories.map((c) => (
-                  <tr key={c.id} className="border-t border-border">
-                    <td className="py-1.5 pr-2 font-medium">{c.name}</td>
-                    <td className="py-1.5">
-                      <Input
-                        className="ml-auto h-10 w-[4.5rem] text-right"
-                        inputMode="decimal"
-                        value={factorX[c.id] ?? shownFactor(c.id, c.name, "X", settings.priceMarkups)}
-                        onChange={(e) => {
-                          setFactorX((m) => ({ ...m, [c.id]: e.target.value }));
-                          persistMap("priceMarkups", c.id, e.target.value);
-                        }}
-                        placeholder="—"
-                      />
-                    </td>
-                    <td className="py-1.5 pl-2">
-                      <Input
-                        className="ml-auto h-10 w-[4.5rem] text-right"
-                        inputMode="decimal"
-                        value={factorA[c.id] ?? shownFactor(c.id, c.name, "A", settings.priceMarkupsA)}
-                        onChange={(e) => {
-                          setFactorA((m) => ({ ...m, [c.id]: e.target.value }));
-                          persistMap("priceMarkupsA", c.id, e.target.value);
-                        }}
-                        placeholder="—"
-                      />
-                    </td>
-                  </tr>
-                ))}
+                {categories.map((c) => {
+                  const n = desalineados.get(c.id) ?? 0;
+                  return (
+                    <Fragment key={c.id}>
+                      <tr className="border-t border-border">
+                        <td className="py-1.5 pr-2 font-medium">{c.name}</td>
+                        <td className="py-1.5">
+                          <Input
+                            className="ml-auto h-10 w-[4.5rem] text-right"
+                            inputMode="decimal"
+                            value={factorX[c.id] ?? shownFactor(c.id, c.name, "X", settings.priceMarkups)}
+                            onFocus={(e) => (alEntrar.current = { id: c.id, raw: e.target.value })}
+                            onBlur={(e) => alSalirDelMargen(c.id, e.target.value)}
+                            onChange={(e) => {
+                              setFactorX((m) => ({ ...m, [c.id]: e.target.value }));
+                              persistMap("priceMarkups", c.id, e.target.value);
+                            }}
+                            placeholder="—"
+                          />
+                        </td>
+                        <td className="py-1.5 pl-2">
+                          <Input
+                            className="ml-auto h-10 w-[4.5rem] text-right"
+                            inputMode="decimal"
+                            value={factorA[c.id] ?? shownFactor(c.id, c.name, "A", settings.priceMarkupsA)}
+                            onFocus={(e) => (alEntrar.current = { id: c.id, raw: e.target.value })}
+                            onBlur={(e) => alSalirDelMargen(c.id, e.target.value)}
+                            onChange={(e) => {
+                              setFactorA((m) => ({ ...m, [c.id]: e.target.value }));
+                              persistMap("priceMarkupsA", c.id, e.target.value);
+                            }}
+                            placeholder="—"
+                          />
+                        </td>
+                        <td className="py-1.5 pl-2 text-right">
+                          {n > 0 ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              <span className="num text-sm font-medium text-warn">{n}</span>
+                              <button
+                                type="button"
+                                aria-label={`Alinear ${c.name}`}
+                                className="h-8 rounded-full bg-elevated px-2.5 text-xs font-medium text-muted hover:text-fg"
+                                onClick={() => alinear([c.id])}
+                              >
+                                Alinear
+                              </button>
+                            </span>
+                          ) : null}
+                        </td>
+                      </tr>
+                      {aviso === c.id && n > 0 ? (
+                        <tr>
+                          <td colSpan={4} className="pb-2">
+                            <div className="flex flex-wrap items-center gap-2 rounded-lg bg-warn/10 px-3 py-2">
+                              <p className="text-sm">
+                                Este margen cambia <span className="num font-medium">{n}</span>{" "}
+                                {n === 1 ? "precio" : "precios"} de góndola.
+                              </p>
+                              <div className="ml-auto flex gap-2">
+                                <Button size="sm" onClick={() => alinear([c.id])}>
+                                  Aplicar ahora
+                                </Button>
+                                <Button size="sm" variant="secondary" onClick={() => setAviso(null)}>
+                                  Después
+                                </Button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -7,7 +7,7 @@ import { archiveClosedMonths, emptyBook, cellsOf, currentYm, type FacLine } from
 import { lineUnits, orderNote, packOf, suggestPacks } from "./pack";
 import { nextCadenceDates } from "./supplier-cadence";
 import { addLot, consumeFifo } from "./lots";
-import { factorFor, quotedPrice, repriceProducts, unitCost } from "./pricing";
+import { marginPrice, repriceProducts, unitCost } from "./pricing";
 import { uid } from "./utils";
 import {
   CATEGORY_SUPPLIER,
@@ -665,12 +665,11 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         const st = get();
         const cat = st.categories.find((c) => c.id === categoryId);
         if (!cat) return 0;
-        const factor = factorFor(cat, "X", st.settings);
-        const step = st.settings.roundStep && st.settings.roundStep > 0 ? st.settings.roundStep : 100;
-        const mode = st.settings.roundMode === "down" ? "down" : "up";
+        // Cada producto con la Fac de su proveedor, como el cruce del dueño y la
+        // herramienta del encargado. Es la misma cuenta que marca los desalineados.
         const r = repriceProducts(
           st.products,
-          (p) => (p.categoryId === categoryId ? quotedPrice(p, factor, step, mode) : null),
+          (p) => (p.categoryId === categoryId ? marginPrice(p, cat, st.suppliers, st.settings) : null),
           new Date().toISOString(),
         );
         if (!r.changed.length) return 0;

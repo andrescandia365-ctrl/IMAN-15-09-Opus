@@ -158,3 +158,36 @@ export function invoiceForProduct(
 export function shelfInvoice(p: Product, suppliers: Supplier[]): InvoiceKind {
   return invoiceForProduct(p, suppliers)?.invoice ?? "X";
 }
+
+/**
+ * El precio de góndola que le toca a un producto por el margen de su rubro,
+ * con la Fac de quien lo trae y el redondeo del dueño. `null` si no tiene
+ * costo o si el rubro no tiene margen: ahí no hay nada que alinear, y factorFor
+ * daría 1, que es vender al costo.
+ */
+export function marginPrice(
+  p: Product,
+  category: Category,
+  suppliers: Supplier[],
+  settings: Settings,
+): number | null {
+  const kind = shelfInvoice(p, suppliers);
+  if (!hasFactor(category, kind, settings)) return null;
+  const step = settings.roundStep && settings.roundStep > 0 ? settings.roundStep : 100;
+  const mode = settings.roundMode === "down" ? "down" : "up";
+  return quotedPrice(p, factorFor(category, kind, settings), step, mode);
+}
+
+/** Los productos del rubro cuyo precio de góndola no es el que da su margen. */
+export function misalignedProducts(
+  products: Product[],
+  category: Category,
+  suppliers: Supplier[],
+  settings: Settings,
+): Product[] {
+  return products.filter((p) => {
+    if (p.categoryId !== category.id) return false;
+    const price = marginPrice(p, category, suppliers, settings);
+    return price != null && price !== p.price;
+  });
+}
