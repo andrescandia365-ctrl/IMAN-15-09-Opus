@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { EncargadoBook } from "@/components/ledger-grid";
 import { PriceUpdateCard } from "@/components/price-calc";
 import { onShiftNow } from "@/lib/team";
+import { backupOnClose } from "@/lib/sync";
 
 export function CashView() {
   const cash = useCashSnapshot();
@@ -281,6 +282,14 @@ export function CashView() {
                 if (!r.ok) toast.error(r.error);
                 else {
                   toast.success("Turno cerrado");
+                  // Cerrar el turno pone el trabajo a salvo, igual que Sincronizar.
+                  const storeId = useImanStore.getState().deskStoreId;
+                  if (storeId) {
+                    void backupOnClose(storeId).then((b) => {
+                      if (b.ok) toast("Respaldo subido a la nube");
+                      else toast.error(`El respaldo no subió: ${b.error}. Tocá Sincronizar.`);
+                    });
+                  }
                   setCloseAmt("");
                   setCelAmt("");
                   setSubeAmt("");

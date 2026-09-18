@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { incomingCopy, mergeOrders, mergePayload, richerOrder } from "./cap.ts";
-import { pruneSyncLog, trimSyncLog, type SyncLogItem } from "./sync-log.ts";
-import type { KioskPayload, MonthAgg, OrderDraft, Sale, Settings } from "./types.ts";
+import { backupRecords, incomingCopy, mergeBackup, mergeOrders, mergePayload, richerOrder } from "./cap.ts";
+import { haceCuanto, pruneSyncLog, trimSyncLog, type SyncLogItem } from "./sync-log.ts";
+import type { CashShift, KioskPayload, MonthAgg, OrderDraft, Sale, Settings } from "./types.ts";
 
 const settings = { name: "Faro", city: "", onboarded: true } as Settings;
 
@@ -173,5 +173,81 @@ describe("juntar la fotocopia con la copia del aparato no cuenta plata dos veces
     const r = mergePayload(fotocopia, aca);
     assert.deepEqual(r.sales.map((s) => s.id), ["nueva"]);
     assert.equal(r.monthAggs?.find((a) => a.ym === mesViejo.ym)?.ventas, 100);
+  });
+});
+
+describe("respaldo cuando chocan dos fotocopias", () => {
+  const hace = (dias: number) => new Date(Date.now() - dias * 86_400_000).toISOString();
+  const turno = (id: string, status: "open" | "closed", dias: number): CashShift => ({
+    id,
+    status,
+    openingCash: 1000,
+    closingCash: status === "closed" ? 5000 : null,
+    expectedCash: null,
+    salesTotal: null,
+    salesCount: null,
+    note: null,
+    openedAt: hace(dias),
+    closedAt: status === "closed" ? hace(dias - 0.3) : null,
+  });
+  it("los turnos viejos del celu no le borran al respaldo los cierres de la caja", () => {
+    const caja = payload({ shifts: [turno("t1", "closed", 1), turno("t2", "open", 0.2)] });
+    const celu = payload({ shifts: [turno("t1", "open", 1)] });
+    const r = mergeBackup(caja, celu);
+    assert.deepEqual(
+      r.shifts.map((s) => `${s.id}:${s.status}`),
+      ["t2:open", "t1:closed"],
+    );
+    // Lo mismo queda también en el aparato que sube.
+    assert.deepEqual(
+      backupRecords(caja, celu).shifts.map((s) => `${s.id}:${s.status}`),
+      ["t2:open", "t1:closed"],
+    );
+  });
+
+  it("retiros e historial se suman de los dos lados", () => {
+    const caja = payload({
+      drops: [{ id: "d1", shiftId: "t1", amount: 5000, note: "fuerte", createdAt: hace(0.5) }],
+      movements: [{ id: "m1", productId: "p1", productName: "Coca 2L", delta: -1, reason: "venta", createdAt: hace(0.4) }],
+    });
+    const celu = payload({
+      drops: [],
+      movements: [{ id: "m2", productId: "p1", productName: "Coca 2L", delta: 6, reason: "recepción", createdAt: hace(0.1) }],
+    });
+    const r = mergeBackup(caja, celu);
+    assert.deepEqual(r.drops.map((d) => d.id), ["d1"]);
+    assert.deepEqual(r.movements.map((m) => m.id), ["m2", "m1"]);
+  });
+
+  it("ajustes y proveedores: gana el último que sube", () => {
+    const caja = payload({
+      settings: { ...settings, roundStep: 100 },
+      suppliers: [{ id: "s1", name: "Omar", days: [1], notes: "", whatsapp: "" }],
+    });
+    const celu = payload({
+      settings: { ...settings, roundStep: 50 },
+      suppliers: [{ id: "s1", name: "Omar Distribuidora", days: [1], notes: "", whatsapp: "" }],
+    });
+    const r = mergeBackup(caja, celu);
+    assert.equal(r.settings.roundStep, 50);
+    assert.equal(r.suppliers[0]?.name, "Omar Distribuidora");
+  });
+
+  it("un aparato vacío no pisa la fotocopia", () => {
+    const servidor = payload({ shifts: [turno("t1", "closed", 1)] });
+    const vacio = payload({ products: [], sales: [] });
+    const r = mergeBackup(servidor, vacio);
+    assert.equal(r.products.length, 1);
+    assert.deepEqual(r.shifts.map((s) => s.id), ["t1"]);
+  });
+});
+
+describe("la última vez que se sincronizó", () => {
+  const now = Date.parse("2026-09-18T15:00:00.000Z");
+  it("se lee en lenguaje de piso", () => {
+    assert.equal(haceCuanto("2026-09-18T14:59:40.000Z", now), "recién");
+    assert.equal(haceCuanto("2026-09-18T14:35:00.000Z", now), "hace 25 min");
+    assert.equal(haceCuanto("2026-09-18T13:00:00.000Z", now), "hace 2 h");
+    assert.equal(haceCuanto("2026-09-15T15:00:00.000Z", now), "hace 3 días");
   });
 });

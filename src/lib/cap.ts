@@ -1,4 +1,17 @@
-import type { DayBook, KioskPayload, MonthAgg, MonthSheet, OrderDraft, Product, Refund, Sale, SaleItem } from "@/lib/types";
+import type {
+  CashDrop,
+  CashShift,
+  DayBook,
+  KioskPayload,
+  MonthAgg,
+  MonthSheet,
+  OrderDraft,
+  Product,
+  Refund,
+  Sale,
+  SaleItem,
+  StockMove,
+} from "@/lib/types";
 import { unitCost } from "./pricing.ts";
 
 /** Live tickets we keep in the blob. Older ones fold into monthAggs. */
@@ -281,6 +294,58 @@ export function mergePayload(server: KioskPayload, local: KioskPayload): KioskPa
     monthSheets: mergeSheets(server.monthSheets ?? [], local.monthSheets ?? []),
     ticket: local.ticket?.length ? local.ticket : server.ticket,
   });
+}
+
+/** Un mismo turno en los dos lados: el cerrado gana sobre el abierto; si no, el de este aparato. */
+function richerShift(a: CashShift, b: CashShift): CashShift {
+  if (a.status !== b.status) return a.status === "closed" ? a : b;
+  return b;
+}
+
+function unionById<T extends { id: string }>(server: T[], local: T[], pick: (a: T, b: T) => T): T[] {
+  const map = new Map<string, T>();
+  for (const x of server) if (x?.id) map.set(x.id, x);
+  for (const x of local) {
+    if (!x?.id) continue;
+    const cur = map.get(x.id);
+    map.set(x.id, cur ? pick(cur, x) : x);
+  }
+  return [...map.values()];
+}
+
+const esteAparato = <T,>(_server: T, local: T) => local;
+const masNuevo = (a: { createdAt: string }, b: { createdAt: string }) => (a.createdAt < b.createdAt ? 1 : -1);
+
+/**
+ * Turnos, retiros e historial de stock no viajan por la cinta. Si dos aparatos
+ * suben la fotocopia, se suman los dos lados en lugar de ganar uno entero: el
+ * celu arrancaba con los turnos de cuando se abrió y, al subir, le borraba al
+ * respaldo los cierres de la caja. El aparato adopta lo mismo en su estado,
+ * para que la próxima subida sin choque no lo vuelva a perder.
+ */
+export function backupRecords(
+  server: Pick<KioskPayload, "shifts" | "drops" | "movements">,
+  local: Pick<KioskPayload, "shifts" | "drops" | "movements">,
+): Pick<KioskPayload, "shifts" | "drops" | "movements"> {
+  return {
+    shifts: unionById(server.shifts ?? [], local.shifts ?? [], richerShift).sort((a, b) =>
+      a.openedAt < b.openedAt ? 1 : -1,
+    ),
+    drops: unionById<CashDrop>(server.drops ?? [], local.drops ?? [], esteAparato).sort(masNuevo),
+    movements: unionById<StockMove>(server.movements ?? [], local.movements ?? [], esteAparato).sort(masNuevo),
+  };
+}
+
+/**
+ * El respaldo cuando dos fotocopias chocan: lo de mergePayload (ventas,
+ * devoluciones y pedidos sumados; el resto, de este aparato) más turnos,
+ * retiros e historial sumados. Ajustes y proveedores siguen con "gana el
+ * último". Antes de esto, quien sube ya bajó y aplicó la cinta, así que lo que
+ * viaja por ella (productos, stock, planilla, lotes) ya está al día.
+ */
+export function mergeBackup(server: KioskPayload, local: KioskPayload): KioskPayload {
+  // Ventas viejas y meses ya los cuida mergePayload: no cuenta dos veces lo mismo.
+  return prunePayload({ ...mergePayload(server, local), ...backupRecords(server, local) });
 }
 
 function remoteHasWork(p: KioskPayload | null | undefined): boolean {

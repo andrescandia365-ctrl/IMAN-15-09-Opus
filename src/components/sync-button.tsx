@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, RefreshCw } from "lucide-react";
 import { onQueueChange, listSyncLog, syncMeta, type SyncLogItem } from "@/lib/local-db";
+import { haceCuanto } from "@/lib/sync-log";
 import { reviewCloud } from "@/lib/sync";
 import { usePhoneUi } from "@/lib/device";
 import { cn } from "@/lib/utils";
 
-export function SyncButton({ storeId, rev }: { storeId: string; rev?: number }) {
+export function SyncButton({ storeId }: { storeId: string }) {
   const phone = usePhoneUi();
   const [last, setLast] = useState("");
   const [busy, setBusy] = useState(false);
@@ -55,7 +56,7 @@ export function SyncButton({ storeId, rev }: { storeId: string; rev?: number }) 
     setChecking(true);
     if (phone) setLive("Revisando si hay trabajo en la nube");
     try {
-      const r = await reviewCloud(storeId, { phone, rev });
+      const r = await reviewCloud(storeId, { phone });
       setLive(r.message);
       await listSyncLog(storeId).then(setItems);
       const m = await syncMeta(storeId);
@@ -92,6 +93,9 @@ export function SyncButton({ storeId, rev }: { storeId: string; rev?: number }) 
       {open ? (
         <div className="fixed right-3 top-20 z-50 w-[min(18rem,calc(100vw-1.5rem))] whitespace-normal rounded-xl bg-surface p-3 text-fg shadow-[var(--shadow-border)]">
           <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-subtle">Nube</p>
+          <p className="mt-1 text-xs text-muted">
+            {last ? `Última vez: ${haceCuanto(last, now)}` : "Todavía no se sincronizó en este aparato"}
+          </p>
           {checking && phone ? (
             <p className="mt-2 text-sm">Revisando si hay trabajo en la nube</p>
           ) : live ? (

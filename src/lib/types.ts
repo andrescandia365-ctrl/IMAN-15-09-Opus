@@ -292,4 +292,16 @@ export interface KioskPayload {
   staff?: StaffMember[];
   roster?: RosterSlot[];
   payouts?: StaffPayout[];
+  /**
+   * Hasta dónde de la cinta llega esta fotocopia: el cursor de quien la subió,
+   * qué aparato era y cuándo se sacó la foto (con su reloj). Un aparato que
+   * arranca de la fotocopia sigue la cinta desde ahí (ver pull-start.ts).
+   */
+  mark?: CopyMark;
+}
+
+export interface CopyMark {
+  seq: number;
+  device: string;
+  at: string;
 }

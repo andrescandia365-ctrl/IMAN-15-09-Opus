@@ -41,3 +41,15 @@ export function formatSyncLogLine(item: SyncLogItem): string {
   if (item.status === "done") return `${item.title} — ${item.detail} — listo`;
   return `${item.title} — ${item.detail}`;
 }
+
+/** "hace 2 h", para la línea de la última vez que el aparato puso su trabajo a salvo. */
+export function haceCuanto(iso: string, now = Date.now()): string {
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return "";
+  const min = Math.max(0, Math.floor((now - t) / 60_000));
+  if (min < 1) return "recién";
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 48) return `hace ${h} h`;
+  return `hace ${Math.floor(h / 24)} días`;
+}

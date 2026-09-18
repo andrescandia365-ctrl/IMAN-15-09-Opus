@@ -12,11 +12,21 @@ import { hashPin, pinLooksOk } from "@/lib/owner-pin";
 import { signOut } from "@/lib/auth/client";
 import { useCurrentUser } from "@/lib/auth/use-current-user";
 import { formatDateLong, daysUntil } from "@/lib/format";
-import { saveKiosk } from "@/lib/kiosk";
+import { pushCopy } from "@/lib/sync";
 import type { MyAccess } from "@/lib/license";
 import { PLAN_LABEL, type PlanMonths } from "@/lib/plan";
 import { RUBROS } from "@/lib/seed";
-import { snapshotKiosk, useImanStore } from "@/lib/store";
+import { useImanStore } from "@/lib/store";
+
+/**
+ * Cambios del dueño que no viajan por la cinta (nombre, rubro, ciudad, el
+ * catálogo de ejemplo): suben con la fotocopia, con su rev, así juntan en lugar
+ * de pisar lo que otro aparato haya subido (invariante 5).
+ */
+function subirFotocopia(): Promise<unknown> {
+  const storeId = useImanStore.getState().deskStoreId;
+  return storeId ? pushCopy(storeId) : Promise.resolve();
+}
 
 export function SettingsView({
   access,
@@ -59,8 +69,7 @@ export function SettingsView({
           disabled={signingOut}
           onClick={() => {
             setSigningOut(true);
-            const snap = snapshotKiosk(useImanStore.getState());
-            void saveKiosk({ data: snap })
+            void subirFotocopia()
               .catch((err) => console.error("[kiosk] save failed", err))
               .finally(() => {
                 void signOut("/").catch(() => setSigningOut(false));
@@ -106,7 +115,7 @@ export function SettingsView({
                 if (!n) return;
                 saveSettings({ name: n });
                 toast.success("Nombre actualizado");
-                void saveKiosk({ data: snapshotKiosk(useImanStore.getState()) }).catch((err) => {
+                void subirFotocopia().catch((err) => {
                   console.error("[kiosk] save failed", err);
                 });
               }}
@@ -124,7 +133,7 @@ export function SettingsView({
                 type="button"
                 onClick={() => {
                   saveSettings({ rubro: r.id });
-                  void saveKiosk({ data: snapshotKiosk(useImanStore.getState()) }).catch(() => {});
+                  void subirFotocopia().catch(() => {});
                 }}
                 className={
                   settings.rubro === r.id
@@ -159,7 +168,7 @@ export function SettingsView({
               onClick={() => {
                 saveSettings({ city: city.trim() });
                 toast.success("Ciudad actualizada");
-                void saveKiosk({ data: snapshotKiosk(useImanStore.getState()) }).catch((err) => {
+                void subirFotocopia().catch((err) => {
                   console.error("[kiosk] save failed", err);
                 });
               }}
@@ -406,7 +415,7 @@ export function SettingsView({
             onClick={() => {
               loadExampleCatalog();
               setWipeAsk(false);
-              void saveKiosk({ data: snapshotKiosk(useImanStore.getState()) });
+              void subirFotocopia();
               toast.success("Catálogo de ejemplo cargado");
             }}
           >
@@ -421,7 +430,7 @@ export function SettingsView({
               }
               const r = clearExampleCatalog();
               setWipeAsk(false);
-              void saveKiosk({ data: snapshotKiosk(useImanStore.getState()) });
+              void subirFotocopia();
               if (!r.products && !r.suppliers) {
                 toast("No había catálogo de ejemplo en este local.");
                 return;

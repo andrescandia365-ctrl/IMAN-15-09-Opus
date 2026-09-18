@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Toaster, toast } from "sonner";
 import { ActivateScreen } from "@/components/activate-screen";
@@ -28,10 +28,11 @@ import {
   saveLocalSnapshot,
   saveSession,
   setActiveLocalStore,
+  writeBlobRev,
 } from "@/lib/local-db";
 import { flushDeskOutbox } from "@/lib/desk-outbox";
 import { decideFloorBoot, isBrowserOnline, lockFloor, readFloorLockSync, type FloorLock } from "@/lib/floor-lock";
-import { flushCopy, pushCopy, pushQuiet } from "@/lib/sync";
+import { backupOnHide, flushCopy, pushQuiet, startFromCopy } from "@/lib/sync";
 import { registerPwa } from "@/lib/pwa";
 import { authEnabled } from "@/lib/auth/client";
 import { errorText } from "@/lib/errors";
@@ -104,8 +105,6 @@ export function App() {
   const [gate, setGate] = useState<Gate>(() => (authEnabled ? "hub" : "desk"));
   const [floor, setFloor] = useState(false);
   const [pullError, setPullError] = useState<string | null>(null);
-  const storeRev = useRef(0);
-  const copyFailToast = useRef(false);
 
   const floorUser = user ?? (lock ? userFromLock(lock) : null);
   const userId = floorUser?.id ?? null;
@@ -252,11 +251,13 @@ export function App() {
           const storeId = account.stores.some((s) => s.id === keep) ? keep : account.activeStoreId;
           setActiveStoreId(storeId);
           setActiveLocalStore(storeId);
-          storeRev.current = account.rev;
+          void writeBlobRev(storeId, account.rev);
           const local = await loadLocalSnapshot(storeId);
           const payload = localHasCopy(local)
             ? mergePayload(account.payload, local!)
             : account.payload;
+          // Sin copia propia el aparato arranca de la fotocopia: sigue la cinta desde donde llega la foto.
+          if (!localHasCopy(local)) await startFromCopy(storeId, account.payload);
           hydrateKiosk(payload, { restore: !localHasCopy(local) });
           void saveLocalSnapshot(storeId, payload);
           void saveSession({
@@ -313,6 +314,7 @@ export function App() {
     if (!userId || !hydrated || gate !== "desk") return;
     let t: number | undefined;
     let last = "";
+    let subido = "";
     const DATA = [
       "products",
       "categories",
@@ -352,7 +354,7 @@ export function App() {
             void appendSyncLog(activeStoreId, {
               kind: "catalog",
               title: "Catálogo",
-              detail: "subiendo a la nube",
+              detail: "sube al sincronizar",
               status: "pending",
             }).catch(() => {});
           }
@@ -364,27 +366,19 @@ export function App() {
           );
         }
         void saveLocalSnapshot(activeStoreId, snap).catch(() => {});
-        if (isBrowserOnline()) {
-          void pushCopy(activeStoreId, snap)
-            .then((r) => {
-              if (r.ok) {
-                copyFailToast.current = false;
-                return;
-              }
-              if (!copyFailToast.current) {
-                copyFailToast.current = true;
-                toast.error(r.error || "No pude subir el local. Quedó pendiente.");
-              }
-            })
-            .catch(() => {});
-          void pushQuiet(activeStoreId).catch(() => {});
-        } else {
-          void pushCopy(activeStoreId, snap).catch(() => {});
-        }
+        // La cinta sube sola. La fotocopia no (invariante 6): sube con
+        // Sincronizar, al cerrar el turno y al cerrar la app. Si subiera en cada
+        // cambio, el botón sería decorativo y las fotocopias se pisarían.
+        if (isBrowserOnline()) void pushQuiet(activeStoreId).catch(() => {});
       };
       window.clearTimeout(t);
       if (immediate) {
         run();
+        // Al cerrar o esconder la app, si cambió algo desde la última vez.
+        if (last !== subido) {
+          subido = last;
+          void backupOnHide(activeStoreId).catch(() => {});
+        }
         return;
       }
       t = window.setTimeout(run, 400);
@@ -425,7 +419,7 @@ export function App() {
   function applyBundle(bundle: AccountBundle, nextGate: Gate) {
     setStores(bundle.stores);
     setActiveStoreId(bundle.activeStoreId);
-    storeRev.current = bundle.rev;
+    void writeBlobRev(bundle.activeStoreId, bundle.rev);
     hydrateKiosk(bundle.payload);
     setGate(nextGate);
   }
@@ -451,7 +445,8 @@ export function App() {
         : bundle.payload;
       setStores(bundle.stores);
       setActiveStoreId(bundle.activeStoreId);
-      storeRev.current = bundle.rev;
+      void writeBlobRev(bundle.activeStoreId, bundle.rev);
+      if (!localHasCopy(local)) await startFromCopy(bundle.activeStoreId, bundle.payload);
       hydrateKiosk(payload, { restore: !localHasCopy(local) });
       setGate("desk");
       void saveLocalSnapshot(id, payload);

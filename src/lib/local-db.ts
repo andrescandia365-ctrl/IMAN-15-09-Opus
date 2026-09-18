@@ -169,6 +169,14 @@ export async function markAcked(storeId: string, ids: string[]): Promise<void> {
   await editQueue(storeId, (q) => ackEvents(q, ids));
 }
 
+/**
+ * Pone el cursor de la cinta donde llega la fotocopia con la que arrancó el
+ * aparato. No cuenta como sincronizar: la hora de la última vez no se toca.
+ */
+export async function startPullAt(storeId: string, seq: number): Promise<void> {
+  await editQueue(storeId, (q) => ({ ...q, lastPullSeq: Math.max(q.lastPullSeq, seq) }));
+}
+
 export async function rememberPulled(
   storeId: string,
   events: ImanEvent[],
@@ -259,6 +267,24 @@ export async function resolvePendingLogs(
     });
     if (changed) await writeLog(storeId, next);
   });
+}
+
+function revKey(storeId: string) {
+  return `rev:${storeId}`;
+}
+
+/**
+ * El rev de la última fotocopia de este local que este aparato conoce del
+ * servidor. Se manda al subir: si otro aparato subió en el medio, el servidor
+ * no pisa y devuelve la suya para juntar (invariante 5).
+ */
+export async function readBlobRev(storeId: string): Promise<number | null> {
+  const v = await idbGet<number>(revKey(storeId));
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+export async function writeBlobRev(storeId: string, rev: number): Promise<void> {
+  await idbSet(revKey(storeId), rev);
 }
 
 function startKey(storeId: string) {
