@@ -230,6 +230,10 @@ export interface MonthAgg {
   cogsMissing?: number;
   /** Ausente o `false` = plegado con el método viejo, que estimaba el costo. */
   cogsTrusted?: boolean;
+  /** Plata devuelta a clientes ese mes. Ausente = el mes se plegó sin esto. */
+  devoluciones?: number;
+  /** Lo que había costado la mercadería que volvió a la góndola. */
+  devolucionesCogs?: number;
 }
 
 export interface MonthSheet {

@@ -1,4 +1,4 @@
-import type { DayBook, KioskPayload, MonthAgg, MonthSheet, OrderDraft, Product, Sale, SaleItem } from "@/lib/types";
+import type { DayBook, KioskPayload, MonthAgg, MonthSheet, OrderDraft, Product, Refund, Sale, SaleItem } from "@/lib/types";
 import { unitCost } from "./pricing.ts";
 
 /** Live tickets we keep in the blob. Older ones fold into monthAggs. */
@@ -30,6 +30,22 @@ function lineCost(it: SaleItem, byId: Map<string, Product>): number | null {
   return p ? unitCost(p) : null;
 }
 
+function emptyAgg(ym: string): MonthAgg {
+  return {
+    ym,
+    ventas: 0,
+    tickets: 0,
+    mp: 0,
+    efectivo: 0,
+    debito: 0,
+    cogs: 0,
+    cogsMissing: 0,
+    cogsTrusted: true,
+    devoluciones: 0,
+    devolucionesCogs: 0,
+  };
+}
+
 function foldSale(map: Map<string, MonthAgg>, s: Sale, byId: Map<string, Product>): void {
   const ym = ymOf(s.createdAt);
   const cur = map.get(ym) ?? {
@@ -56,6 +72,31 @@ function foldSale(map: Map<string, MonthAgg>, s: Sale, byId: Map<string, Product
   map.set(ym, cur);
 }
 
+/**
+ * Lo que había costado lo que el cliente devolvió: primero el costo que guardó
+ * la línea de la venta original, después el costo de hoy del producto, y si no
+ * hay ninguno la unidad se cuenta como faltante. Nunca estimado.
+ */
+function foldRefund(
+  map: Map<string, MonthAgg>,
+  r: Refund,
+  byId: Map<string, Product>,
+  salesById: Map<string, Sale>,
+): void {
+  const ym = ymOf(r.createdAt);
+  const cur = map.get(ym) ?? emptyAgg(ym);
+  cur.devoluciones = (cur.devoluciones ?? 0) + r.amount;
+  const linea = r.saleId
+    ? salesById.get(r.saleId)?.items.find((it) => it.productId === r.productId)
+    : undefined;
+  const prod = byId.get(r.productId);
+  const c =
+    typeof linea?.cost === "number" && linea.cost > 0 ? linea.cost : prod ? unitCost(prod) : null;
+  if (c == null) cur.cogsMissing = (cur.cogsMissing ?? 0) + r.units;
+  else cur.devolucionesCogs = (cur.devolucionesCogs ?? 0) + c * r.units;
+  map.set(ym, cur);
+}
+
 export function mergeAggs(a: MonthAgg[], b: MonthAgg[]): MonthAgg[] {
   const map = new Map<string, MonthAgg>();
   for (const row of [...a, ...b]) {
@@ -75,6 +116,8 @@ export function mergeAggs(a: MonthAgg[], b: MonthAgg[]): MonthAgg[] {
       cogsMissing: (cur.cogsMissing ?? 0) + (row.cogsMissing ?? 0),
       // Basta con que una mitad venga del método viejo para no poder confiar.
       cogsTrusted: cur.cogsTrusted === true && row.cogsTrusted === true,
+      devoluciones: (cur.devoluciones ?? 0) + (row.devoluciones ?? 0),
+      devolucionesCogs: (cur.devolucionesCogs ?? 0) + (row.devolucionesCogs ?? 0),
     });
   }
   return [...map.values()].sort((x, y) => y.ym.localeCompare(x.ym)).slice(0, 36);
@@ -100,6 +143,17 @@ export function prunePayload(p: KioskPayload): KioskPayload {
   const map = new Map<string, MonthAgg>();
   const byId = new Map(p.products.map((x) => [x.id, x]));
   for (const s of folded) foldSale(map, s, byId);
+
+  // Las devoluciones a clientes se pliegan con el mismo corte que las ventas y
+  // salen de la lista. Si se quedaran, cada guardado las volvería a sumar al
+  // mes: la venta no se duplica porque al plegarse se va, y acá igual.
+  const salesById = new Map(p.sales.map((x) => [x.id, x]));
+  const refundsKeep: Refund[] = [];
+  for (const r of p.refunds ?? []) {
+    const viejo = new Date(r.createdAt).getTime() < cutoff;
+    if (r.kind === "cliente" && viejo) foldRefund(map, r, byId, salesById);
+    else refundsKeep.push(r);
+  }
   extra.push(...map.values());
 
   const bookCut = Date.now() - BOOKS_KEEP * 86_400_000;
@@ -115,7 +169,7 @@ export function prunePayload(p: KioskPayload): KioskPayload {
     shifts: [...p.shifts].sort((a, b) => (a.openedAt < b.openedAt ? 1 : -1)).slice(0, SHIFTS_KEEP),
     drops: keepNewest(p.drops, DROPS_KEEP),
     orders: keepNewest(p.orders, ORDERS_KEEP),
-    refunds: keepNewest(p.refunds ?? [], REFUNDS_KEEP),
+    refunds: keepNewest(refundsKeep, REFUNDS_KEEP),
     payouts: keepNewest(p.payouts ?? [], PAYOUTS_KEEP),
     roster: (p.roster ?? []).filter((r) => {
       const t = new Date(`${r.date}T12:00:00`).getTime();

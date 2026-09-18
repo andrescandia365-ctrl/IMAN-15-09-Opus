@@ -32,7 +32,7 @@ import { PAY_LABEL, formatARS, todayKey } from "@/lib/format";
 import type { StoreMeta, StoreRollup } from "@/lib/kiosk";
 import type { MyAccess } from "@/lib/license";
 import { unitCost } from "@/lib/pricing";
-import type { MonthAgg, PayMethod, Product, Sale } from "@/lib/types";
+import type { MonthAgg, PayMethod, Product, Refund, Sale } from "@/lib/types";
 import { useImanStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { usePhoneUi } from "@/lib/device";
@@ -84,6 +84,7 @@ export function OwnerDesk({
   const monthExpenses = useImanStore((s) => s.settings.monthExpenses);
   const mpFeePct = useImanStore((s) => s.settings.mpFeePct);
   const products = useImanStore((s) => s.products);
+  const refunds = useImanStore((s) => s.refunds);
   const [salidaOpen, setSalidaOpen] = useState(false);
   const [resultadoOpen, setResultadoOpen] = useState(false);
 
@@ -475,6 +476,7 @@ export function OwnerDesk({
                 <ResultadoDelMes
                   ym={ym}
                   sales={sales}
+                  refunds={refunds}
                   aggs={monthAggs}
                   products={products}
                   mpFeePct={mpFeePct ?? 0.06}
@@ -754,6 +756,7 @@ function plural(n: number, uno: string, varios: string): string {
 function ResultadoDelMes({
   ym,
   sales,
+  refunds,
   aggs,
   products,
   mpFeePct,
@@ -763,6 +766,7 @@ function ResultadoDelMes({
 }: {
   ym: string;
   sales: Sale[];
+  refunds: Refund[];
   aggs: MonthAgg[];
   products: Product[];
   mpFeePct: number;
@@ -797,20 +801,43 @@ function ResultadoDelMes({
         if (p && new Date(p.priceUpdatedAt).getTime() < viejo) precioViejo.add(p.name);
       }
     }
+    // Lo que volvió a la góndola: se resta de las ventas una sola vez, y su
+    // costo se devuelve porque la mercadería está de nuevo adentro.
+    let devuelto = 0;
+    let devueltoCosto = 0;
+    const ventasById = new Map(sales.map((x) => [x.id, x]));
+    for (const r of refunds) {
+      if (r.kind !== "cliente" || ymLocal(r.createdAt) !== ym) continue;
+      devuelto += r.amount;
+      const linea = r.saleId
+        ? ventasById.get(r.saleId)?.items.find((it) => it.productId === r.productId)
+        : undefined;
+      const prod = byId.get(r.productId);
+      const c =
+        typeof linea?.cost === "number" && linea.cost > 0 ? linea.cost : prod ? unitCost(prod) : null;
+      if (c == null) faltantes += r.units;
+      else devueltoCosto += c * r.units;
+    }
     const agg = aggs.find((a) => a.ym === ym);
     if (agg) {
       ventas += agg.ventas;
       ventasMp += agg.mp;
       costo += agg.cogs;
       faltantes += agg.cogsMissing ?? 0;
+      devuelto += agg.devoluciones ?? 0;
+      devueltoCosto += agg.devolucionesCogs ?? 0;
     }
     const comision = ventasMp * mpFeePct;
     const gastos = gastosPlanilla + gastosFijos;
-    const margen = ventas - costo - comision - gastos;
+    const margen = ventas - devuelto - costo + devueltoCosto - comision - gastos;
     return {
       ventas,
       ventasMp,
       costo,
+      devuelto,
+      devueltoCosto,
+      // Un mes plegado antes de que existiera esto no guardó sus devoluciones.
+      aggSinDevoluciones: Boolean(agg) && agg?.devoluciones === undefined,
       faltantes,
       comision,
       gastos,
@@ -821,7 +848,7 @@ function ResultadoDelMes({
       sinCosto: [...sinCosto],
       precioViejo: [...precioViejo],
     };
-  }, [ym, sales, aggs, products, mpFeePct, gastosPlanilla, gastosFijos, retiros]);
+  }, [ym, sales, refunds, aggs, products, mpFeePct, gastosPlanilla, gastosFijos, retiros]);
 
   const fuenteVentas =
     r.fuente === "vivo"
@@ -850,6 +877,19 @@ function ResultadoDelMes({
 
       <ul className="mt-3 flex flex-col">
         <Renglon k="Ventas del mes" v={r.ventas} fuente={fuenteVentas} />
+        {r.devuelto || r.devueltoCosto || r.aggSinDevoluciones ? (
+          <>
+            <Renglon
+              k="Devoluciones a clientes"
+              v={-r.devuelto}
+              fuente={
+                r.aggSinDevoluciones
+                  ? "De este mes no quedaron devoluciones registradas"
+                  : "Lo que se le devolvió al cliente, una sola vez"
+              }
+            />
+          </>
+        ) : null}
         <Renglon
           k="Costo de lo vendido"
           v={-r.costo}
@@ -859,10 +899,17 @@ function ResultadoDelMes({
               : "Costo guardado en cada venta; si falta, el del catálogo de hoy"
           }
         />
+        {r.devuelto || r.devueltoCosto ? (
+          <Renglon
+            k="Costo de lo devuelto"
+            v={r.devueltoCosto}
+            fuente="La mercadería volvió a la góndola: su costo se devuelve"
+          />
+        ) : null}
         <Renglon
           k="Comisión Mercado Pago"
           v={-r.comision}
-          fuente={`${(mpFeePct * 100).toLocaleString("es-AR", { maximumFractionDigits: 2 })}% sobre ${formatARS(r.ventasMp)} en Mercado Pago`}
+          fuente={`${(mpFeePct * 100).toLocaleString("es-AR", { maximumFractionDigits: 2 })}% sobre ${formatARS(r.ventasMp)} cobrados por Mercado Pago · la cobran igual si el cliente devuelve`}
         />
         <Renglon
           k="Gastos"
