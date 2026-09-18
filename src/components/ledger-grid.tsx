@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { ChevronDown, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { PriceCalcButton } from "@/components/price-calc";
 import { formatARS, formatMiles, todayKey } from "@/lib/format";
 import {
   LEDGER_ROWS,
@@ -54,33 +53,51 @@ const DATE_CELL =
 
 export function EncargadoBook({ defaultOpen = false }: { defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
+  const [full, setFull] = useState(false);
   const ym = currentYm();
   return (
-    <section className="rounded-xl bg-surface shadow-[var(--shadow-border)]">
+    <section className="flex min-h-0 flex-col rounded-xl bg-surface shadow-[var(--shadow-border)]">
       <div className="flex items-center gap-2 px-5 py-4">
+        <span className="min-w-0 flex-1">
+          <span className="block text-xs font-medium uppercase tracking-[0.14em] text-subtle">Encargado</span>
+          <span className="mt-0.5 block font-display text-xl tracking-tight">Asientos · {monthTitle(ym)}</span>
+        </span>
+        {open ? (
+          <Button size="sm" variant="secondary" onClick={() => setFull(true)}>
+            <Maximize2 className="size-4" />
+            Pantalla completa
+          </Button>
+        ) : null}
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
+          className="grid size-9 shrink-0 place-items-center rounded-md text-muted hover:bg-elevated hover:text-fg"
+          aria-label={open ? "Cerrar la planilla" : "Abrir la planilla"}
         >
-          <span>
-            <span className="block text-xs font-medium uppercase tracking-[0.14em] text-subtle">Encargado</span>
-            <span className="mt-0.5 block font-display text-xl tracking-tight">Asientos · {monthTitle(ym)}</span>
-          </span>
-          <ChevronDown className={cn("size-4 text-muted transition-transform", open && "rotate-180")} />
+          <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />
         </button>
-        <PriceCalcButton />
       </div>
       {open ? (
-        <div className="h-[min(36rem,70dvh)] min-h-0 border-t border-border px-3 pb-3 pt-2">
-          <LedgerSheet ym={ym} editable />
+        <div className="h-[min(44rem,78dvh)] min-h-0 border-t border-border px-3 pb-3 pt-2">
+          <LedgerSheet ym={ym} editable full={full} onFull={setFull} />
         </div>
       ) : null}
     </section>
   );
 }
 
-export function LedgerSheet({ ym, editable }: { ym: string; editable: boolean }) {
+export function LedgerSheet({
+  ym,
+  editable,
+  full: fullProp,
+  onFull,
+}: {
+  ym: string;
+  editable: boolean;
+  /** Con esto la tarjeta de afuera maneja el botón y la planilla no lo dibuja. */
+  full?: boolean;
+  onFull?: (v: boolean) => void;
+}) {
   const books = useImanStore((s) => s.books);
   const sheets = useImanStore((s) => s.monthSheets);
   const setLedgerCell = useImanStore((s) => s.setLedgerCell);
@@ -89,7 +106,13 @@ export function LedgerSheet({ ym, editable }: { ym: string; editable: boolean })
   const dates = useMemo(() => monthDates(ym), [ym]);
   const today = todayKey();
   const scroller = useDragScroll<HTMLDivElement>();
-  const [full, setFull] = useState(false);
+  const [fullPropio, setFullPropio] = useState(false);
+  const deAfuera = fullProp !== undefined;
+  const full = deAfuera ? fullProp : fullPropio;
+  const setFull = (v: boolean) => {
+    if (deAfuera) onFull?.(v);
+    else setFullPropio(v);
+  };
   const live = useMemo(() => {
     const ofYm = books.filter((b) => b.date.startsWith(ym));
     if (ofYm.length) return books;
@@ -118,10 +141,11 @@ export function LedgerSheet({ ym, editable }: { ym: string; editable: boolean })
    * de pantalla completa hay que soltarlo a mano: si no, el número se va con la
    * pantalla sin haber llegado a la planilla.
    */
-  function salirDePantallaCompleta() {
+  const salirDePantallaCompleta = useCallback(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    setFull(false);
-  }
+    if (deAfuera) onFull?.(false);
+    else setFullPropio(false);
+  }, [deAfuera, onFull]);
 
   useEffect(() => {
     if (!full) return;
@@ -131,7 +155,7 @@ export function LedgerSheet({ ym, editable }: { ym: string; editable: boolean })
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [full]);
+  }, [full, salirDePantallaCompleta]);
 
   // Al abrir, y al cambiar de tamaño la planilla, el día de hoy queda a la vista.
   useEffect(() => {
@@ -143,29 +167,31 @@ export function LedgerSheet({ ym, editable }: { ym: string; editable: boolean })
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col gap-2", full && "fixed inset-0 z-50 bg-surface p-3")}>
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        {full ? (
-          <span className="font-display text-lg tracking-tight">{monthTitle(ym)}</span>
-        ) : (
-          <span />
-        )}
-        {full ? (
-          <Button
-            size="sm"
-            variant="secondary"
-            aria-label="Salir de pantalla completa"
-            onClick={salirDePantallaCompleta}
-          >
-            <Minimize2 className="size-4" />
-            Salir
-          </Button>
-        ) : (
-          <Button size="sm" variant="secondary" onClick={() => setFull(true)}>
-            <Maximize2 className="size-4" />
-            Pantalla completa
-          </Button>
-        )}
-      </div>
+      {full || !deAfuera ? (
+        <div className="flex shrink-0 items-center justify-between gap-2">
+          {full ? (
+            <span className="font-display text-lg tracking-tight">{monthTitle(ym)}</span>
+          ) : (
+            <span />
+          )}
+          {full ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              aria-label="Salir de pantalla completa"
+              onClick={salirDePantallaCompleta}
+            >
+              <Minimize2 className="size-4" />
+              Salir
+            </Button>
+          ) : (
+            <Button size="sm" variant="secondary" onClick={() => setFull(true)}>
+              <Maximize2 className="size-4" />
+              Pantalla completa
+            </Button>
+          )}
+        </div>
+      ) : null}
       <div
         ref={scroller}
         className="ledger-sheet no-scrollbar min-h-0 flex-1 cursor-grab touch-none overflow-auto rounded-lg bg-paper text-ink select-none active:cursor-grabbing"

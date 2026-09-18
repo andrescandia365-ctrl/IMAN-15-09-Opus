@@ -1,13 +1,5 @@
 import { useMemo, useState } from "react";
-import { Search, Tag } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -31,26 +23,20 @@ function verFactor(n: number): string {
  * costo nuevo, sin tener que llamar al dueño. No escribe nada — los
  * multiplicadores y el redondeo se siguen tocando solo en el panel del dueño.
  */
-export function PriceCalcButton() {
-  const [open, setOpen] = useState(false);
+export function PriceCalcCard() {
   return (
-    <>
-      <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
-        <Tag className="size-4" />
-        Precios
-      </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="w-[min(34rem,calc(100vw-24px))]">
-          <DialogHeader>
-            <DialogTitle>Precios</DialogTitle>
-            <DialogDescription>
-              A cuánto vender. Los márgenes los pone el dueño; acá solo se consulta.
-            </DialogDescription>
-          </DialogHeader>
-          <PriceCalc />
-        </DialogContent>
-      </Dialog>
-    </>
+    <section className="flex min-h-0 flex-col rounded-xl bg-surface shadow-[var(--shadow-border)]">
+      <div className="shrink-0 px-5 py-4">
+        <span className="block text-xs font-medium uppercase tracking-[0.14em] text-subtle">Herramienta</span>
+        <span className="mt-0.5 block font-display text-xl tracking-tight">Precios</span>
+        <p className="mt-1 text-xs leading-snug text-muted">
+          A cuánto vender. Los márgenes los pone el dueño; acá solo se consulta.
+        </p>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto border-t border-border px-4 pb-4">
+        <PriceCalc />
+      </div>
+    </section>
   );
 }
 

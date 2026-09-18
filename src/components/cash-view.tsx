@@ -16,6 +16,7 @@ import { formatARS, formatTime } from "@/lib/format";
 import { useCashSnapshot, useImanStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { EncargadoBook } from "@/components/ledger-grid";
+import { PriceCalcCard } from "@/components/price-calc";
 import { onShiftNow } from "@/lib/team";
 
 export function CashView() {
@@ -183,7 +184,10 @@ export function CashView() {
         ) : null}
       </section>
 
-      <EncargadoBook defaultOpen />
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,7fr)_minmax(280px,3fr)]">
+        <EncargadoBook defaultOpen />
+        <PriceCalcCard />
+      </div>
 
       <Dialog open={dropOpen} onOpenChange={setDropOpen}>
         <DialogContent>
