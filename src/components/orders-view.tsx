@@ -146,31 +146,50 @@ export function OrdersView() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-[minmax(0,1.2fr)_minmax(260px,0.8fr)]">
         <div className="flex min-h-0 flex-col gap-3 overflow-hidden">
-          <div className="flex w-full gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setDay(0)}
               className={cn(
-                "h-10 min-w-0 flex-1 rounded-full px-2 text-sm font-medium",
+                "h-10 shrink-0 rounded-full px-4 text-sm font-medium",
                 day === 0 ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
               )}
             >
               Todos
             </button>
-            {DAYS.map((d) => (
-              <button
-                key={d.n}
-                type="button"
-                onClick={() => setDay(d.n)}
-                className={cn(
-                  "h-10 min-w-0 flex-1 rounded-full px-2 text-sm font-medium",
-                  day === d.n ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
-                )}
-              >
-                {d.label}
-                {d.n === today ? <span className="ml-1 text-[10px] opacity-80">hoy</span> : null}
-              </button>
-            ))}
+            <div className="inline-flex shrink-0 items-center rounded-full bg-elevated p-1 shadow-[var(--shadow-border)]">
+              {DAYS.map((d) => (
+                <button
+                  key={d.n}
+                  type="button"
+                  onClick={() => setDay(d.n)}
+                  className={cn(
+                    "relative h-9 rounded-full px-3 text-sm font-medium",
+                    day === d.n ? "bg-accent text-accent-fg" : "text-muted hover:text-fg",
+                  )}
+                >
+                  {d.label}
+                  {d.n === today ? (
+                    <span
+                      aria-label="hoy"
+                      className={cn(
+                        "absolute left-1/2 top-1 size-1 -translate-x-1/2 rounded-full",
+                        day === d.n ? "bg-accent-fg" : "bg-accent",
+                      )}
+                    />
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-subtle">
+              Proveedores <span className="num text-muted">{ofDay.length}</span>
+            </p>
+            <Button size="sm" variant="secondary" className="shrink-0" onClick={openNew}>
+              <Plus className="size-4" />
+              Registrar proveedor
+            </Button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {ofDay.length === 0 ? (
@@ -231,12 +250,6 @@ export function OrdersView() {
         </div>
 
         <div className="flex min-h-0 flex-col gap-3 overflow-hidden">
-          <div className="flex justify-end">
-            <Button variant="secondary" className="shrink-0" onClick={openNew}>
-              <Plus className="size-4" />
-              Registrar proveedor
-            </Button>
-          </div>
           <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
           <h2 className="flex items-center gap-2 font-display text-xl tracking-tight">
             <Truck className="size-4" />
