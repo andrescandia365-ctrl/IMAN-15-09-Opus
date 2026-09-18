@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { incomingCopy, mergeOrders, richerOrder } from "./cap.ts";
+import { incomingCopy, mergeOrders, mergePayload, richerOrder } from "./cap.ts";
 import { pruneSyncLog, trimSyncLog, type SyncLogItem } from "./sync-log.ts";
-import type { KioskPayload, OrderDraft, Settings } from "./types.ts";
+import type { KioskPayload, MonthAgg, OrderDraft, Sale, Settings } from "./types.ts";
 
 const settings = { name: "Faro", city: "", onboarded: true } as Settings;
 
@@ -131,5 +131,47 @@ describe("líneas que no vencen", () => {
     const quedan = trimSyncLog(rows, now);
     assert.equal(quedan.length, 41);
     assert.equal(quedan.at(-1)?.id, "arranque");
+  });
+});
+
+describe("juntar la fotocopia con la copia del aparato no cuenta plata dos veces", () => {
+  const hace = (dias: number) => new Date(Date.now() - dias * 86_400_000).toISOString();
+  const agosto: MonthAgg = { ym: "2026-08", ventas: 1000, tickets: 10, mp: 0, efectivo: 1000, debito: 0, cogs: 500 };
+  const venta = (id: string, dias: number): Sale => ({
+    id,
+    createdAt: hace(dias),
+    paymentMethod: "efectivo",
+    note: "",
+    total: 100,
+    paid: null,
+    items: [],
+  });
+
+  it("dos copias con los mismos meses no los duplican", () => {
+    const r = mergePayload(payload({ monthAggs: [agosto] }), payload({ monthAggs: [{ ...agosto }] }));
+    assert.equal(r.monthAggs?.find((a) => a.ym === "2026-08")?.ventas, 1000);
+    assert.equal(r.monthAggs?.find((a) => a.ym === "2026-08")?.tickets, 10);
+  });
+
+  it("recargar muchas veces tampoco", () => {
+    let aca = payload({ monthAggs: [agosto] });
+    for (let i = 0; i < 5; i++) aca = mergePayload(payload({ monthAggs: [agosto] }), aca);
+    assert.equal(aca.monthAggs?.find((a) => a.ym === "2026-08")?.ventas, 1000);
+  });
+
+  it("gana el resumen más completo del mes", () => {
+    const masCompleto = { ...agosto, ventas: 1500, tickets: 15 };
+    const r = mergePayload(payload({ monthAggs: [masCompleto] }), payload({ monthAggs: [agosto] }));
+    assert.equal(r.monthAggs?.find((a) => a.ym === "2026-08")?.ventas, 1500);
+  });
+
+  it("una venta vieja que solo tiene la fotocopia no se vuelve a plegar; una nueva sí entra", () => {
+    // Este aparato ya plegó la vieja a su resumen; la fotocopia todavía la tenía suelta.
+    const mesViejo: MonthAgg = { ym: hace(10).slice(0, 7), ventas: 100, tickets: 1, mp: 0, efectivo: 100, debito: 0, cogs: 0 };
+    const fotocopia = payload({ sales: [venta("vieja", 10), venta("nueva", 1)], monthAggs: [] });
+    const aca = payload({ sales: [], monthAggs: [mesViejo] });
+    const r = mergePayload(fotocopia, aca);
+    assert.deepEqual(r.sales.map((s) => s.id), ["nueva"]);
+    assert.equal(r.monthAggs?.find((a) => a.ym === mesViejo.ym)?.ventas, 100);
   });
 });

@@ -123,6 +123,23 @@ export function mergeAggs(a: MonthAgg[], b: MonthAgg[]): MonthAgg[] {
   return [...map.values()].sort((x, y) => y.ym.localeCompare(x.ym)).slice(0, 36);
 }
 
+/**
+ * El mismo mes en dos copias del local (la fotocopia y la del aparato) es el
+ * mismo resumen visto dos veces, no dos cajas: hay una sola caja por local.
+ * Gana el que tiene más tickets, y si empatan el de este aparato. mergeAggs los
+ * suma, que es lo que va al plegar ventas nuevas; al juntar copias duplicaba
+ * "El mes" en cada recarga.
+ */
+export function sameAggs(server: MonthAgg[], local: MonthAgg[]): MonthAgg[] {
+  const map = new Map<string, MonthAgg>();
+  for (const row of server) map.set(row.ym, row);
+  for (const row of local) {
+    const cur = map.get(row.ym);
+    map.set(row.ym, cur && cur.tickets > row.tickets ? cur : row);
+  }
+  return [...map.values()].sort((x, y) => y.ym.localeCompare(x.ym)).slice(0, 36);
+}
+
 function keepNewest<T extends { createdAt: string }>(rows: T[], n: number): T[] {
   if (rows.length <= n) return rows;
   return [...rows].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, n);
@@ -228,12 +245,17 @@ export function mergePayload(server: KioskPayload, local: KioskPayload): KioskPa
       orders: mergeOrders(server.orders, local.orders),
     });
   }
+  // Una venta vieja que solo tiene la fotocopia ya está plegada en el resumen de
+  // este aparato (hay una sola caja). Si entrara, al recortar se volvería a
+  // plegar y el mes quedaría contado de más. Lo mismo con las devoluciones.
+  const cutoff = Date.now() - SALES_DAYS * 86_400_000;
+  const viejo = (iso: string) => new Date(iso).getTime() < cutoff;
   const salesById = new Map<string, Sale>();
-  for (const s of server.sales) salesById.set(s.id, s);
+  for (const s of server.sales) if (!viejo(s.createdAt)) salesById.set(s.id, s);
   for (const s of local.sales) salesById.set(s.id, s);
   const sales = [...salesById.values()].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   const refundsById = new Map<string, NonNullable<KioskPayload["refunds"]>[number]>();
-  for (const r of server.refunds ?? []) refundsById.set(r.id, r);
+  for (const r of server.refunds ?? []) if (r.kind !== "cliente" || !viejo(r.createdAt)) refundsById.set(r.id, r);
   for (const r of local.refunds ?? []) refundsById.set(r.id, r);
   const refunds = [...refundsById.values()].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   const products = local.products.length ? local.products : server.products;
@@ -255,7 +277,7 @@ export function mergePayload(server: KioskPayload, local: KioskPayload): KioskPa
     sales,
     refunds,
     orders: mergeOrders(server.orders, local.orders),
-    monthAggs: mergeAggs(server.monthAggs ?? [], local.monthAggs ?? []),
+    monthAggs: sameAggs(server.monthAggs ?? [], local.monthAggs ?? []),
     monthSheets: mergeSheets(server.monthSheets ?? [], local.monthSheets ?? []),
     ticket: local.ticket?.length ? local.ticket : server.ticket,
   });
