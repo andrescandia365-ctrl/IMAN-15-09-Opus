@@ -176,6 +176,16 @@ const trustedOrigins = (request?: Request): string[] => {
 };
 
 const databaseUrl = env("DATABASE_URL");
+if (databaseUrl && !env("BETTER_AUTH_SECRET")) {
+  throw new Error(
+    "BETTER_AUTH_SECRET is required when DATABASE_URL is set — a random secret per process would sign people out on every cold start.",
+  );
+}
+if (databaseUrl && !explicitBaseURL) {
+  throw new Error(
+    "BETTER_AUTH_URL is required when DATABASE_URL is set — email sign-in needs the public origin.",
+  );
+}
 
 // Static broker OAuth endpoints (skip OIDC discovery on every sign-in / callback).
 // Discovery would cost an extra network hop to the broker before the popup can
@@ -224,8 +234,8 @@ const grokOAuthPlugin = authConfigured
 
 export const auth = betterAuth({
   baseURL,
-  // Deployed apps inject BETTER_AUTH_SECRET. Preview: process-stable secret on
-  // globalThis so HMR doesn't invalidate PGLite-backed sessions (see above).
+  // Neon/prod: BETTER_AUTH_SECRET is required (checked above). Preview: a
+  // process-stable secret on globalThis so HMR doesn't invalidate sessions.
   secret: env("BETTER_AUTH_SECRET") ?? previewAuthSecret(),
   database,
 

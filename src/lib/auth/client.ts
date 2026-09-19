@@ -44,10 +44,9 @@ export const authClient = createAuthClient({
 
 /**
  * True when sign-in UI should be shown — i.e. whenever `VITE_AUTH_ENABLED` is
- * not `"false"`. The shipped template sets it to `"false"`
- * (`.grok/app-env.json`), which selects the dev user (see `use-current-user`);
- * with the key removed, sign-in is real in preview (baked preview client) and
- * when deployed (injected per-app client).
+ * not `"false"`. This app ships `"true"` in `.grok/app-env.json` so a Vercel
+ * build cannot fall back to the shared dev user. Set the flag to `"false"`
+ * only in a throwaway preview.
  */
 export const authEnabled = import.meta.env.VITE_AUTH_ENABLED !== "false";
 

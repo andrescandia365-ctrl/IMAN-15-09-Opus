@@ -110,7 +110,9 @@ self.addEventListener("install", (event) => {
     (async () => {
       const cache = await caches.open(SHELL);
       await Promise.all(PRECACHE.map((u) => cache.add(u).catch(() => undefined)));
-      await self.skipWaiting();
+      // No skipWaiting acá: si ya hay un mostrador abierto, el JS viejo sigue
+      // hasta que el encargado toque "actualizar". El primer install lo pide
+      // la página (no hay controller todavía).
     })(),
   );
 });

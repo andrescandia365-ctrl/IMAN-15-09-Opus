@@ -33,7 +33,7 @@ import {
 import { flushDeskOutbox } from "@/lib/desk-outbox";
 import { decideFloorBoot, isBrowserOnline, lockFloor, readFloorLockSync, type FloorLock } from "@/lib/floor-lock";
 import { backupOnHide, flushCopy, pushQuiet, startFromCopy } from "@/lib/sync";
-import { registerPwa } from "@/lib/pwa";
+import { applyPwaUpdate, registerPwa, subscribePwaUpdate } from "@/lib/pwa";
 import { authEnabled } from "@/lib/auth/client";
 import { errorText } from "@/lib/errors";
 
@@ -105,6 +105,7 @@ export function App() {
   const [gate, setGate] = useState<Gate>(() => (authEnabled ? "hub" : "desk"));
   const [floor, setFloor] = useState(false);
   const [pullError, setPullError] = useState<string | null>(null);
+  const [pwaUpdate, setPwaUpdate] = useState(false);
 
   const floorUser = user ?? (lock ? userFromLock(lock) : null);
   const userId = floorUser?.id ?? null;
@@ -113,6 +114,8 @@ export function App() {
     document.documentElement.classList.toggle("light", theme === "light");
     document.documentElement.style.colorScheme = theme;
   }, [theme]);
+
+  useEffect(() => subscribePwaUpdate(setPwaUpdate), []);
 
   useEffect(() => {
     registerPwa();
@@ -471,10 +474,34 @@ export function App() {
     floorLock: lock,
   });
 
-  if (boot === "boot") return <BootScreen />;
-  if (boot === "landing" || (authFail && !lock)) return <LandingScreen />;
+  const updateBar = pwaUpdate ? (
+    <button
+      type="button"
+      className="fixed inset-x-0 top-0 z-[80] bg-accent px-4 py-3 text-center text-sm font-medium text-accent-fg"
+      onClick={applyPwaUpdate}
+    >
+      Hay una versión nueva. Tocá para actualizar.
+    </button>
+  ) : null;
+
+  if (boot === "boot")
+    return (
+      <>
+        {updateBar}
+        <BootScreen />
+      </>
+    );
+  if (boot === "landing" || (authFail && !lock))
+    return (
+      <>
+        {updateBar}
+        <LandingScreen />
+      </>
+    );
   if (pullError && !lock) {
     return (
+      <>
+        {updateBar}
       <main className="grid min-h-dvh place-items-center bg-bg px-4 text-fg">
         <div className="w-full max-w-sm rounded-xl bg-surface p-5 shadow-[var(--shadow-border)]">
           <p className="font-display text-2xl tracking-tight">IMAN</p>
@@ -493,10 +520,23 @@ export function App() {
           </button>
         </div>
       </main>
+      </>
     );
   }
-  if (authEnabled && (!hydrated || !access)) return <BootScreen label="Trayendo el local…" />;
-  if (!access) return <BootScreen />;
+  if (authEnabled && (!hydrated || !access))
+    return (
+      <>
+        {updateBar}
+        <BootScreen label="Trayendo el local…" />
+      </>
+    );
+  if (!access)
+    return (
+      <>
+        {updateBar}
+        <BootScreen />
+      </>
+    );
 
   const onFloor = gate === "desk" || Boolean(lock) || floor;
   const licensed =
@@ -512,6 +552,7 @@ export function App() {
 
   return (
     <>
+      {updateBar}
       {!licensed ? (
         <ActivateScreen access={access} onAccess={setAccess} />
       ) : showWizard ? (

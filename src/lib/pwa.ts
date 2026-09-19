@@ -59,7 +59,38 @@ function postPrecache(worker: ServiceWorker | null | undefined) {
  * Register the floor shell as soon as JS runs (not after window.load).
  * First online visit caches HTML/JS/CSS/fonts so the second visit — airplane
  * mode, closed tab — is IMAN, not Chrome's "No tienes conexión".
+ *
+ * Una versión nueva no se recarga sola: el SW espera y la página muestra un
+ * cartel. Recargar en medio de una venta perdería el ticket.
  */
+const updateListeners = new Set<(ready: boolean) => void>();
+let waitingWorker: ServiceWorker | null = null;
+let reloadWhenClaimed = false;
+
+function setWaiting(w: ServiceWorker | null) {
+  waitingWorker = w;
+  for (const cb of updateListeners) cb(Boolean(w));
+}
+
+export function subscribePwaUpdate(cb: (ready: boolean) => void): () => void {
+  updateListeners.add(cb);
+  if (waitingWorker) cb(true);
+  return () => {
+    updateListeners.delete(cb);
+  };
+}
+
+/** El encargado tocó el cartel: activar el SW nuevo y recargar. */
+export function applyPwaUpdate() {
+  if (!waitingWorker) return;
+  reloadWhenClaimed = true;
+  try {
+    waitingWorker.postMessage({ type: "SKIP_WAITING" });
+  } catch {
+    window.location.reload();
+  }
+}
+
 export function registerPwa() {
   if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
   if (window.parent !== window) return;
@@ -72,30 +103,51 @@ export function registerPwa() {
     postPrecache(worker);
   };
 
+  const maybePrompt = (reg: ServiceWorkerRegistration) => {
+    if (!reg.waiting) return;
+    if (!navigator.serviceWorker.controller) {
+      try {
+        reg.waiting.postMessage({ type: "SKIP_WAITING" });
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    setWaiting(reg.waiting);
+  };
+
   void navigator.serviceWorker
     .register("/sw.js", { scope: "/", updateViaCache: "none" })
     .then((reg) => {
       send(reg);
-      if (reg.waiting) {
-        try {
-          reg.waiting.postMessage({ type: "SKIP_WAITING" });
-        } catch {
-          /* ignore */
-        }
-      }
+      maybePrompt(reg);
       reg.addEventListener("updatefound", () => {
         const nw = reg.installing;
         if (!nw) return;
         nw.addEventListener("statechange", () => {
-          if (nw.state === "installed") send(reg);
+          if (nw.state === "installed") {
+            send(reg);
+            maybePrompt(reg);
+          }
         });
       });
+      const poke = () => {
+        void reg.update().catch(() => undefined);
+      };
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") poke();
+      });
+      window.setInterval(poke, 60 * 60 * 1000);
     })
     .catch((err) => {
       console.error("[pwa] sw", err);
     });
 
   navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (reloadWhenClaimed) {
+      window.location.reload();
+      return;
+    }
     void navigator.serviceWorker.ready.then(send);
   });
 
