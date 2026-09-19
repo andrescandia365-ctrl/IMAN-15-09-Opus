@@ -53,7 +53,10 @@ async function main() {
 
   const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 });
   const client = await pool.connect();
+  /** Distinct from other apps on a shared Postgres. Direct URL required: the pooler may not honor advisory locks. */
+  const MIGRATE_LOCK = 871230015;
   try {
+    await client.query("SELECT pg_advisory_lock($1)", [MIGRATE_LOCK]);
     await client.query(
       "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())",
     );
@@ -84,6 +87,11 @@ async function main() {
     }
     console.log(count ? `[migrate] done — ${count} migration(s) applied.` : "[migrate] up to date.");
   } finally {
+    try {
+      await client.query("SELECT pg_advisory_unlock($1)", [MIGRATE_LOCK]);
+    } catch {
+      // Connection already dead — the lock dies with it.
+    }
     client.release();
     await pool.end();
   }

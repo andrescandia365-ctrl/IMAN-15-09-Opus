@@ -1,3 +1,4 @@
+import { Pool, types as pgTypes } from "pg";
 import { pendingMigrations } from "../../scripts/migration-plan.mjs";
 
 /** Which database backend is active. */
@@ -46,6 +47,7 @@ export interface Sql {
  */
 const globalRef = globalThis as typeof globalThis & {
   __pgSqlPromise__?: Promise<Sql>;
+  __pgPool__?: Pool;
   __pgliteInstance__?: Promise<import("@electric-sql/pglite").PGlite>;
   __pgliteMigrateChain__?: Promise<void>;
 };
@@ -85,15 +87,30 @@ function toSql(run: Run): Sql {
   return sql;
 }
 
+/**
+ * One Pool per process, shared with Better Auth. `max: 3` so a handful of
+ * warm lambdas cannot exhaust Neon's connection cap. Prefer the pooled
+ * DATABASE_URL at runtime.
+ */
+export function getPgPool(): Pool {
+  if (!databaseUrl) throw new Error("DATABASE_URL is not set");
+  if (!globalRef.__pgPool__) {
+    pgTypes.setTypeParser(OID_INT8, Number);
+    pgTypes.setTypeParser(OID_DATE, identity);
+    pgTypes.setTypeParser(OID_INTERVAL, identity);
+    globalRef.__pgPool__ = new Pool({
+      connectionString: databaseUrl,
+      max: 3,
+      connectionTimeoutMillis: 8_000,
+      idleTimeoutMillis: 10_000,
+    });
+  }
+  return globalRef.__pgPool__;
+}
+
 function createNeonSql(): Promise<Sql> {
   globalRef.__pgSqlPromise__ ??= (async () => {
-    // Regular Postgres driver: node-postgres (`pg`) — works directly with Neon's
-    // pooled endpoint. One pool per process; warm serverless instances reuse it.
-    const { Pool, types } = await import("pg");
-    types.setTypeParser(OID_INT8, Number);
-    types.setTypeParser(OID_DATE, identity);
-    types.setTypeParser(OID_INTERVAL, identity);
-    const pool = new Pool({ connectionString: databaseUrl });
+    const pool = getPgPool();
     return toSql(async <T>(text: string, params: unknown[]) => {
       const res = await pool.query(text, params);
       return res.rows as T[];

@@ -29,7 +29,7 @@ import { chunk } from "@/lib/event-queue";
 import { nombresBorrados, quitadosPor } from "@/lib/deleted";
 import type { ImanEvent } from "@/lib/events";
 import type { KioskPayload } from "@/lib/types";
-import { errorText } from "@/lib/errors";
+import { errorText, isCloudWaking } from "@/lib/errors";
 
 /** Cuántas páginas de la cinta se bajan de una. 20 × 500 = un mes parado. */
 const MAX_PULL_PAGES = 20;
@@ -227,16 +227,28 @@ export type SyncResult = {
   started?: boolean;
 };
 
+async function onceOrRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (!isCloudWaking(err)) throw err;
+    await new Promise((r) => setTimeout(r, 1500));
+    return fn();
+  }
+}
+
 export async function syncNow(storeId: string): Promise<SyncResult> {
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     return { ok: false, pushed: 0, pulled: 0, error: "Sin red. Los tickets siguen en este aparato." };
   }
   try {
-    const pushed = await pushPending(storeId);
-    const { pulled, more, started } = await pullApply(storeId);
-    await saveLocalSnapshot(storeId, liveCopy());
-    const alJuntar = await saveBlob(storeId);
-    return { ok: true, pushed, pulled: pulled + alJuntar, more, started };
+    return await onceOrRetry(async () => {
+      const pushed = await pushPending(storeId);
+      const { pulled, more, started } = await pullApply(storeId);
+      await saveLocalSnapshot(storeId, liveCopy());
+      const alJuntar = await saveBlob(storeId);
+      return { ok: true, pushed, pulled: pulled + alJuntar, more, started };
+    });
   } catch (err) {
     return {
       ok: false,
