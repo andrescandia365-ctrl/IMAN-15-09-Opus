@@ -14,9 +14,10 @@ Se vende como lector láser + licencia de 12 / 24 / 36 meses (1 / 2 / 3 seats).
 skills en `.grok/`, herramientas `imagine_*` y de cuándo scaffoldear una app
 nueva. Nada de eso corre acá. Ignoralo completo, junto con la carpeta `.grok/`.
 
-**`IMAN_HANDOFF.txt`** sí es válido y es la fuente de verdad del producto. Su
-advertencia de "no adjuntes .tsx" era para chats que rechazan archivos: acá
-tenés el repo entero, leé los archivos directo.
+**`IMAN_HANDOFF.txt`** sí es válido para producto e invariantes. Está fechado
+el 15-09: el mapa de archivos, la cinta y lo que se construyó después viven
+acá. Su advertencia de "no adjuntes .tsx" era para chats que rechazan
+archivos: acá tenés el repo entero, leé los archivos directo.
 
 **Nunca scaffoldear una app nueva.** Este workspace ya existe y está andando.
 
@@ -44,8 +45,9 @@ las invariantes de auth ya se rompieron antes.
 ### Datos de prueba
 
 `npm run seed:prueba` → usuario `prueba@iman.local` / `prueba1234`, PIN de dueño
-`1234`, catálogo de ejemplo cargado. **La base local es en memoria y se borra en
-cada reinicio**, así que hay que re-seedear.
+`1234`, catálogo de ejemplo cargado. **La base del servidor de desarrollo
+(PGLite) es en memoria y se borra al reiniciar**, hay que re-seedear. El POS
+del navegador vive en IndexedDB (`iman-local`) y no se borra con el restart.
 
 ---
 
@@ -138,10 +140,14 @@ igual. Si no queda escrito, vuelve a pasar.
 | `src/components/shell.tsx` | nav de PC y de celu, logo → Dueño, botón Sincronizar |
 | `src/components/counter-view.tsx` | Mostrador (venta en PC) |
 | `src/components/inventory-view.tsx` | Inventario |
-| `src/components/orders-view.tsx` | Pedidos |
+| `src/components/orders-view.tsx` | Pedidos; llegada contra boleta |
 | `src/components/cash-view.tsx` + `ledger-grid.tsx` | Caja / planilla del mes |
-| `src/components/phone-sell / phone-floor / phone-receive` | el celu |
-| `src/components/owner-desk.tsx` + `owner-pin-dialog.tsx` + `owner-prices.tsx` | Dueño |
+| `src/components/price-calc.tsx` | Actualizar precios (Caja PC) |
+| `src/components/costo-boleta.tsx` | ejemplo de boleta A/X; se reusa en la llegada |
+| `src/components/settings-view.tsx` | Ajustes: condición fiscal, filas de Asientos |
+| `src/components/ledger-rows-config.tsx` | el dueño arma las filas y los tags |
+| `src/components/phone-sell / phone-floor / phone-receive` | el celu (Llegó carga costo opcional) |
+| `src/components/owner-desk.tsx` + `owner-pin-dialog.tsx` + `owner-prices.tsx` | Dueño. En el celu, Precios se mira |
 | `src/components/camera-scan.tsx` | escaneo con cámara (BarcodeDetector) |
 | `src/components/vendor-dashboard.tsx` | Taller (vendedor) |
 
@@ -149,17 +155,42 @@ igual. Si no queda escrito, vuelve a pasar.
 
 | Archivo | Qué es |
 |---|---|
-| `src/lib/store.ts` | Zustand. `checkout`, `refundCliente`, `refundProveedor`, `saveProduct`, `adjustStock`, `setLedgerCell`, `receiveOrder` — **todos llaman `recordEvent`** |
-| `src/lib/events.ts` | `applyEvent`. Tipos: sale, stock, ledger, product, product.delete, refund, receive, order, staff |
+| `src/lib/store.ts` | Zustand. `checkout`, `refundCliente`, `refundProveedor`, `saveProduct`, `adjustStock`, `setLedgerCell`, `receiveOrder`, `saveSettings`, `saveSupplier`, `importCatalog`, `applyCategoryPrices` — **todos llaman `recordEvent`** |
+| `src/lib/events.ts` | `applyEvent`. Tipos: sale, stock, ledger, product, product.delete, refund, receive, order, staff, category, lot, supplier, settings, price |
 | `src/lib/local-db.ts` | IndexedDB, `recordEvent`, `pendingEvents`, `markAcked`, `editQueue` |
 | `src/lib/event-queue.ts` | cola local pura (append/ack/trim/chunk) + tests |
-| `src/lib/sync.ts` | `syncNow` (botón) y `pushQuiet` (fondo) |
+| `src/lib/sync.ts` | `syncNow` (botón), `pushQuiet` (la cinta sube sola), `pullCopy` |
 | `src/lib/kiosk.ts` | servidor: `pushEvents`, `pullEvents` |
 | `src/lib/pack.ts` | `findByScan`: packBarcode → packQty unidades; barcode → 1 |
-| `src/lib/ledger.ts` | `LEDGER_ROWS`, filas bloqueadas, cierre de mes |
+| `src/lib/ledger.ts` | filas de Asientos por tags, archivo del mes con las filas de entonces |
+| `src/lib/costo-guia.ts` | qué renglón de la boleta copiar, calculadora de bulto, sospechas |
+| `src/lib/fiscal.ts` | condición fiscal del local, tasa y nombre del impuesto (datos, no constantes) |
+| `src/lib/mes.ts` | `margenDelMes`: la resta del mes, con o sin el impuesto de góndola |
+| `src/lib/receive-cost.ts` | recepción contra lo pedido + costo de la boleta |
+| `src/lib/catalog-io.ts` | import/export. El stock de la planilla no pisa el del local |
+| `src/lib/pricing.ts` | márgenes, `quotedPrice`, `invoiceForProduct` |
 | `src/lib/print.ts` + `escpos.ts` + `usb-print.ts` | ticket ESC/POS por Web Serial |
 | `src/lib/errors.ts` | traduce fallas técnicas a lenguaje de piso |
 | `src/lib/key-lock.ts` | turno por clave para IndexedDB |
+
+### Cinta — qué viaja en qué tipo
+
+- **`price`:** plata (costo y/o góndola). Actualizar precios, alinear un rubro, el cruce del dueño. No da de alta ni revive.
+- **`product`:** alta (con stock inicial) o edición de ficha (nombre, código, pack, rubro…). Update: ficha completa, sin stock ni lots.
+- **`lot`:** un lote de vencimiento. Stock y lots no viajan en `product`.
+- **`settings`:** márgenes, redondeo, comisión MP, condición fiscal, filas de Asientos. PIN y logo solo si ese toque los cambió.
+- **`supplier`:** alta/edición/baja de proveedor (`op: save` o `delete`).
+- Stock: solo `sale`, `stock`, `refund`, `receive`, `lot`.
+
+`importCatalog` ya no es un `setState` masivo: emite `category`/`product` (o `price` si solo cambió la plata) uno por uno. Producto que ya existe: nombre, código, precio, costo, rubro. **El stock de la planilla se ignora.**
+
+### Planilla y el mes
+
+El dueño arma las filas (`ledgerRows` + `ledgerTags`). TOTAL PROVEEDORES suma lo tagueado `proveedor`, no ids fijos. Un mes archivado guarda **las filas de entonces** (`MonthSheet.rows`): septiembre viejo no se viste con las de ahora.
+
+La planilla sigue cuadrando **efectivo** (invariante 10). Las ganancias viven en Dueño → Mes (`margenDelMes`):
+- Monotributo y en negro: la plata que entró. Etiquetas distintas.
+- Responsable inscripto + góndola con impuesto: las ventas se miran sin ese impuesto. Tasa y nombre salen del local (`taxPct`, `taxName`), no de un 21% fijo.
 
 ### Sync — cómo funciona
 
@@ -169,8 +200,16 @@ Cursor = `seq` del servidor (`migrations/0015_event_seq.sql`).
 PC no lo bajaba nunca.
 Push en tandas de 200 (`event-queue.ts chunk`). Se marca como subido **solo** lo
 que vuelve en `accepted`.
+
+**La cinta sube sola** cuando hay red (`pushQuiet`, a cada cambio). **La
+fotocopia no:** Sincronizar, cierre de turno, cerrar la app (invariante 6).
 Sincronizar = push pendientes → pull por seq (hasta 20 páginas) → aplicar
-eventos ajenos → `saveLocalSnapshot` → fotocopia con `rev`.
+eventos ajenos (`pulledPatch`, incluye `settings`) → `saveLocalSnapshot` →
+fotocopia con `rev`. `pullCopy` usa el estado vivo, no una foto vieja, para no
+pisar stock ni el ticket a medio armar.
+
+El otro aparato **no aplica** lo ajeno hasta que alguien toca Sincronizar ahí.
+Que la cinta haya subido no es lo mismo que el celu ya venda al precio nuevo.
 
 ---
 
@@ -201,6 +240,11 @@ Tauri .exe · carga probada de 10k · recuperación de PIN cuando quedás afuera
 NC real en PDF · login separado para el encargado · PowerSync/CRDT · React
 Native · backup automático de blob completo · impresora WebUSB clase 7 (hoy solo
 serial)
+
+Ya no es deuda (no reabrir): cinta de `settings` y `supplier`, evento `price`,
+ficha completa en `product`, filas de Asientos por tags, meses archivados con
+sus filas, condición fiscal y `margenDelMes`, `importCatalog` por eventos,
+guía de costo en Actualizar precios, `pullCopy` que no pisa el estado vivo.
 
 ---
 
