@@ -104,6 +104,30 @@ cada reinicio**, así que hay que re-seedear.
 
 ---
 
+## Compatibilidad de eventos
+
+Los aparatos no se actualizan al mismo tiempo. Un celu puede llevarse semanas
+en la versión anterior. La cinta es la misma: lo que manda la PC lo aplica el
+celu con **el `applyEvent` que tiene**, no con el de ahora.
+
+- **Nunca achicar el body de un evento que ya existe.** El aparato viejo lo
+  aplica con el código viejo. Los campos que no viajan se borran (un
+  `{ ...incoming }` se come nombre, código, rubro).
+- **Si hace falta mandar menos, se crea un TIPO NUEVO.** El `applyEvent` viejo
+  cae en el `default` y lo ignora limpio. El costo: ese aparato no se entera
+  hasta que actualice. El beneficio: no se le destruye nada.
+- **Ejemplos.** `lot` fue bien: tipo nuevo, el viejo lo ignora. Achicar
+  `product` a `{ id, price }` fue mal: el tipo ya existía, el spread viejo
+  casi le borra el catálogo a los aparatos sin actualizar. La plata va en
+  `price`. La ficha (nombre, código, pack, rubro) va en `product` completa,
+  sin stock ni lots.
+
+Esto ya había pasado: estaba anotado como pendiente, con la condición de no
+hacerlo hasta que todos los aparatos tuvieran la versión nueva, y se hizo
+igual. Si no queda escrito, vuelve a pasar.
+
+---
+
 ## Mapa de archivos
 
 ### Pantallas
