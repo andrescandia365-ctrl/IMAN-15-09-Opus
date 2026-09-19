@@ -9,6 +9,7 @@ import {
 import { Lock, Maximize2, Minimize2, Search, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatARS, formatMiles } from "@/lib/format";
@@ -16,12 +17,24 @@ import { findByScan, packOf, productMatchesQuery } from "@/lib/pack";
 import {
   factorFor,
   hasFactor,
+  invoiceForProduct,
   isBigPriceJump,
   quotedPrice,
   shelfInvoice,
   unitCost,
   type InvoiceKind,
 } from "@/lib/pricing";
+import {
+  BOLETA_A,
+  BOLETA_X,
+  POR_UNIDAD,
+  QUE_NUMERO,
+  avisosDeCosto,
+  porUnidad,
+  recordatorioBulto,
+  recordatorioCosto,
+  recordatorioEscaneoBulto,
+} from "@/lib/costo-guia";
 import { useImanStore } from "@/lib/store";
 import type { Category, Product } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -67,7 +80,14 @@ function PriceUpdate({ storeId }: { storeId: string }) {
   const [sel, setSel] = useState<{ id: string; kind: "unit" | "pack" } | null>(null);
   const [costo, setCosto] = useState("");
   const [costoInicial, setCostoInicial] = useState("");
-  const [confirmar, setConfirmar] = useState<{ cost: number; price: number } | null>(null);
+  const [bulto, setBulto] = useState("");
+  const [ejemplo, setEjemplo] = useState<InvoiceKind | null>(null);
+  const [confirmar, setConfirmar] = useState<{
+    cost: number;
+    price: number;
+    avisos: string[];
+    salto: boolean;
+  } | null>(null);
   const [hechos, setHechos] = useState<Hecho[]>(() => memorias.get(storeId) ?? []);
 
   const buscador = useRef<HTMLInputElement>(null);
@@ -99,6 +119,9 @@ function PriceUpdate({ storeId }: { storeId: string }) {
     ? (categories.find((c) => c.id === producto.categoryId) ?? { id: producto.categoryId, name: "", sort: 0 })
     : null;
   const fac: InvoiceKind = producto ? shelfInvoice(producto, suppliers) : "X";
+  // Para el recordatorio: sin proveedor con factura que traiga el rubro no se sabe qué renglón es.
+  const facProveedor = producto ? (invoiceForProduct(producto, suppliers)?.invoice ?? null) : null;
+  const pack = producto ? packOf(producto) : 1;
   const sinMargen = rubro ? !hasFactor(rubro, fac, settings) : false;
   const tocado = costo !== costoInicial;
   const costoNuevo = producto ? (tocado ? Number(costo) || null : unitCost(producto)) : null;
@@ -121,6 +144,7 @@ function PriceUpdate({ storeId }: { storeId: string }) {
     setCursor(0);
     setCosto("");
     setCostoInicial("");
+    setBulto("");
     setConfirmar(null);
     alBuscador();
   }, [alBuscador]);
@@ -170,6 +194,7 @@ function PriceUpdate({ storeId }: { storeId: string }) {
     setSel({ id: p.id, kind });
     setCosto(inicial);
     setCostoInicial(inicial);
+    setBulto("");
     setConfirmar(null);
     setQ("");
     setCursor(0);
@@ -232,7 +257,9 @@ function PriceUpdate({ storeId }: { storeId: string }) {
   function guardar() {
     if (!producto || !rubro) return;
     // Si se escaneó el próximo sin dar Enter, el código cayó en el costo.
-    const scan = tocado && costo.length >= LARGO_CODIGO ? findByScan(products, costo) : null;
+    const scan =
+      (tocado && costo.length >= LARGO_CODIGO ? findByScan(products, costo) : null) ??
+      (bulto.length >= LARGO_CODIGO ? findByScan(products, bulto) : null);
     if (scan) {
       toast(`Eso era un código: ${scan.product.name}`);
       elegir(scan.product, scan.kind);
@@ -250,8 +277,19 @@ function PriceUpdate({ storeId }: { storeId: string }) {
       sinCambios();
       return;
     }
-    if (isBigPriceJump(producto.price, precioNuevo)) {
-      setConfirmar({ cost: costoNuevo, price: precioNuevo });
+    // Solo se sospecha de un número que cargó el encargado.
+    const avisos = tocado
+      ? avisosDeCosto({
+          costo: costoNuevo,
+          costoAntes: unitCost(producto),
+          precioNuevo,
+          bulto: pack,
+          desdeBulto: bulto !== "",
+        })
+      : [];
+    const salto = isBigPriceJump(producto.price, precioNuevo);
+    if (avisos.length || salto) {
+      setConfirmar({ cost: costoNuevo, price: precioNuevo, avisos, salto });
       return;
     }
     aplicar(producto, costoNuevo, precioNuevo);
@@ -374,13 +412,55 @@ function PriceUpdate({ storeId }: { storeId: string }) {
             </div>
 
             {sel?.kind === "pack" ? (
-              <p className="rounded-lg bg-warn/15 px-3 py-2 text-sm">
-                Escaneaste el bulto de <span className="num">{packOf(producto)}</span> unidades. El costo que pongas
-                es POR UNIDAD.
-              </p>
+              <p className="rounded-lg bg-warn/15 px-3 py-2 text-sm">{recordatorioEscaneoBulto(pack)}</p>
             ) : null}
 
-            <div className="grid grid-cols-2 gap-3">
+            {/* Siempre a la vista: qué renglón de la boleta va, según la factura del proveedor del rubro. */}
+            <div className="rounded-lg bg-elevated px-3 py-2.5">
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-sm leading-snug">{recordatorioCosto(facProveedor)}</p>
+                <button
+                  type="button"
+                  className="shrink-0 text-xs text-muted underline underline-offset-2 hover:text-fg"
+                  onClick={() => setEjemplo(facProveedor ?? fac)}
+                >
+                  {QUE_NUMERO}
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-muted">{POR_UNIDAD}</p>
+              {pack > 1 ? <p className="text-xs text-muted">{recordatorioBulto(pack)}</p> : null}
+            </div>
+
+            <div
+              className={cn(
+                "grid gap-3",
+                pack > 1 ? "grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1fr)]" : "grid-cols-2",
+              )}
+            >
+              {pack > 1 ? (
+                <div>
+                  <Label>Costo del bulto</Label>
+                  <Input
+                    inputMode="numeric"
+                    placeholder="opcional"
+                    aria-label={`Costo del bulto de ${pack}`}
+                    value={bulto}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/[^\d]/g, "");
+                      setBulto(v);
+                      // La calculadora llena el costo por unidad; si se borra, vuelve el de antes.
+                      setCosto(v ? String(porUnidad(Number(v), pack)) : costoInicial);
+                      setConfirmar(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return;
+                      e.preventDefault();
+                      guardar();
+                    }}
+                    autoComplete="off"
+                  />
+                </div>
+              ) : null}
               <div>
                 <Label>Costo por unidad</Label>
                 <Input
@@ -390,6 +470,8 @@ function PriceUpdate({ storeId }: { storeId: string }) {
                   value={costo}
                   onChange={(e) => {
                     setCosto(e.target.value.replace(/[^\d]/g, ""));
+                    // Escribir la unidad a mano deja la calculadora de bulto de lado.
+                    setBulto("");
                     setConfirmar(null);
                   }}
                   onFocus={(e) => e.currentTarget.select()}
@@ -400,9 +482,9 @@ function PriceUpdate({ storeId }: { storeId: string }) {
                   }}
                   autoComplete="off"
                 />
-                {packOf(producto) > 1 && sel?.kind !== "pack" ? (
-                  <p className="mt-1 text-[11px] text-subtle">
-                    No el del bulto de <span className="num">{packOf(producto)}</span>.
+                {bulto ? (
+                  <p className="num mt-1 text-[11px] text-muted">
+                    {formatARS(Number(bulto))} ÷ {pack} = {formatARS(porUnidad(Number(bulto), pack))}
                   </p>
                 ) : null}
               </div>
@@ -469,9 +551,15 @@ function PriceUpdate({ storeId }: { storeId: string }) {
                   cancelarConfirmar();
                 }}
               >
+                {confirmar.avisos.map((a) => (
+                  <p key={a} className="mb-1 text-sm font-medium">
+                    {a}
+                  </p>
+                ))}
                 <p className="text-sm">
                   El precio pasa de <span className="num">{formatARS(producto.price)}</span> a{" "}
-                  <span className="num">{formatARS(confirmar.price)}</span>. ¿Seguro?
+                  <span className="num">{formatARS(confirmar.price)}</span>.
+                  {confirmar.avisos.length ? "" : " ¿Seguro?"}
                 </p>
                 <div className="mt-2 flex gap-2">
                   <Button ref={confirmarRef} size="sm" onClick={() => aplicar(producto, confirmar.cost, confirmar.price)}>
@@ -523,6 +611,101 @@ function PriceUpdate({ storeId }: { storeId: string }) {
           </ul>
         </div>
       ) : null}
+
+      <Dialog open={ejemplo != null} onOpenChange={(v) => !v && setEjemplo(null)}>
+        <DialogContent
+          // Al cerrar vuelve al costo, con lo que ya estaba cargado.
+          onCloseAutoFocus={(e) => {
+            e.preventDefault();
+            costoRef.current?.focus({ preventScroll: true });
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Qué número copiar de la boleta</DialogTitle>
+            <DialogDescription>Una boleta de ejemplo. El renglón resaltado es el que va en el costo.</DialogDescription>
+          </DialogHeader>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            {(["A", "X"] as InvoiceKind[]).map((k) => (
+              <button
+                key={k}
+                type="button"
+                className={cn(
+                  "h-10 rounded-md text-sm font-medium",
+                  ejemplo === k ? "bg-accent text-accent-fg" : "bg-elevated text-muted",
+                )}
+                onClick={() => setEjemplo(k)}
+              >
+                Factura {k}
+              </button>
+            ))}
+          </div>
+          {ejemplo === "A" ? (
+            <BoletaEjemplo
+              titulo="Factura A"
+              renglones={[
+                ["Cantidad", `${BOLETA_A.unidades} unidades`],
+                ["Neto", formatARS(BOLETA_A.neto)],
+                ["Impuestos internos", formatARS(BOLETA_A.internos)],
+                ["Subtotal", formatARS(BOLETA_A.subtotal), true],
+                ["IVA 21%", formatARS(BOLETA_A.iva)],
+                ["TOTAL", formatARS(BOLETA_A.total)],
+              ]}
+              cuenta={`Costo por unidad = ${formatARS(BOLETA_A.subtotal)} ÷ ${BOLETA_A.unidades} = ${formatARS(porUnidad(BOLETA_A.subtotal, BOLETA_A.unidades))}`}
+              nota="Ojo: los impuestos internos SÍ van. El IVA NO."
+            />
+          ) : (
+            <BoletaEjemplo
+              titulo="Factura X"
+              renglones={[
+                ["Cantidad", `${BOLETA_X.unidades} unidades`],
+                ["TOTAL", formatARS(BOLETA_X.total), true],
+              ]}
+              cuenta={`Costo por unidad = ${formatARS(BOLETA_X.total)} ÷ ${BOLETA_X.unidades} = ${formatARS(porUnidad(BOLETA_X.total, BOLETA_X.unidades))}`}
+              nota="Acá va todo lo que pagaste. No se descuenta nada."
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </section>
+  );
+}
+
+/** Una boleta de mentira: el renglón que se copia, resaltado; el resto, en gris. */
+function BoletaEjemplo({
+  titulo,
+  renglones,
+  cuenta,
+  nota,
+}: {
+  titulo: string;
+  renglones: [string, string, boolean?][];
+  cuenta: string;
+  nota: string;
+}) {
+  return (
+    <div className="mt-3">
+      <div className="ticket-grain rounded-lg bg-paper px-4 py-3 text-ink shadow-[var(--shadow-ticket)]">
+        <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-ink-muted">Boleta de ejemplo · {titulo}</p>
+        <ul className="mt-2 flex flex-col gap-0.5">
+          {renglones.map(([nombre, valor, este]) => (
+            <li
+              key={nombre}
+              className={cn(
+                "flex items-center justify-between gap-3 rounded-md px-2 py-1.5 text-sm",
+                este ? "bg-dato font-semibold text-dato-fg" : "text-ink-muted",
+              )}
+            >
+              <span>
+                {nombre}
+                {este ? <span className="ml-2 text-[11px] font-medium uppercase tracking-[0.08em]">← este</span> : null}
+              </span>
+              <span className="num">{valor}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <p className="num mt-3 text-sm font-medium">{cuenta}</p>
+      <p className="mt-1 text-sm text-muted">{nota}</p>
+    </div>
   );
 }
