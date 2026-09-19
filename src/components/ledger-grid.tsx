@@ -168,7 +168,7 @@ export function LedgerSheet({
     const caja = root.getBoundingClientRect();
     const dia = col.getBoundingClientRect();
     root.scrollLeft += dia.left - caja.left - (caja.width - dia.width) / 2;
-  }, [ym, dates, full]);
+  }, [scroller, ym, dates, full]);
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col gap-2", full && "fixed inset-0 z-50 bg-surface p-3")}>

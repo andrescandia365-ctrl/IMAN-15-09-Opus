@@ -27,8 +27,6 @@ import { ReceiptDialog } from "@/components/receipt";
 import { SyncButton } from "@/components/sync-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
   Tooltip,
@@ -42,7 +40,7 @@ import { toast } from "sonner";
 import { addStore, groupRollup, selectStore, type StoreMeta, type StoreRollup } from "@/lib/kiosk";
 
 import type { MyAccess } from "@/lib/license";
-import { clearFlashSecret, readFlashSecret } from "@/lib/shop-secret-flash";
+import { clearFlashSecret } from "@/lib/shop-secret-flash";
 import { snapshotKiosk, useCashSnapshot, useImanStore } from "@/lib/store";
 import { loadLocalSnapshot, saveLocalSnapshot, setActiveLocalStore } from "@/lib/local-db";
 import { isBrowserOnline } from "@/lib/floor-lock";
@@ -70,7 +68,6 @@ const PHONE_NAV: { id: ViewId | "owner"; label: string; icon: typeof LayoutGrid 
 
 export function Shell({
   access,
-  onAccess,
   stores,
   activeStoreId,
   seats,
@@ -80,7 +77,6 @@ export function Shell({
   onStudio,
 }: {
   access: MyAccess;
-  onAccess: (next: MyAccess) => void;
   stores: StoreMeta[];
   activeStoreId: string;
   seats: number;
@@ -424,7 +420,6 @@ export function Shell({
           {ownerOpen ? (
             <OwnerDesk
               access={access}
-              onAccess={onAccess}
               stores={stores}
               activeStoreId={activeStoreId}
               rollup={rollup}
@@ -504,119 +499,6 @@ export function Shell({
         ) : null}
       </div>
     </TooltipProvider>
-  );
-}
-
-function OwnerStores({
-  stores,
-  activeStoreId,
-  cap,
-  busy,
-  onSwitch,
-  onCreate,
-}: {
-  stores: StoreMeta[];
-  activeStoreId: string;
-  cap: number;
-  busy: boolean;
-  onSwitch: (id: string) => void;
-  onCreate: (name: string, catalog: "example" | "empty") => void;
-}) {
-  const [name, setName] = useState("");
-  const [catalog, setCatalog] = useState<"example" | "empty">("empty");
-  const [rollup, setRollup] = useState<{
-    stores: StoreRollup[];
-    todayTotal: number;
-    monthTotal: number;
-  } | null>(null);
-
-  useEffect(() => {
-    if (!isBrowserOnline()) return;
-    void groupRollup()
-      .then(setRollup)
-      .catch((err) => console.error("[stores] rollup", err));
-  }, [stores, activeStoreId]);
-
-  return (
-    <div className="mt-4 rounded-lg bg-elevated p-3">
-      <p className="text-[11px] uppercase tracking-[0.14em] text-subtle">Grupo</p>
-      {rollup ? (
-        <p className="mt-1 text-sm">
-          Hoy {formatARS(rollup.todayTotal)}
-          <span className="text-muted"> · mes {formatARS(rollup.monthTotal)}</span>
-        </p>
-      ) : (
-        <p className="mt-1 text-sm text-muted">Sumando locales…</p>
-      )}
-      <ul className="mt-2 space-y-1">
-        {(rollup?.stores ?? stores).map((s) => (
-          <li key={s.id}>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => onSwitch(s.id)}
-              className={cn(
-                "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm",
-                s.id === activeStoreId ? "bg-surface" : "hover:bg-surface/60",
-              )}
-            >
-              <span className="truncate">{s.name}</span>
-              {"todayTotal" in s ? (
-                <span className="num text-xs text-muted">{formatARS(s.todayTotal)}</span>
-              ) : null}
-            </button>
-          </li>
-        ))}
-      </ul>
-      {stores.length < cap ? (
-        <form
-          className="mt-3 space-y-2 border-t border-border pt-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const n = name.trim();
-            if (!n) return;
-            onCreate(n, catalog);
-            setName("");
-          }}
-        >
-          <Label htmlFor="new-store">Agregar local</Label>
-          <Input
-            id="new-store"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Sucursal 2"
-            maxLength={40}
-          />
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setCatalog("empty")}
-              className={cn(
-                "flex-1 rounded-md px-2 py-1.5 text-xs",
-                catalog === "empty" ? "bg-accent text-accent-fg" : "bg-surface text-muted",
-              )}
-            >
-              Vacío
-            </button>
-            <button
-              type="button"
-              onClick={() => setCatalog("example")}
-              className={cn(
-                "flex-1 rounded-md px-2 py-1.5 text-xs",
-                catalog === "example" ? "bg-accent text-accent-fg" : "bg-surface text-muted",
-              )}
-            >
-              Catálogo de prueba
-            </button>
-          </div>
-          <Button type="submit" size="sm" className="w-full" disabled={busy || !name.trim()}>
-            Crear local
-          </Button>
-        </form>
-      ) : (
-        <p className="mt-2 text-xs text-subtle">El plan abre {cap} locales.</p>
-      )}
-    </div>
   );
 }
 

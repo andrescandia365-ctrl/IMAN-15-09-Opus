@@ -21,6 +21,9 @@ const GOOGLE = GROK_PROVIDERS.find((p) => p.idp === "google");
 /** Held only for the post-signup confirm screen so /login does not bounce away. */
 let signupConfirmMail = "";
 
+// Vive acá porque la escribe este componente y la lee la ruta /login. Lo único
+// que cuesta es que, en desarrollo, editar este archivo recarga la página entera.
+// eslint-disable-next-line react-refresh/only-export-components
 export function peekSignupConfirm(): string {
   return signupConfirmMail;
 }

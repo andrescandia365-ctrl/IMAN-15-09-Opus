@@ -28,13 +28,7 @@ function subirFotocopia(): Promise<unknown> {
   return storeId ? pushCopy(storeId) : Promise.resolve();
 }
 
-export function SettingsView({
-  access,
-  onAccess,
-}: {
-  access: MyAccess;
-  onAccess: (next: MyAccess) => void;
-}) {
+export function SettingsView({ access }: { access: MyAccess }) {
   const settings = useImanStore((s) => s.settings);
   const saveSettings = useImanStore((s) => s.saveSettings);
   const loadExampleCatalog = useImanStore((s) => s.loadExampleCatalog);

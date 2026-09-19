@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CameraScan } from "@/components/camera-scan";
 import { VenceField } from "@/components/vence-field";
-import { daysUntil, formatARS } from "@/lib/format";
+import { daysUntil } from "@/lib/format";
 import { BORRADO_MIENTRAS_EDITABAS } from "@/lib/deleted";
 import { lotsOf, soonestExpiry, unallocated } from "@/lib/lots";
 import { findByScan, packOf, productMatchesQuery, stockBreakdown } from "@/lib/pack";
@@ -368,7 +368,6 @@ function ProductPhoneDialog({
 
 export function PhoneExpireView() {
   const products = useImanStore((s) => s.products);
-  const saveProduct = useImanStore((s) => s.saveProduct);
   const dateLot = useImanStore((s) => s.dateLot);
   const [q, setQ] = useState("");
   const [cam, setCam] = useState(false);

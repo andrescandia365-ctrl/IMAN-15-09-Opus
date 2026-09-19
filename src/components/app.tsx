@@ -132,7 +132,7 @@ export function App() {
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [setHydrated]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -532,7 +532,6 @@ export function App() {
       ) : gate === "desk" ? (
         <Shell
           access={access}
-          onAccess={setAccess}
           stores={stores}
           activeStoreId={activeStoreId}
           seats={planSeats}

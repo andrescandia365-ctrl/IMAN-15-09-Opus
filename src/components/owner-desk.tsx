@@ -54,7 +54,6 @@ type Tab = "precios" | "mes" | "ticket" | "factura" | "grupo" | "equipo" | "loca
 
 export function OwnerDesk({
   access,
-  onAccess,
   stores,
   activeStoreId,
   rollup,
@@ -65,7 +64,6 @@ export function OwnerDesk({
   onCreate,
 }: {
   access: MyAccess;
-  onAccess: (next: MyAccess) => void;
   stores: StoreMeta[];
   activeStoreId: string;
   rollup: { stores: StoreRollup[]; todayTotal: number; monthTotal: number } | null;
@@ -509,7 +507,7 @@ export function OwnerDesk({
                 </form>
               ) : null}
             </div>
-            <SettingsView access={access} onAccess={onAccess} />
+            <SettingsView access={access} />
           </div>
         ) : null}
       </div>

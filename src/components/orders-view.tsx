@@ -603,7 +603,7 @@ export function OrdersView() {
             return lineUnits(p, l.qty, l.asUnit);
           });
           const got = receipts.map((x) => x.units);
-          const missing = got.filter((u, i) => u <= 0).length;
+          const missing = got.filter((u) => u <= 0).length;
           const short = got.some((u, i) => u > 0 && u < (expected[i] ?? 0));
           const sum = got.reduce((a, u) => a + u, 0);
           if (!sum) toast.success("Anotado. No entró mercadería.");

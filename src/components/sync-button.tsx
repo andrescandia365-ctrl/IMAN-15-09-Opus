@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, RefreshCw } from "lucide-react";
 import { onQueueChange, listSyncLog, syncMeta, type SyncLogItem } from "@/lib/local-db";
 import { haceCuanto } from "@/lib/sync-log";
@@ -17,10 +17,12 @@ export function SyncButton({ storeId }: { storeId: string }) {
   const [live, setLive] = useState<string | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
 
-  function refreshMeta() {
+  // Cambia solo si cambia el local: el efecto de abajo se vuelve a anotar con
+  // el local nuevo y nunca queda leyendo el registro de otro.
+  const refreshMeta = useCallback(() => {
     void syncMeta(storeId).then((m) => setLast(m.lastSyncAt));
     void listSyncLog(storeId).then(setItems);
-  }
+  }, [storeId]);
 
   useEffect(() => {
     refreshMeta();
@@ -33,7 +35,7 @@ export function SyncButton({ storeId }: { storeId: string }) {
       off();
       window.clearInterval(t);
     };
-  }, [storeId]);
+  }, [refreshMeta]);
 
   useEffect(() => {
     if (!open) return;
