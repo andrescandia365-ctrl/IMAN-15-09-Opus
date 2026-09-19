@@ -114,6 +114,11 @@ export function cellsOf(book: DayBook | undefined): Record<string, number> {
   return c;
 }
 
+/** Si la celda ya dice eso. Una celda vacía vale 0, igual que en pantalla. */
+export function sameCell(books: DayBook[], date: string, rowId: string, value: number): boolean {
+  return (cellsOf(books.find((b) => b.date === date))[rowId] ?? 0) === value;
+}
+
 export function cellValue(
   rows: DayBook[],
   date: string,

@@ -3,7 +3,7 @@ import { prunePayload } from "./cap";
 import { todayKey } from "./format";
 import { keepStockAndLots, receiveBody } from "./events";
 import { appendSyncLog, lastKnownStore, queueCopy, recordEvent, saveLocalSnapshot } from "./local-db";
-import { archiveClosedMonths, emptyBook, cellsOf, currentYm, type FacLine } from "./ledger";
+import { archiveClosedMonths, emptyBook, cellsOf, currentYm, sameCell, type FacLine } from "./ledger";
 import { lineUnits, orderNote, packOf, suggestPacks } from "./pack";
 import { nextCadenceDates } from "./supplier-cadence";
 import { addLot, consumeFifo } from "./lots";
@@ -765,6 +765,10 @@ export const useImanStore = create<ImanState>()((set, get) => ({
       upsertBook: (row) => set((st) => ({ books: upsertBookRow(st.books, row) })),
 
       setLedgerCell: (date, rowId, value) => {
+        // Salir de una celda sin cambiarla no escribe ni manda nada. Recorrer la
+        // columna con las flechas reenviaba lo que este aparato tenía y pisaba lo
+        // que el dueño había cargado desde el celu.
+        if (sameCell(get().books, date, rowId, value)) return;
         set((st) => {
           const cur = st.books.find((b) => b.date === date) ?? emptyBook(date);
           const cells = { ...(cur.cells ?? {}), [rowId]: value };
