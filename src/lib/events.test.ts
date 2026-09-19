@@ -125,6 +125,22 @@ test("syncNow guarda el borrado de categoría que bajó de otro aparato", () => 
   );
 });
 
+test("syncNow saca la categoría borrada también de los proveedores del otro aparato", () => {
+  const vacia: Category = { id: "c-vacia", name: "Vacía", sort: 3 };
+  const antes = payload({
+    categories: [...payload().categories, vacia],
+    suppliers: [
+      supplier({ categoryIds: ["c-bebidas", "c-vacia"] }),
+      supplier({ id: "prov-lacteos", name: "Lácteos Juan", categoryIds: ["c-vacia"] }),
+    ],
+  });
+  const alStore = pulledPatch(applyEvents(antes, [ev({ op: "delete", id: "c-vacia" })]));
+  assert.deepEqual(
+    alStore.suppliers.map((s) => `${s.id}:${(s.categoryIds ?? []).join("+")}`),
+    ["prov-omar:c-bebidas", "prov-lacteos:"],
+  );
+});
+
 // Lotes: el aparato que recibe la venta tiene que quedar con los mismos lotes que la caja.
 function conLotes(): Product {
   return {

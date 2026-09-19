@@ -292,12 +292,14 @@ export function applyEvents(payload: KioskPayload, events: ImanEvent[]): KioskPa
 /**
  * Lo que syncNow escribe al store después de aplicar los eventos de otro
  * aparato. Una clave que falte acá se aplica y se tira: le pasó a categories,
- * que bajaba el renombre y no lo guardaba nunca.
+ * que bajaba el renombre y no lo guardaba nunca, y a suppliers, que perdía el
+ * rubro borrado y el proveedor seguía apuntando a una categoría que ya no está.
  */
 export function pulledPatch(next: KioskPayload) {
   return {
     products: next.products,
     categories: next.categories,
+    suppliers: next.suppliers,
     sales: next.sales,
     books: next.books ?? [],
     refunds: next.refunds ?? [],
