@@ -14,6 +14,13 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { ClienteRefundDialog } from "@/components/refunds";
 import { CameraScan } from "@/components/camera-scan";
@@ -25,7 +32,8 @@ import { sendOrQueueDeskTicket } from "@/lib/desk-outbox";
 import { useDeskInbox } from "@/lib/desk-listen";
 import { usePhoneUi } from "@/lib/device";
 import { useDragScroll } from "@/lib/drag-scroll";
-import type { PayMethod, Product } from "@/lib/types";
+import type { PayMethod, Product, TicketLine } from "@/lib/types";
+import { mergeTicketLines } from "@/lib/ticket-merge";
 import { cn } from "@/lib/utils";
 import { errorText } from "@/lib/errors";
 
@@ -63,6 +71,7 @@ export function CounterView() {
   const checkout = useImanStore((s) => s.checkout);
   const cash = useCashSnapshot();
   const replaceTicket = useImanStore((s) => s.replaceTicket);
+  const [elegirTicket, setElegirTicket] = useState(false);
   const deskStoreId = useImanStore((s) => s.deskStoreId);
   const phone = usePhoneUi();
   const cashFloat = useImanStore((s) => s.settings.cashFloat);
@@ -184,8 +193,27 @@ export function CounterView() {
   }
 
   async function loadIncoming() {
+    // Con un ticket a medio cobrar no se reemplaza en silencio: se pregunta.
+    if (useImanStore.getState().ticket.length) {
+      setElegirTicket(true);
+      return;
+    }
+    await traerDelCelu("reemplazar");
+  }
+
+  async function traerDelCelu(modo: "sumar" | "reemplazar") {
+    setElegirTicket(false);
     const t = await inbox.accept();
     if (!t) return;
+    if (modo === "sumar") {
+      const cur = useImanStore.getState();
+      replaceTicket(mergeTicketLines(cur.ticket, t.lines), {
+        payMethod: cur.payMethod,
+        paidInput: cur.paidInput,
+      });
+      toast.success("Sumado al ticket del mostrador");
+      return;
+    }
     replaceTicket(t.lines, {
       payMethod: t.payMethod,
       paidInput: t.paid != null ? String(t.paid) : "",
@@ -228,6 +256,31 @@ export function CounterView() {
           </div>
         </div>
       ) : null}
+      <Dialog open={elegirTicket && Boolean(inbox.incoming)} onOpenChange={setElegirTicket}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Ya hay un ticket en el mostrador</DialogTitle>
+            <DialogDescription>Elegí qué hacer con el ticket del celular.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <TicketResumen titulo="En el mostrador" lineas={ticket} total={total} />
+            <TicketResumen
+              titulo="Del celular"
+              lineas={inbox.incoming?.lines ?? []}
+              total={inbox.incoming?.total ?? 0}
+            />
+          </div>
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            <Button variant="ghost" onClick={() => setElegirTicket(false)}>
+              Cancelar
+            </Button>
+            <Button variant="secondary" onClick={() => void traerDelCelu("reemplazar")}>
+              Reemplazar
+            </Button>
+            <Button onClick={() => void traerDelCelu("sumar")}>Sumar al ticket</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.72fr)_minmax(280px,0.78fr)] lg:grid-rows-1">
       <section className="flex min-h-0 flex-col overflow-hidden rounded-xl bg-surface p-3 shadow-[var(--shadow-border)] sm:p-4">
         <div className="flex items-center gap-2">
@@ -770,6 +823,24 @@ function ShiftRail() {
           </ul>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** Lo que tiene un ticket, para elegir antes de sumar o reemplazar. */
+function TicketResumen({ titulo, lineas, total }: { titulo: string; lineas: TicketLine[]; total: number }) {
+  return (
+    <div className="rounded-lg bg-elevated p-3">
+      <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-subtle">{titulo}</p>
+      <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-sm">
+        {lineas.map((l) => (
+          <li key={l.productId} className="flex justify-between gap-2">
+            <span className="min-w-0 truncate">{l.name}</span>
+            <span className="num shrink-0 text-muted">× {l.qty}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="num mt-2 border-t border-border pt-2 text-right font-medium">{formatARS(total)}</p>
     </div>
   );
 }
