@@ -26,6 +26,7 @@ import { pullEvents, pushEvents, saveKiosk, selectStore } from "@/lib/kiosk";
 import { snapshotKiosk, useImanStore } from "@/lib/store";
 import { backupRecords, incomingCopy, mergeBackup, prunePayload } from "@/lib/cap";
 import { chunk } from "@/lib/event-queue";
+import { nombresBorrados, quitadosPor } from "@/lib/deleted";
 import type { ImanEvent } from "@/lib/events";
 import type { KioskPayload } from "@/lib/types";
 import { errorText } from "@/lib/errors";
@@ -105,12 +106,24 @@ async function pullApply(storeId: string): Promise<{ pulled: number; more: boole
       ? []
       : pulled.filter((e) => e.deviceId !== mine && !known.has(e.id) && !alreadyInCopy(e, saved?.desde));
   let next: KioskPayload | null = null;
+  let quitados: string[] = [];
   if (fresh.length) {
-    next = applyEvents(liveCopy(), fresh);
+    const antes = liveCopy();
+    next = applyEvents(antes, fresh);
+    quitados = quitadosPor(antes.products, fresh);
     useImanStore.setState(pulledPatch(next));
   }
   aplicado.set(storeId, cursor);
   if (next) await saveLocalSnapshot(storeId, next);
+  if (quitados.length) {
+    // Si un día "desaparecen productos", queda el rastro de que fue un borrado.
+    await appendSyncLog(storeId, {
+      kind: "catalog",
+      title: "Borrado desde otro aparato",
+      detail: nombresBorrados(quitados),
+      status: "done",
+    });
+  }
   await rememberPulled(storeId, pulled, cursor);
   await writePullStart(storeId, pullStartAfter(mode, more, saved, now));
   return { pulled: fresh.length, more, started: mode === "skip" };

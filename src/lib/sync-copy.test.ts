@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { backupRecords, incomingCopy, mergeBackup, mergeOrders, mergePayload, richerOrder } from "./cap.ts";
+import { backupRecords, incomingCopy, mergeBackup, mergeOrders, mergePayload, richerOrder, richerShift } from "./cap.ts";
 import { haceCuanto, pruneSyncLog, trimSyncLog, type SyncLogItem } from "./sync-log.ts";
 import type { CashShift, KioskPayload, MonthAgg, OrderDraft, Sale, Settings } from "./types.ts";
 
@@ -231,6 +231,37 @@ describe("respaldo cuando chocan dos fotocopias", () => {
     const r = mergeBackup(caja, celu);
     assert.equal(r.settings.roundStep, 50);
     assert.equal(r.suppliers[0]?.name, "Omar Distribuidora");
+  });
+
+  it("un cierre sin efectivo contado no le gana a un turno abierto", () => {
+    // Así cerraba la restauración de una copia los turnos que estaban abiertos.
+    const inventado = { ...turno("t1", "open", 0.2), status: "closed" as const, closedAt: hace(0.1) };
+    const abierto = turno("t1", "open", 0.2);
+    for (const [servidor, local] of [
+      [inventado, abierto],
+      [abierto, inventado],
+    ]) {
+      const r = backupRecords({ shifts: [servidor!], drops: [], movements: [] }, { shifts: [local!], drops: [], movements: [] });
+      assert.equal(r.shifts[0]?.status, "open");
+    }
+    // Un cierre de verdad le gana a los dos, del lado que venga.
+    const cerrado = { ...turno("t1", "closed", 0.2) };
+    for (const otro of [abierto, inventado]) {
+      assert.equal(richerShift(otro, cerrado).closingCash, 5000);
+      assert.equal(richerShift(cerrado, otro).closingCash, 5000);
+    }
+  });
+
+  it("los borrados se suman de los dos lados", () => {
+    const caja = payload({ deletedProducts: [{ id: "alfajor", at: hace(0.5), name: "Alfajor" }] });
+    const celu = payload({ deletedProducts: [{ id: "chicle", at: hace(0.2), name: "Chicle" }] });
+    assert.deepEqual(mergeBackup(caja, celu).deletedProducts?.map((d) => d.id), ["chicle", "alfajor"]);
+  });
+
+  it("un producto que volvió (catálogo de ejemplo recargado) sale de la lista de la fotocopia", () => {
+    const servidor = payload({ deletedProducts: [{ id: "p1", at: hace(3) }, { id: "otro", at: hace(3) }] });
+    const recargado = payload({ deletedProducts: [] });
+    assert.deepEqual(mergeBackup(servidor, recargado).deletedProducts?.map((d) => d.id), ["otro"]);
   });
 
   it("un aparato vacío no pisa la fotocopia", () => {

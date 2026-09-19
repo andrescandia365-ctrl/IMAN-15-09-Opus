@@ -1,4 +1,5 @@
 import { emptyBook, cellsOf } from "./ledger.ts";
+import { isDeleted, mergeDeleted } from "./deleted.ts";
 import { consumeFifo, insertLot, lotsOf } from "./lots.ts";
 import { packOf } from "./pack.ts";
 import type {
@@ -130,6 +131,9 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
       const p = ev.body as unknown as Product;
       if (!p?.id) return payload;
       const exists = payload.products.some((x) => x.id === p.id);
+      // Un borrado no se revive: el evento llegó tarde (un cambio de precio de
+      // otro aparato, un editor que se abrió antes del borrado).
+      if (!exists && isDeleted(payload.deletedProducts, p.id)) return payload;
       // Un alta se toma entera, con su stock inicial; uno que ya está solo cambia el catálogo.
       return {
         ...payload,
@@ -151,7 +155,14 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
     case "product.delete": {
       const id = (ev.body as { id: string })?.id;
       if (!id) return payload;
-      return { ...payload, products: payload.products.filter((p) => p.id !== id) };
+      const name = payload.products.find((p) => p.id === id)?.name;
+      return {
+        ...payload,
+        products: payload.products.filter((p) => p.id !== id),
+        deletedProducts: mergeDeleted(payload.deletedProducts, [
+          { id, at: ev.at, device: ev.deviceId, ...(name ? { name } : {}) },
+        ]),
+      };
     }
     case "refund": {
       const r = ev.body as unknown as Refund;
@@ -297,6 +308,7 @@ export function pulledPatch(next: KioskPayload) {
     staff: next.staff ?? [],
     roster: next.roster ?? [],
     payouts: next.payouts ?? [],
+    deletedProducts: next.deletedProducts ?? [],
   };
 }
 

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { prunePayload } from "./cap";
 import { todayKey } from "./format";
 import { keepStockAndLots, receiveBody } from "./events";
+import { forgetDeleted, isDeleted, mergeDeleted, nombresBorrados } from "./deleted";
 import { appendSyncLog, lastKnownStore, queueCopy, recordEvent, saveLocalSnapshot } from "./local-db";
 import { archiveClosedMonths, emptyBook, cellsOf, currentYm, sameCell, type FacLine } from "./ledger";
 import { lineUnits, orderNote, packOf, suggestPacks } from "./pack";
@@ -21,6 +22,7 @@ import type {
   CashShift,
   Category,
   DayBook,
+  DeletedProduct,
   MonthAgg,
   MonthSheet,
   OrderDraft,
@@ -65,6 +67,7 @@ export interface ImanState {
   staff: StaffMember[];
   roster: RosterSlot[];
   payouts: StaffPayout[];
+  deletedProducts: DeletedProduct[];
   lastSaleId: string | null;
   receiptOpen: boolean;
   deskStoreId: string;
@@ -100,7 +103,8 @@ export interface ImanState {
     facLine?: FacLine;
     amount?: number;
   }) => { ok: boolean; error?: string };
-  saveProduct: (p: Product) => void;
+  /** `borrado`: el producto se borró (desde otro aparato) mientras se editaba; no se vuelve a crear. */
+  saveProduct: (p: Product) => { ok: boolean; borrado?: boolean };
   deleteProduct: (id: string) => void;
   adjustStock: (id: string, delta: number, reason: string) => void;
   saveSettings: (patch: Partial<Settings>) => void;
@@ -161,6 +165,18 @@ function pushOrderCopy(getState: () => ImanState) {
   void saveLocalSnapshot(storeId, snap)
     .then(() => queueCopy(storeId, snap))
     .catch(() => {});
+}
+
+/** Una línea en el registro de sincronización: si un día "desaparecen productos", queda el rastro. */
+function logBorrado(getState: () => ImanState, detail: string) {
+  const storeId = getState().deskStoreId || lastKnownStore();
+  if (!storeId) return;
+  void appendSyncLog(storeId, {
+    kind: "catalog",
+    title: "Borrado en este aparato",
+    detail,
+    status: "done",
+  }).catch(() => {});
 }
 
 function hoursAgoIso(h: number): string {
@@ -292,6 +308,7 @@ function seedState() {
     staff: [] as StaffMember[],
     roster: [] as RosterSlot[],
     payouts: [] as StaffPayout[],
+    deletedProducts: [] as DeletedProduct[],
     lastSaleId: null as string | null,
     receiptOpen: false,
     deskStoreId: "",
@@ -621,6 +638,8 @@ export const useImanStore = create<ImanState>()((set, get) => ({
       saveProduct: (p) => {
         const st = get();
         const cur = st.products.find((x) => x.id === p.id);
+        // Un editor abierto antes de que llegara el borrado no lo revive.
+        if (!cur && isDeleted(st.deletedProducts, p.id)) return { ok: false, borrado: true };
         // Del editor se toma el catálogo. Stock y lotes son los del store ahora, no
         // los de la copia que hizo el diálogo al abrirse: si entró una venta en el
         // medio, guardar la devolvía. La corrección a mano del stock viaja aparte,
@@ -630,14 +649,21 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           products: cur ? st.products.map((x) => (x.id === p.id ? next : x)) : [...st.products, next],
         });
         recordEvent("product", next);
+        return { ok: true };
       },
 
       deleteProduct: (id) => {
-        set((st) => ({
-          products: st.products.filter((p) => p.id !== id),
+        const st = get();
+        const p = st.products.find((x) => x.id === id);
+        const ev = recordEvent("product.delete", { id });
+        set({
+          products: st.products.filter((x) => x.id !== id),
           ticket: st.ticket.filter((l) => l.productId !== id),
-        }));
-        recordEvent("product.delete", { id });
+          deletedProducts: mergeDeleted(st.deletedProducts, [
+            { id, at: ev.at, device: ev.deviceId, ...(p ? { name: p.name } : {}) },
+          ]),
+        });
+        if (p) logBorrado(get, p.name);
       },
 
       adjustStock: (id, delta, reason) => {
@@ -1187,6 +1213,8 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           products: SEED_PRODUCTS.map((p) => ({ ...p })),
           categories: SEED_CATEGORIES.map((c) => ({ ...c })),
           suppliers: SEED_SUPPLIERS.map((s) => ({ ...s, days: [...s.days] })),
+          // Vuelven los mismos ids: si quedaran en la lista, sus cambios no entrarían nunca.
+          deletedProducts: forgetDeleted(st.deletedProducts, SEED_PRODUCTS.map((p) => p.id)),
           ...emptyBooks(st.settings.cashFloat),
         })),
 
@@ -1198,12 +1226,17 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         const drop = st.products.filter((p) => seedIds.has(p.id) || seedCodes.has(p.barcode));
         const dropIds = new Set(drop.map((p) => p.id));
         const dropSup = st.suppliers.filter((s) => seedSup.has(s.id));
+        const borrados = drop.map((p) => {
+          const ev = recordEvent("product.delete", { id: p.id });
+          return { id: p.id, at: ev.at, device: ev.deviceId, name: p.name };
+        });
         set({
           products: st.products.filter((p) => !dropIds.has(p.id)),
           suppliers: st.suppliers.filter((s) => !seedSup.has(s.id)),
           ticket: st.ticket.filter((l) => !dropIds.has(l.productId)),
+          deletedProducts: mergeDeleted(st.deletedProducts, borrados),
         });
-        for (const p of drop) recordEvent("product.delete", { id: p.id });
+        if (drop.length) logBorrado(get, `catálogo de ejemplo: ${nombresBorrados(drop.map((p) => p.name))}`);
         return { products: drop.length, suppliers: dropSup.length };
       },
 
@@ -1229,6 +1262,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
             products: SEED_PRODUCTS.map((p) => ({ ...p })),
             categories: SEED_CATEGORIES.map((c) => ({ ...c })),
             suppliers: SEED_SUPPLIERS.map((s) => ({ ...s, days: [...s.days] })),
+            deletedProducts: forgetDeleted(st.deletedProducts, SEED_PRODUCTS.map((p) => p.id)),
             settings: named,
           };
         }),
@@ -1273,6 +1307,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           staff: pruned.staff ?? [],
           roster: pruned.roster ?? [],
           payouts: pruned.payouts ?? [],
+          deletedProducts: pruned.deletedProducts ?? [],
           ticket: keepUi ? (cur?.ticket ?? []) : restore ? [] : (pruned.ticket ?? []),
           payMethod: keepUi ? (cur?.payMethod ?? "efectivo") : (pruned.payMethod ?? "efectivo"),
           hydrated: true,
@@ -1319,6 +1354,7 @@ export function snapshotKiosk(st: ImanState): KioskPayload {
     staff: st.staff,
     roster: st.roster,
     payouts: st.payouts,
+    deletedProducts: st.deletedProducts,
     ticket: st.ticket,
     payMethod: st.payMethod,
   };

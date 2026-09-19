@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { CameraScan } from "@/components/camera-scan";
 import { VenceField } from "@/components/vence-field";
 import { daysUntil, formatARS } from "@/lib/format";
+import { BORRADO_MIENTRAS_EDITABAS } from "@/lib/deleted";
 import { lotsOf, soonestExpiry, unallocated } from "@/lib/lots";
 import { findByScan, packOf, productMatchesQuery, stockBreakdown } from "@/lib/pack";
 import { useImanStore } from "@/lib/store";
@@ -206,8 +207,12 @@ export function PhoneStockView() {
             toast.error("Nombre y precio son obligatorios");
             return;
           }
-          saveProduct({ ...draft, name: draft.name.trim(), priceUpdatedAt: new Date().toISOString() });
+          const r = saveProduct({ ...draft, name: draft.name.trim(), priceUpdatedAt: new Date().toISOString() });
           setOpen(false);
+          if (r.borrado) {
+            toast.error(BORRADO_MIENTRAS_EDITABAS);
+            return;
+          }
           toast.success("Producto guardado");
         }}
         onClose={() => setOpen(false)}

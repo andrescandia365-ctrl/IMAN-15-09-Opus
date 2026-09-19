@@ -298,6 +298,15 @@ export interface KioskPayload {
    * arranca de la fotocopia sigue la cinta desde ahí (ver pull-start.ts).
    */
   mark?: CopyMark;
+  /** Productos borrados: no se reviven con eventos viejos (ver deleted.ts). */
+  deletedProducts?: DeletedProduct[];
+}
+
+export interface DeletedProduct {
+  id: string;
+  at: string;
+  name?: string;
+  device?: string;
 }
 
 export interface CopyMark {

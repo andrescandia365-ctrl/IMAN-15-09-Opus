@@ -13,6 +13,7 @@ import type {
   StockMove,
 } from "@/lib/types";
 import { unitCost } from "./pricing.ts";
+import { mergeDeleted } from "./deleted.ts";
 
 /** Live tickets we keep in the blob. Older ones fold into monthAggs. */
 export const SALES_KEEP = 1500;
@@ -272,6 +273,10 @@ export function mergePayload(server: KioskPayload, local: KioskPayload): KioskPa
   for (const r of local.refunds ?? []) refundsById.set(r.id, r);
   const refunds = [...refundsById.values()].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   const products = local.products.length ? local.products : server.products;
+  // Los borrados de los dos lados, menos los productos que están: si se
+  // recargó el catálogo de ejemplo, la lista vieja de la fotocopia no los frena.
+  const vivos = new Set(products.map((p) => p.id));
+  const deletedProducts = mergeDeleted(server.deletedProducts, local.deletedProducts).filter((d) => !vivos.has(d.id));
   const categories = local.categories.length ? local.categories : server.categories;
   const settings = {
     ...server.settings,
@@ -292,14 +297,23 @@ export function mergePayload(server: KioskPayload, local: KioskPayload): KioskPa
     orders: mergeOrders(server.orders, local.orders),
     monthAggs: sameAggs(server.monthAggs ?? [], local.monthAggs ?? []),
     monthSheets: mergeSheets(server.monthSheets ?? [], local.monthSheets ?? []),
+    deletedProducts,
     ticket: local.ticket?.length ? local.ticket : server.ticket,
   });
 }
 
-/** Un mismo turno en los dos lados: el cerrado gana sobre el abierto; si no, el de este aparato. */
-function richerShift(a: CashShift, b: CashShift): CashShift {
-  if (a.status !== b.status) return a.status === "closed" ? a : b;
-  return b;
+/**
+ * Un cierre con efectivo contado gana; después, el turno abierto; al final, un
+ * cierre sin efectivo contado, que no es un cierre de verdad (así cerraba los
+ * turnos abiertos la restauración de una copia). Si empatan, el de este aparato.
+ */
+function shiftRank(s: CashShift): number {
+  if (s.status === "open") return 1;
+  return s.closingCash != null ? 2 : 0;
+}
+
+export function richerShift(a: CashShift, b: CashShift): CashShift {
+  return shiftRank(a) > shiftRank(b) ? a : b;
 }
 
 function unionById<T extends { id: string }>(server: T[], local: T[], pick: (a: T, b: T) => T): T[] {

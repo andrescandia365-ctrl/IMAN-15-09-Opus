@@ -32,6 +32,7 @@ import { CameraScan } from "@/components/camera-scan";
 import { VenceField } from "@/components/vence-field";
 import { lotsOf } from "@/lib/lots";
 import { stockCorrection } from "@/lib/events";
+import { BORRADO_MIENTRAS_EDITABAS } from "@/lib/deleted";
 import { findByScan, packOf, productMatchesQuery, shortCodeOf, stockBreakdown } from "@/lib/pack";
 import { buildSuggestions } from "@/lib/suggest";
 import { useImanStore } from "@/lib/store";
@@ -325,12 +326,16 @@ export function InventoryView() {
           const ahora = useImanStore.getState().products.find((x) => x.id === editing.id);
           const delta = ahora ? stockCorrection(stockAlAbrir, editing.stock, ahora.stock) : 0;
           if (delta) adjustStock(editing.id, delta, "corrección manual");
-          saveProduct({
+          const r = saveProduct({
             ...editing,
             name: editing.name.trim(),
             priceUpdatedAt: new Date().toISOString(),
           });
           setOpen(false);
+          if (r.borrado) {
+            toast.error(BORRADO_MIENTRAS_EDITABAS);
+            return;
+          }
           toast.success("Producto guardado");
         }}
       />

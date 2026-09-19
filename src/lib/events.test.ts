@@ -333,3 +333,38 @@ test("los eventos con el formato viejo se aplican sin error", () => {
     assert.equal(applyEvent(antes, ev(body, { type: "lot" })), antes);
   }
 });
+
+test("un borrado deja rastro: qué producto, cuándo y desde qué aparato", () => {
+  const next = applyEvent(
+    payload({ products: [conLotes()] }),
+    ev({ id: "yogur" }, { id: "ev_borrar", type: "product.delete", at: "2026-09-18T15:00:00.000Z", deviceId: "dev_pc" }),
+  );
+  assert.equal(next.products.length, 0);
+  assert.deepEqual(next.deletedProducts, [
+    { id: "yogur", at: "2026-09-18T15:00:00.000Z", device: "dev_pc", name: "Yogur" },
+  ]);
+  assert.deepEqual(pulledPatch(next).deletedProducts, next.deletedProducts);
+});
+
+test("un cambio de precio que llega después del borrado no revive el producto", () => {
+  const borrar = ev({ id: "yogur" }, { id: "ev_borrar", type: "product.delete" });
+  const precio = ev({ ...conLotes(), price: 1600 }, { id: "ev_precio_viejo", type: "product", deviceId: "dev_celu" });
+  // En cualquier orden que lleguen, el producto queda borrado.
+  assert.equal(applyEvents(payload({ products: [conLotes()] }), [borrar, precio]).products.length, 0);
+  assert.equal(applyEvents(payload({ products: [conLotes()] }), [precio, borrar]).products.length, 0);
+  // Un aparato que arranca de una fotocopia con la lista tampoco lo revive.
+  const recuperado = payload({ deletedProducts: [{ id: "yogur", at: "2026-09-18T15:00:00.000Z" }] });
+  assert.equal(applyEvent(recuperado, precio).products.length, 0);
+  // Un producto que no está en la lista sigue entrando con su evento.
+  const otro = ev({ ...yogurSuelto(3), id: "flan", name: "Flan" }, { id: "ev_flan", type: "product" });
+  assert.deepEqual(applyEvent(recuperado, otro).products.map((p) => p.id), ["flan"]);
+});
+
+test("si el producto está (se recargó el ejemplo), la lista no le frena los cambios", () => {
+  const conLista = payload({
+    products: [conLotes()],
+    deletedProducts: [{ id: "yogur", at: "2026-09-18T15:00:00.000Z" }],
+  });
+  const next = applyEvent(conLista, ev({ ...conLotes(), price: 1600 }, { id: "ev_precio", type: "product" }));
+  assert.equal(next.products[0]?.price, 1600);
+});
