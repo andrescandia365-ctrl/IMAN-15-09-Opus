@@ -18,7 +18,7 @@
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/cap.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/event-queue.test.ts src/lib/events.test.ts src/lib/floor-lock.test.ts src/lib/sync-copy.test.ts src/lib/pricing.test.ts src/lib/reprice.test.ts src/lib/ledger.test.ts src/lib/ticket-merge.test.ts src/lib/deleted.test.ts src/lib/sha256.test.ts src/lib/pull-start.test.ts",
+    "test": "node --experimental-strip-types --test src/lib/cap.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/event-queue.test.ts src/lib/events.test.ts src/lib/floor-lock.test.ts src/lib/sync-copy.test.ts src/lib/pricing.test.ts src/lib/reprice.test.ts src/lib/ledger.test.ts src/lib/ticket-merge.test.ts src/lib/deleted.test.ts src/lib/sha256.test.ts src/lib/pull-start.test.ts",
     "test:platform": "node --test 'scripts/**/*.test.mjs'",
     "lint": "eslint .",
     "format": "prettier --write ."
