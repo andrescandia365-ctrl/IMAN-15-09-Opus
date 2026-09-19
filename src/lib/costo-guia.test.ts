@@ -25,14 +25,15 @@ describe("qué renglón de la boleta copiar", () => {
   });
 
   it("un pack dice su número", () => {
-    assert.equal(recordatorioBulto(6), "Este viene en bulto de 6. Dividí el costo del bulto por 6.");
+    assert.equal(recordatorioBulto(6), "Este viene en bulto de 6. Poné el costo del bulto.");
   });
 
-  it("escanear el bulto no dice que el costo es solo por unidad", () => {
+  it("escanear el bulto y el campo dicen lo mismo", () => {
     const t = recordatorioEscaneoBulto(6);
     assert.match(t, /bulto de 6/);
-    assert.match(t, /del bulto o el de cada unidad/);
+    assert.match(t, /costo del bulto/);
     assert.doesNotMatch(t, /POR UNIDAD/);
+    assert.doesNotMatch(t, /cada unidad/);
   });
 });
 
@@ -74,9 +75,80 @@ describe("avisos cuando el costo no tiene sentido", () => {
     assert.deepEqual(avisosDeCosto({ ...base, precioNuevo: 0, costo: 5200 }), [sospechaBulto(6)]);
   });
 
-  it("no sospecha si salió de la calculadora de bulto, ni sin costo anterior, ni lejos del bulto", () => {
+  it("no sospecha si salió de la calculadora de bulto, ni lejos del bulto", () => {
     assert.deepEqual(avisosDeCosto({ ...base, precioNuevo: 0, costo: 6000, desdeBulto: true }), []);
-    assert.deepEqual(avisosDeCosto({ ...base, precioNuevo: 0, costo: 6000, costoAntes: null }), []);
     assert.deepEqual(avisosDeCosto({ ...base, precioNuevo: 0, costo: 3000 }), []);
+  });
+
+  it("sin costo anterior y sin precio de góndola no hay escala: no avisa", () => {
+    assert.deepEqual(avisosDeCosto({ ...base, precioNuevo: 0, costo: 6000, costoAntes: null }), []);
+  });
+
+  it("primera carga: el total del remito en el costo por unidad avisa, no bloquea", () => {
+    assert.deepEqual(
+      avisosDeCosto({
+        costo: 10216,
+        costoAntes: null,
+        precioNuevo: 15400,
+        precioHoy: 3100,
+        bulto: 6,
+        desdeBulto: false,
+      }),
+      [sospechaBulto(6)],
+    );
+    assert.deepEqual(
+      avisosDeCosto({
+        costo: 12158,
+        costoAntes: null,
+        precioNuevo: 18000,
+        precioHoy: 3100,
+        bulto: 6,
+        desdeBulto: false,
+      }),
+      [sospechaBulto(6)],
+    );
+  });
+
+  it("primera carga: cerca de packQty veces un costo razonable avisa", () => {
+    // Góndola 3100 → unidad razonable ~1550 → bulto de 6 ~9300.
+    assert.deepEqual(
+      avisosDeCosto({
+        costo: 9300,
+        costoAntes: null,
+        precioNuevo: 14000,
+        precioHoy: 3100,
+        bulto: 6,
+        desdeBulto: false,
+      }),
+      [sospechaBulto(6)],
+    );
+  });
+
+  it("primera carga: un costo de unidad razonable no avisa", () => {
+    assert.deepEqual(
+      avisosDeCosto({
+        costo: 1703,
+        costoAntes: null,
+        precioNuevo: 3100,
+        precioHoy: 3100,
+        bulto: 6,
+        desdeBulto: false,
+      }),
+      [],
+    );
+  });
+
+  it("primera carga desde la calculadora de bulto no avisa", () => {
+    assert.deepEqual(
+      avisosDeCosto({
+        costo: 1703,
+        costoAntes: null,
+        precioNuevo: 3100,
+        precioHoy: 3100,
+        bulto: 6,
+        desdeBulto: true,
+      }),
+      [],
+    );
   });
 });

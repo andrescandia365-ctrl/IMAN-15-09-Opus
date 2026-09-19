@@ -6,7 +6,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { Lock, Maximize2, Minimize2, Search, Undo2 } from "lucide-react";
+import { Lock, Maximize2, Minimize2, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,23 +42,22 @@ function verFactor(n: number): string {
   return n.toLocaleString("es-AR", { maximumFractionDigits: 3 });
 }
 
-type Valores = { cost: number | null; price: number; priceUpdatedAt: string };
-type Hecho = { id: string; name: string; antes: Valores; despues: Valores };
+type Hecho = { id: string; categoryId: string };
 
 /**
  * Lo actualizado en esta sesión, por local. Vive fuera de la tarjeta para que
  * no se pierda al ir a Inventario y volver; se va al recargar la página.
+ * Solo alimenta el renglón "Van N de este rubro": no hay historial en pantalla.
  */
 const memorias = new Map<string, Hecho[]>();
-const TOPE = 10;
 const MUESTRA = 8;
 /** Un costo con esta cantidad de dígitos que es un código es un escaneo que cayó en el costo. */
 const LARGO_CODIGO = 8;
 
 /**
- * Carga rápida de costos con el lector, mientras se guarda un pedido. El
- * encargado pone el costo por unidad; el precio sale del margen del rubro y el
- * redondeo, que se siguen tocando solo en el panel del dueño.
+ * Carga rápida de costos con el lector, mientras se guarda un pedido. Si
+ * viene en bulto, el cursor va al costo del bulto. El precio sale del margen
+ * del rubro, que se sigue tocando solo en el panel del dueño.
  */
 export function PriceUpdateCard() {
   const storeId = useImanStore((s) => s.deskStoreId);
@@ -90,6 +89,7 @@ function PriceUpdate({ storeId }: { storeId: string }) {
 
   const buscador = useRef<HTMLInputElement>(null);
   const costoRef = useRef<HTMLInputElement>(null);
+  const bultoRef = useRef<HTMLInputElement>(null);
   const confirmarRef = useRef<HTMLButtonElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const avisoRef = useRef<HTMLDivElement>(null);
@@ -147,14 +147,20 @@ function PriceUpdate({ storeId }: { storeId: string }) {
     alBuscador();
   }, [alBuscador]);
 
+  const enfocarCosto = useCallback((enBulto: boolean) => {
+    const el = enBulto ? bultoRef.current : costoRef.current;
+    el?.focus({ preventScroll: true });
+    el?.select();
+  }, []);
+
   /** Al entrar o salir de pantalla completa el foco vuelve a donde se estaba cargando. */
   const pantallaCompleta = useCallback(
     (v: boolean) => {
       setFull(v);
-      if (sel) costoRef.current?.focus({ preventScroll: true });
+      if (sel) enfocarCosto(pack > 1);
       else alBuscador();
     },
-    [sel, alBuscador],
+    [sel, pack, alBuscador, enfocarCosto],
   );
 
   // Al abrir, el buscador queda listo para el lector sin mover la pantalla.
@@ -163,12 +169,12 @@ function PriceUpdate({ storeId }: { storeId: string }) {
   }, [alBuscador]);
 
   // El cálculo y el aviso tienen que quedar a la vista: la tarjeta está al pie de Caja.
+  // Si viene en bulto, el cursor va al costo del bulto — no al de unidad.
   useEffect(() => {
     if (!sel) return;
-    costoRef.current?.focus({ preventScroll: true });
-    costoRef.current?.select();
+    enfocarCosto(pack > 1);
     editorRef.current?.scrollIntoView({ block: "nearest" });
-  }, [sel]);
+  }, [sel, pack, enfocarCosto]);
 
   useEffect(() => {
     if (!confirmar) return;
@@ -223,26 +229,21 @@ function PriceUpdate({ storeId }: { storeId: string }) {
     else toast.error(`No está: ${raw}`);
   }
 
-  function anotar(h: Hecho) {
+  function anotar(p: Product) {
     setHechos((prev) => {
-      // Un producto aparece una vez: si se toca de nuevo, Deshacer vuelve a como estaba al empezar.
-      const previo = prev.find((x) => x.id === h.id);
-      const junto = previo ? { ...h, antes: previo.antes } : h;
-      const resto = prev.filter((x) => x.id !== h.id);
-      const volvio = junto.antes.cost === junto.despues.cost && junto.antes.price === junto.despues.price;
-      return (volvio ? resto : [junto, ...resto]).slice(0, TOPE);
+      const resto = prev.filter((x) => x.id !== p.id);
+      return [{ id: p.id, categoryId: p.categoryId }, ...resto];
     });
   }
 
   function aplicar(p: Product, cost: number, price: number) {
-    const antes: Valores = { cost: p.cost, price: p.price, priceUpdatedAt: p.priceUpdatedAt };
-    const despues: Valores = {
+    saveProduct({
+      ...p,
       cost,
       price,
       priceUpdatedAt: price === p.price ? p.priceUpdatedAt : new Date().toISOString(),
-    };
-    saveProduct({ ...p, ...despues });
-    anotar({ id: p.id, name: p.name, antes, despues });
+    });
+    anotar(p);
     toast.success(`${p.name} · ${formatARS(price)}`);
     volverAlBuscador();
   }
@@ -254,62 +255,71 @@ function PriceUpdate({ storeId }: { storeId: string }) {
 
   function guardar() {
     if (!producto || !rubro) return;
-    // Si se escaneó el próximo sin dar Enter, el código cayó en el costo.
+    // Si se escaneó el próximo sin dar Enter, el código cayó en el costo (o en el bulto).
     const scan =
-      (tocado && costo.length >= LARGO_CODIGO ? findByScan(products, costo) : null) ??
-      (bulto.length >= LARGO_CODIGO ? findByScan(products, bulto) : null);
+      (bulto.length >= LARGO_CODIGO ? findByScan(products, bulto) : null) ??
+      (tocado && costo.length >= LARGO_CODIGO ? findByScan(products, costo) : null);
     if (scan) {
       toast(`Eso era un código: ${scan.product.name}`);
       elegir(scan.product, scan.kind);
       return;
     }
-    if (costoNuevo == null) {
-      toast.error("Poné el costo por unidad");
+    const desdeBulto = pack > 1 && bulto !== "";
+    const escrito = desdeBulto || tocado;
+    const costoFinal = desdeBulto
+      ? Number(bulto) > 0
+        ? porUnidad(Number(bulto), pack)
+        : null
+      : tocado
+        ? Number(costo) || null
+        : unitCost(producto);
+    if (costoFinal == null) {
+      toast.error(pack > 1 ? "Poné el costo del bulto" : "Poné el costo por unidad");
       return;
     }
-    if (sinMargen || precioNuevo == null) {
+    const precioFinal = sinMargen
+      ? null
+      : quotedPrice({ ...producto, cost: costoFinal }, factorFor(rubro, fac, settings), step, mode);
+    if (sinMargen || precioFinal == null) {
       toast.error("Este rubro no tiene margen. Lo pone el dueño.");
       return;
     }
-    if (!tocado && precioNuevo === producto.price) {
+    if (!escrito && precioFinal === producto.price) {
       sinCambios();
       return;
     }
     // Solo se sospecha de un número que cargó el encargado.
-    const avisos = tocado
+    const avisos = escrito
       ? avisosDeCosto({
-          costo: costoNuevo,
+          costo: costoFinal,
           costoAntes: unitCost(producto),
-          precioNuevo,
+          precioNuevo: precioFinal,
           bulto: pack,
-          desdeBulto: bulto !== "",
+          desdeBulto,
+          precioHoy: producto.price,
         })
       : [];
-    const salto = isBigPriceJump(producto.price, precioNuevo);
+    const salto = isBigPriceJump(producto.price, precioFinal);
     if (avisos.length || salto) {
-      setConfirmar({ cost: costoNuevo, price: precioNuevo, avisos, salto });
+      setConfirmar({ cost: costoFinal, price: precioFinal, avisos, salto });
       return;
     }
-    aplicar(producto, costoNuevo, precioNuevo);
+    aplicar(producto, costoFinal, precioFinal);
   }
 
   function cancelarConfirmar() {
     setConfirmar(null);
-    costoRef.current?.focus({ preventScroll: true });
-    costoRef.current?.select();
+    enfocarCosto(pack > 1);
   }
 
-  function deshacer(h: Hecho) {
-    setHechos((prev) => prev.filter((x) => x.id !== h.id));
-    const p = products.find((x) => x.id === h.id);
-    if (!p) {
-      toast.error("Ese producto ya no está");
-      return;
-    }
-    saveProduct({ ...p, ...h.antes });
-    toast.success(`${p.name} vuelve a ${formatARS(h.antes.price)}`);
-    if (sel?.id === h.id) volverAlBuscador();
-  }
+  const lineaRonda = useMemo(() => {
+    const categoryId = producto?.categoryId ?? hechos[0]?.categoryId;
+    if (!categoryId) return null;
+    const n = hechos.filter((h) => h.categoryId === categoryId).length;
+    if (n <= 0) return null;
+    const nombre = categories.find((c) => c.id === categoryId)?.name || "este rubro";
+    return { n, nombre };
+  }, [producto, hechos, categories]);
 
   return (
     <section
@@ -323,7 +333,7 @@ function PriceUpdate({ storeId }: { storeId: string }) {
           <span className="block text-xs font-medium uppercase tracking-[0.14em] text-subtle">Herramienta</span>
           <span className="mt-0.5 block font-display text-xl tracking-tight">Actualizar precios</span>
           <p className="mt-1 text-xs leading-snug text-muted">
-            Escaneá, poné el costo por unidad y Enter. El precio sale del margen del rubro, que pone el dueño.
+            Escaneá, poné el costo y Enter. El precio sale del margen del rubro, que pone el dueño.
           </p>
         </div>
         {full ? (
@@ -411,6 +421,8 @@ function PriceUpdate({ storeId }: { storeId: string }) {
 
             {sel?.kind === "pack" ? (
               <p className="rounded-lg bg-warn/15 px-3 py-2 text-sm">{recordatorioEscaneoBulto(pack)}</p>
+            ) : pack > 1 ? (
+              <p className="text-sm text-muted">{recordatorioBulto(pack)}</p>
             ) : null}
 
             {/* Siempre a la vista: qué renglón de la boleta va, según la factura del proveedor del rubro. */}
@@ -425,22 +437,24 @@ function PriceUpdate({ storeId }: { storeId: string }) {
                   {QUE_NUMERO}
                 </button>
               </div>
-              <p className="mt-1 text-xs text-muted">{POR_UNIDAD}</p>
-              {pack > 1 ? <p className="text-xs text-muted">{recordatorioBulto(pack)}</p> : null}
+              {pack <= 1 ? <p className="mt-1 text-xs text-muted">{POR_UNIDAD}</p> : null}
             </div>
 
             <div
               className={cn(
                 "grid gap-3",
-                pack > 1 ? "grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1fr)]" : "grid-cols-2",
+                pack > 1
+                  ? "grid-cols-1 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1fr)]"
+                  : "grid-cols-1 sm:grid-cols-2",
               )}
             >
               {pack > 1 ? (
                 <div>
                   <Label>Costo del bulto</Label>
                   <Input
+                    ref={bultoRef}
                     inputMode="numeric"
-                    placeholder="opcional"
+                    placeholder="del remito"
                     aria-label={`Costo del bulto de ${pack}`}
                     value={bulto}
                     onChange={(e) => {
@@ -450,6 +464,7 @@ function PriceUpdate({ storeId }: { storeId: string }) {
                       setCosto(v ? String(porUnidad(Number(v), pack)) : costoInicial);
                       setConfirmar(null);
                     }}
+                    onFocus={(e) => e.currentTarget.select()}
                     onKeyDown={(e) => {
                       if (e.key !== "Enter") return;
                       e.preventDefault();
@@ -484,6 +499,8 @@ function PriceUpdate({ storeId }: { storeId: string }) {
                   <p className="num mt-1 text-[11px] text-muted">
                     {formatARS(Number(bulto))} ÷ {pack} = {formatARS(porUnidad(Number(bulto), pack))}
                   </p>
+                ) : pack > 1 ? (
+                  <p className="mt-1 text-[11px] text-muted">{POR_UNIDAD}</p>
                 ) : null}
               </div>
               <div>
@@ -581,33 +598,15 @@ function PriceUpdate({ storeId }: { storeId: string }) {
           </div>
         ) : (
           <p className="self-center text-sm text-muted">
-            Escaneá un producto o buscalo por nombre. El costo se carga por unidad.
+            Escaneá un producto o buscalo por nombre.
           </p>
         )}
       </div>
 
-      {hechos.length ? (
-        <div className="border-t border-border px-5 pb-5 pt-4">
-          <h3 className="text-[11px] font-medium uppercase tracking-[0.08em] text-subtle">Actualizados recién</h3>
-          <ul className="mt-2 flex flex-col gap-1">
-            {hechos.map((h) => (
-              <li key={h.id} className="flex items-center justify-between gap-3 rounded-md bg-bg px-3 py-2">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{h.name}</p>
-                  <p className="num text-xs text-muted">
-                    costo {h.antes.cost == null ? "sin cargar" : formatARS(h.antes.cost)} →{" "}
-                    {h.despues.cost == null ? "sin cargar" : formatARS(h.despues.cost)} · precio{" "}
-                    {formatARS(h.despues.price)}
-                  </p>
-                </div>
-                <Button size="sm" variant="ghost" onClick={() => deshacer(h)}>
-                  <Undo2 className="size-4" />
-                  Deshacer
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </div>
+      {lineaRonda ? (
+        <p className="border-t border-border px-5 py-3 text-sm text-muted">
+          Van <span className="num font-medium text-fg">{lineaRonda.n}</span> de {lineaRonda.nombre} en esta ronda
+        </p>
       ) : null}
 
       <BoletaCostoDialog
@@ -615,7 +614,7 @@ function PriceUpdate({ storeId }: { storeId: string }) {
         onOpenKind={setEjemplo}
         onCloseAutoFocus={(e) => {
           e.preventDefault();
-          costoRef.current?.focus({ preventScroll: true });
+          enfocarCosto(pack > 1);
         }}
       />
     </section>

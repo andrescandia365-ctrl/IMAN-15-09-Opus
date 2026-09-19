@@ -19,12 +19,12 @@ export const POR_UNIDAD = "Por UNIDAD, no el costo del bulto.";
 export const QUE_NUMERO = "¿Qué número de la boleta?";
 
 export function recordatorioBulto(n: number): string {
-  return `Este viene en bulto de ${n}. Dividí el costo del bulto por ${n}.`;
+  return `Este viene en bulto de ${n}. Poné el costo del bulto.`;
 }
 
-/** Al escanear el código del bulto: hay campo de bulto, no digas que el costo es solo por unidad. */
+/** Al escanear el código del bulto: el campo y el cartel dicen lo mismo. */
 export function recordatorioEscaneoBulto(n: number): string {
-  return `Escaneaste el bulto de ${n}. Podés poner el del bulto o el de cada unidad.`;
+  return `Escaneaste el bulto de ${n}. Poné el costo del bulto.`;
 }
 
 /** El costo por unidad que sale del bulto, al peso más cercano: el campo de costo no lleva centavos. */
@@ -44,13 +44,39 @@ export function sospechaBulto(n: number): string {
 }
 
 /**
+ * El número del campo unidad parece el bulto entero, no la unidad.
+ * Con costo anterior: cerca de packQty × ese costo (±30%).
+ * Primera carga: cerca de packQty × un costo unitario razonable (la góndola
+ * de hoy da la escala) o un total de remito partido por el bulto que cae
+ * cerca de la góndola. No aplica si el número salió de la calculadora de bulto.
+ */
+export function pareceCostoDeBulto(o: {
+  costo: number;
+  costoAntes: number | null;
+  bulto: number;
+  desdeBulto: boolean;
+  precioHoy?: number;
+}): boolean {
+  if (!(o.bulto > 1) || o.desdeBulto || !(o.costo > 0)) return false;
+  if (o.costoAntes != null && o.costoAntes > 0) {
+    const veces = o.costo / o.costoAntes;
+    return Math.abs(veces / o.bulto - 1) <= 0.3;
+  }
+  const hoy = o.precioHoy ?? 0;
+  if (!(hoy > 0)) return false;
+  const unidadSiBulto = o.costo / o.bulto;
+  const packGuia = (hoy / 2) * o.bulto;
+  if (packGuia > 0 && Math.abs(o.costo / packGuia - 1) <= 0.5) return true;
+  return o.costo > hoy * 1.4 && Math.abs(unidadSiBulto / hoy - 1) <= 0.6;
+}
+
+/**
  * Avisos sobre un costo que cargó el encargado. Son sospechas, no bloqueos:
  * se puede confirmar igual.
  * - Más caro que el precio NUEVO (margen + redondeo): a ese precio se vende a
  *   pérdida. Si el nuevo cubre, no avisa: el de góndola de hoy no cuenta.
- * - Más o menos el bulto entero comparado con el costo anterior (entre 0,7 y
- *   1,3 veces el tamaño del bulto): parece el costo del bulto. No aplica si
- *   el número salió de la calculadora de bulto, que ya dividió.
+ * - El número parece el bulto entero en el campo de unidad. No aplica si
+ *   salió de la calculadora de bulto, que ya dividió.
  */
 export function avisosDeCosto(o: {
   costo: number;
@@ -58,12 +84,10 @@ export function avisosDeCosto(o: {
   precioNuevo: number;
   bulto: number;
   desdeBulto: boolean;
+  precioHoy?: number;
 }): string[] {
   const avisos: string[] = [];
   if (o.precioNuevo > 0 && o.costo > o.precioNuevo) avisos.push(PERDIDA);
-  if (o.bulto > 1 && !o.desdeBulto && o.costoAntes != null && o.costoAntes > 0) {
-    const veces = o.costo / o.costoAntes;
-    if (Math.abs(veces / o.bulto - 1) <= 0.3) avisos.push(sospechaBulto(o.bulto));
-  }
+  if (pareceCostoDeBulto(o)) avisos.push(sospechaBulto(o.bulto));
   return avisos;
 }
