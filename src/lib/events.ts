@@ -167,12 +167,13 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
     case "refund": {
       const r = ev.body as unknown as Refund;
       if (!r?.id || (payload.refunds ?? []).some((x) => x.id === r.id)) return payload;
-      const sign = r.kind === "cliente" ? 1 : -1;
       return {
         ...payload,
         refunds: [r, ...(payload.refunds ?? [])],
+        // Igual que en el origen: lo del cliente vuelve sin fecha; lo que va al
+        // proveedor sale de los lotes, como una venta.
         products: payload.products.map((p) =>
-          p.id === r.productId ? { ...p, stock: Math.max(0, p.stock + sign * r.units) } : p,
+          p.id !== r.productId ? p : r.kind === "cliente" ? { ...p, stock: p.stock + r.units } : consumeFifo(p, r.units),
         ),
       };
     }

@@ -9,7 +9,7 @@ import {
   type ImanEvent,
 } from "./events.ts";
 import { addLot, consumeFifo } from "./lots.ts";
-import type { Category, KioskPayload, Product, Sale, Settings, Supplier } from "./types.ts";
+import type { Category, KioskPayload, Product, Refund, Sale, Settings, Supplier } from "./types.ts";
 
 const settings = { name: "Kiosco de Prueba", city: "Rosario", onboarded: true } as Settings;
 
@@ -383,4 +383,39 @@ test("si el producto está (se recargó el ejemplo), la lista no le frena los ca
   });
   const next = applyEvent(conLista, ev({ ...conLotes(), price: 1600 }, { id: "ev_precio", type: "product" }));
   assert.equal(next.products[0]?.price, 1600);
+});
+
+function devolucion(kind: "cliente" | "proveedor", units: number): ImanEvent {
+  const r: Refund = {
+    id: `rf_${kind}_${units}`,
+    kind,
+    createdAt: "2026-09-18T12:00:00.000Z",
+    productId: "yogur",
+    productName: "Yogur",
+    units,
+    packs: 0,
+    amount: 900 * units,
+    paymentMethod: kind === "cliente" ? "efectivo" : "credito",
+    note: "",
+  };
+  return ev(r, { id: `ev_${r.id}`, type: "refund" });
+}
+
+const sumaLotes = (p: Product | undefined) => (p?.lots ?? []).reduce((a, l) => a + l.units, 0);
+
+test("devolver al proveedor se come los lotes igual que una venta", () => {
+  const next = applyEvent(payload({ products: [conLotes()] }), devolucion("proveedor", 4));
+  // Lo mismo que hace la caja al devolver: consumeFifo, primero lo que vence antes.
+  assert.deepEqual(next.products[0], consumeFifo(conLotes(), 4));
+  assert.equal(next.products[0]?.stock, 6);
+  assert.deepEqual(next.products[0]?.lots, [{ id: "lt_b", expiresAt: "2026-09-25", units: 4 }]);
+  assert.ok(sumaLotes(next.products[0]) <= next.products[0]!.stock);
+  // La misma devolución dos veces no descuenta dos veces.
+  assert.equal(applyEvent(next, devolucion("proveedor", 4)), next);
+});
+
+test("lo que devuelve el cliente vuelve sin fecha y no toca los lotes", () => {
+  const next = applyEvent(payload({ products: [conLotes()] }), devolucion("cliente", 2));
+  assert.equal(next.products[0]?.stock, 12);
+  assert.deepEqual(next.products[0]?.lots, conLotes().lots);
 });

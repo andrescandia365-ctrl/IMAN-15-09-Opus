@@ -608,7 +608,8 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           note: `NC ${line} ${credit}`,
         };
         set({
-          products: st.products.map((x) => (x.id === p.id ? { ...x, stock: x.stock - qtyUnits } : x)),
+          // Lo que vuelve al proveedor sale de los lotes igual que una venta.
+          products: st.products.map((x) => (x.id === p.id ? consumeFifo(x, qtyUnits) : x)),
           refunds: [refund, ...st.refunds].slice(0, 200),
           movements: [
             {
