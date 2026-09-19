@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { catalogImportTouched } from "./catalog-io";
 import { prunePayload } from "./cap";
 import { todayKey } from "./format";
-import { keepStockAndLots, productEventBody, receiveBody, settingsEventPatch } from "./events";
+import { catalogSaveEvent, keepStockAndLots, receiveBody, settingsEventPatch } from "./events";
 import { forgetDeleted, isDeleted, mergeDeleted, nombresBorrados } from "./deleted";
 import { bloqueoPorRubros } from "./rubros";
 import { appendSyncLog, lastKnownStore, queueCopy, recordEvent, saveLocalSnapshot } from "./local-db";
@@ -682,8 +682,8 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         set({
           products: cur ? st.products.map((x) => (x.id === p.id ? next : x)) : [...st.products, next],
         });
-        const body = productEventBody(cur, next);
-        if (!cur || Object.keys(body).length > 1) recordEvent("product", body);
+        const ev = catalogSaveEvent(cur, next);
+        if (ev) recordEvent(ev.type, ev.body);
         return { ok: true };
       },
 
@@ -748,7 +748,8 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         // Uno por producto, como saveProduct: sin esto el celu seguía vendiendo al precio viejo.
         for (const p of r.changed) {
           const prev = st.products.find((x) => x.id === p.id);
-          recordEvent("product", productEventBody(prev, p));
+          const ev = catalogSaveEvent(prev, p);
+          if (ev) recordEvent(ev.type, ev.body);
         }
         return r.changed.length;
       },
@@ -762,7 +763,8 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         set({ products: r.products });
         for (const p of r.changed) {
           const prev = prevs.find((x) => x.id === p.id);
-          recordEvent("product", productEventBody(prev, p));
+          const ev = catalogSaveEvent(prev, p);
+          if (ev) recordEvent(ev.type, ev.body);
         }
         return r.changed.length;
       },

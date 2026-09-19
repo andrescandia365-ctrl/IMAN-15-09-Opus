@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   applyEvent,
   applyEvents,
+  catalogSaveEvent,
   keepStockAndLots,
   productEventBody,
   pulledPatch,
@@ -11,7 +12,8 @@ import {
   type ImanEvent,
 } from "./events.ts";
 import { mergeBackup } from "./cap.ts";
-import { addLot, consumeFifo, insertLot } from "./lots.ts";
+import { isDeleted } from "./deleted.ts";
+import { addLot, consumeFifo, insertLot, lotsOf } from "./lots.ts";
 import type { Category, KioskPayload, Product, Refund, Sale, Settings, Supplier } from "./types.ts";
 
 const settings = { name: "Kiosco de Prueba", city: "Rosario", onboarded: true } as Settings;
@@ -398,19 +400,50 @@ test("la corrección a mano viaja como diferencia y no pisa las ventas del otro 
   assert.equal(stockCorrection(null, 15, 8), 0);
 });
 
-test("un update de producto no manda stock ni lots", () => {
+test("un cambio de plata emite price, no product, y no manda stock ni lots", () => {
   const antes = yogurSuelto(10);
-  const body = productEventBody(antes, { ...antes, price: 1600 });
+  const evSave = catalogSaveEvent(antes, { ...antes, price: 1600, priceUpdatedAt: "2026-09-19T12:00:00.000Z" });
+  assert.equal(evSave?.type, "price");
+  const body = evSave!.body as { id: string; price: number };
   assert.equal("stock" in body, false);
   assert.equal("lots" in body, false);
-  assert.equal((body as { price: number }).price, 1600);
-  assert.equal((body as { id: string }).id, "yogur");
   assert.equal("name" in body, false);
+  assert.equal(body.price, 1600);
+  assert.equal(body.id, "yogur");
 
-  const celu = applyEvent(payload({ products: [yogurSuelto(8)] }), ev(body, { id: "ev_precio", type: "product" }));
+  const celu = applyEvent(payload({ products: [yogurSuelto(8)] }), ev(body, { id: "ev_precio", type: "price" }));
   assert.equal(celu.products[0]?.price, 1600);
   assert.equal(celu.products[0]?.stock, 8);
   assert.equal(celu.products[0]?.name, "Yogur");
+});
+
+test("editar el nombre emite product con la ficha completa, sin stock ni lots", () => {
+  const antes = yogurSuelto(10);
+  const evSave = catalogSaveEvent(antes, { ...antes, name: "Yogur frutilla" });
+  assert.equal(evSave?.type, "product");
+  const body = evSave!.body as { name: string; barcode: string; categoryId: string };
+  assert.equal(body.name, "Yogur frutilla");
+  assert.equal(body.barcode, antes.barcode);
+  assert.equal(body.categoryId, antes.categoryId);
+  assert.equal("stock" in body, false);
+  assert.equal("lots" in body, false);
+
+  const celu = applyEvent(payload({ products: [yogurSuelto(8)] }), ev(body, { id: "ev_nombre", type: "product" }));
+  assert.equal(celu.products[0]?.name, "Yogur frutilla");
+  assert.equal(celu.products[0]?.barcode, antes.barcode);
+  assert.equal(celu.products[0]?.stock, 8);
+});
+
+test("un price no da de alta un producto que no está, ni revive uno borrado", () => {
+  const body = { id: "no-esta", price: 1600 };
+  const vacio = applyEvent(payload(), ev(body, { id: "ev_ghost", type: "price" }));
+  assert.equal(vacio.products.length, 0);
+
+  const borrado = applyEvent(
+    payload({ deletedProducts: [{ id: "yogur", at: "2026-09-19T00:00:00.000Z", device: "dev_pc" }] }),
+    ev({ id: "yogur", price: 1600 }, { id: "ev_revive", type: "price" }),
+  );
+  assert.equal(borrado.products.length, 0);
 });
 
 test("alta de producto sí lleva stock inicial y lots vacíos", () => {
@@ -626,4 +659,98 @@ test("el mismo id de lote dos veces: insertLot no duplica", () => {
     dos.lots?.find((l) => l.id === "lt_a"),
     p.lots?.find((l) => l.id === "lt_a"),
   );
+});
+
+/**
+ * applyEvent de 79191af (antes de d6d6752): el `product` hace spread del body
+ * y el default ignora tipos que no conoce. Congelado acá para no volver a
+ * achicar un evento que el código viejo cree entender.
+ */
+function keepStockAndLots79191af(local: Product, incoming: Product): Product {
+  const fechaDeLotes = lotsOf(local).length > 0 || lotsOf(incoming).length > 0;
+  return {
+    ...incoming,
+    stock: local.stock,
+    lots: local.lots,
+    expiresAt: fechaDeLotes ? local.expiresAt : incoming.expiresAt,
+  };
+}
+
+function applyEvent79191af(payload: KioskPayload, ev: ImanEvent): KioskPayload {
+  switch (ev.type) {
+    case "product": {
+      const p = ev.body as unknown as Product;
+      if (!p?.id) return payload;
+      const exists = payload.products.some((x) => x.id === p.id);
+      if (!exists && isDeleted(payload.deletedProducts, p.id)) return payload;
+      return {
+        ...payload,
+        products: exists
+          ? payload.products.map((x) => (x.id === p.id ? keepStockAndLots79191af(x, p) : x))
+          : [...payload.products, p],
+      };
+    }
+    default:
+      return payload;
+  }
+}
+
+test("un aparato viejo ignora un price y no toca el catálogo", () => {
+  const local = yogurSuelto(8);
+  const antes = payload({ products: [local] });
+  const next = applyEvent79191af(
+    antes,
+    ev({ id: "yogur", price: 1600, cost: 1100 }, { id: "ev_plata", type: "price" }),
+  );
+  assert.equal(next, antes);
+  assert.equal(next.products[0]?.name, "Yogur");
+  assert.equal(next.products[0]?.barcode, "7790001");
+  assert.equal(next.products[0]?.categoryId, "c-almacen");
+  assert.equal(next.products[0]?.price, 1400);
+  assert.equal(next.products[0]?.stock, 8);
+});
+
+test("un product nuevo (ficha completa, sin stock) no le borra campos al aparato viejo", () => {
+  const local = yogurSuelto(8);
+  const body = productEventBody(local, { ...local, name: "Yogur frutilla" });
+  assert.equal("stock" in body, false);
+  assert.equal(body.name, "Yogur frutilla");
+  assert.equal(body.barcode, local.barcode);
+  assert.equal(body.categoryId, local.categoryId);
+
+  const next = applyEvent79191af(payload({ products: [local] }), ev(body, { id: "ev_ficha", type: "product" }));
+  assert.equal(next.products[0]?.name, "Yogur frutilla");
+  assert.equal(next.products[0]?.barcode, "7790001");
+  assert.equal(next.products[0]?.categoryId, "c-almacen");
+  assert.equal(next.products[0]?.stock, 8);
+  assert.deepEqual(next.products[0]?.lots, local.lots);
+});
+
+test("un product parcial (el error de d6d6752) sí le borra la ficha al aparato viejo", () => {
+  const local = yogurSuelto(8);
+  const next = applyEvent79191af(
+    payload({ products: [local] }),
+    ev({ id: "yogur", price: 1600 }, { id: "ev_parcial", type: "product" }),
+  );
+  assert.equal(next.products[0]?.name, undefined);
+  assert.equal(next.products[0]?.barcode, undefined);
+  assert.equal(next.products[0]?.price, 1600);
+  assert.equal(next.products[0]?.stock, 8);
+});
+
+test("la herramienta de actualizar precios (costo y góndola) emite price", () => {
+  const antes = yogurSuelto(10);
+  const evSave = catalogSaveEvent(antes, {
+    ...antes,
+    cost: 1100,
+    price: 1700,
+    priceUpdatedAt: "2026-09-19T12:00:00.000Z",
+  });
+  assert.equal(evSave?.type, "price");
+  assert.deepEqual(evSave?.body, {
+    id: "yogur",
+    cost: 1100,
+    price: 1700,
+    priceUpdatedAt: "2026-09-19T12:00:00.000Z",
+  });
 });

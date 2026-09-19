@@ -44,7 +44,8 @@ export type ImanEvent = {
     | "category"
     | "lot"
     | "supplier"
-    | "settings";
+    | "settings"
+    | "price";
   body: Json;
   acked?: boolean;
 };
@@ -64,7 +65,7 @@ export function settingsEventPatch(patch: Partial<Settings>, prev?: Partial<Sett
   return body;
 }
 
-/** Catálogo: no es stock ni lotes. Un update solo manda los que cambió. */
+/** Catálogo: no es stock ni lotes. El update lleva la ficha completa, no un diff. */
 const CATALOG_KEYS = [
   "name",
   "barcode",
@@ -82,28 +83,61 @@ const CATALOG_KEYS = [
   "priceA",
 ] as const;
 
+const MONEY_KEYS = ["price", "cost", "priceUpdatedAt"] as const;
+
 function catalogEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
   if (a == null && b == null) return true;
   return false;
 }
 
+function jsonVal(v: unknown): Json {
+  return (v === undefined ? null : v) as Json;
+}
+
 /**
  * Lo que viaja en un evento `product`. Alta: el producto entero, con stock
- * inicial y lots []. Update: catálogo que cambió, sin stock ni lots. El body
- * viejo que los traía se ignora al aplicar (keepStockAndLots / merge).
+ * inicial y lots []. Update: ficha completa de catálogo, sin stock ni lots.
+ * Achicar el body de un tipo que el aparato viejo ya entiende le borra los
+ * campos que faltan: por eso el update no es un diff.
  */
 export function productEventBody(prev: Product | undefined, next: Product): { [key: string]: Json } {
   if (!prev) {
     return { ...(next as unknown as Record<string, Json>), lots: (next.lots ?? []) as unknown as Json };
   }
   const body: { [key: string]: Json } = { id: next.id };
-  for (const key of CATALOG_KEYS) {
-    if (catalogEqual(prev[key], next[key])) continue;
-    const v = next[key];
-    body[key] = (v === undefined ? null : v) as Json;
-  }
+  for (const key of CATALOG_KEYS) body[key] = jsonVal(next[key]);
   return body;
+}
+
+/**
+ * Parche de plata. Solo las claves que cambiaron. Si también cambió la ficha,
+ * no es un `price`: va por `product` con la ficha completa.
+ */
+export function priceEventBody(prev: Product, next: Product): { [key: string]: Json } | null {
+  for (const key of CATALOG_KEYS) {
+    if ((MONEY_KEYS as readonly string[]).includes(key)) continue;
+    if (!catalogEqual(prev[key], next[key])) return null;
+  }
+  const body: { [key: string]: Json } = { id: next.id };
+  for (const key of MONEY_KEYS) {
+    if (catalogEqual(prev[key], next[key])) continue;
+    body[key] = jsonVal(next[key]);
+  }
+  return Object.keys(body).length > 1 ? body : null;
+}
+
+/** Qué evento manda saveProduct / alinear / el cruce del dueño. */
+export function catalogSaveEvent(
+  prev: Product | undefined,
+  next: Product,
+): { type: "product" | "price"; body: { [key: string]: Json } } | null {
+  if (!prev) return { type: "product", body: productEventBody(undefined, next) };
+  const plata = priceEventBody(prev, next);
+  if (plata) return { type: "price", body: plata };
+  const ficha = CATALOG_KEYS.some((key) => !catalogEqual(prev[key], next[key]));
+  if (!ficha) return null;
+  return { type: "product", body: productEventBody(prev, next) };
 }
 
 /**
@@ -218,6 +252,30 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
         products: exists
           ? payload.products.map((x) => (x.id === p.id ? mergeProductCatalog(x, p) : x))
           : [...payload.products, p],
+      };
+    }
+    case "price": {
+      const b = ev.body as {
+        id?: string;
+        price?: number;
+        cost?: number | null;
+        priceUpdatedAt?: string;
+      };
+      if (!b?.id) return payload;
+      // No da de alta ni revive: si no está en el catálogo, no se toca.
+      if (!payload.products.some((x) => x.id === b.id)) return payload;
+      return {
+        ...payload,
+        products: payload.products.map((p) => {
+          if (p.id !== b.id) return p;
+          const next = { ...p };
+          if (Object.prototype.hasOwnProperty.call(b, "price") && typeof b.price === "number") next.price = b.price;
+          if (Object.prototype.hasOwnProperty.call(b, "cost")) next.cost = b.cost ?? null;
+          if (Object.prototype.hasOwnProperty.call(b, "priceUpdatedAt") && typeof b.priceUpdatedAt === "string") {
+            next.priceUpdatedAt = b.priceUpdatedAt;
+          }
+          return next;
+        }),
       };
     }
     case "lot": {
