@@ -5,6 +5,8 @@ export type StockLot = {
   id: string;
   expiresAt: string;
   units: number;
+  /** Alta del lote. Sin esto (lotes viejos) cuenta como anterior a cualquier venta. */
+  createdAt?: string;
 };
 
 export function lotsOf(p: { lots?: StockLot[] } | undefined): StockLot[] {
@@ -21,13 +23,19 @@ export function soonestExpiry(p: Product): string | null {
   return lots[0]?.expiresAt ?? p.expiresAt ?? null;
 }
 
+/** Un lote sin alta, o dado de alta no después de `asOf`, existía cuando pasó el evento. */
+function existiaAl(l: StockLot, asOf?: string): boolean {
+  if (!asOf || !l.createdAt) return true;
+  return l.createdAt <= asOf;
+}
+
 /**
- * Descuenta del lote que vence primero. Es una cuenta pura: con los mismos
- * lotes y la misma cantidad da lo mismo en cualquier aparato, y dos ventas dan
- * lo mismo en cualquier orden. Por eso applyEvent la vuelve a correr en el
- * aparato que recibe la venta, en lugar de mandar los lotes en el evento.
+ * Descuenta del lote que vence primero, entre los que ya existían en `asOf`.
+ * Un lote fechado después de la venta no se toca, aunque venza antes. Es una
+ * cuenta pura: el evento sale no manda los lotes; cada aparato la corre con
+ * `ev.at`. Sin `asOf` (o lotes viejos sin createdAt) es el FIFO de siempre.
  */
-export function consumeFifo(p: Product, qty: number): Product {
+export function consumeFifo(p: Product, qty: number, asOf?: string): Product {
   const take = Math.max(0, Math.floor(qty));
   if (take <= 0) return p;
   const lots = lotsOf(p);
@@ -36,7 +44,7 @@ export function consumeFifo(p: Product, qty: number): Product {
   let left = take;
   const next: StockLot[] = [];
   for (const l of lots.slice().sort((a, b) => a.expiresAt.localeCompare(b.expiresAt))) {
-    if (left <= 0) {
+    if (!existiaAl(l, asOf) || left <= 0) {
       next.push(l);
       continue;
     }
@@ -76,7 +84,12 @@ export function addLot(
   if (want <= 0) return { ok: false, error: "Cuántas unidades" };
   const free = unallocated(p);
   if (free <= 0) return { ok: false, error: "No hay stock sin fecha para ese lote" };
-  const lot: StockLot = { id: uid("lt"), expiresAt: date, units: Math.min(want, free) };
+  const lot: StockLot = {
+    id: uid("lt"),
+    expiresAt: date,
+    units: Math.min(want, free),
+    createdAt: new Date().toISOString(),
+  };
   return { ok: true, product: insertLot(p, lot), lot };
 }
 

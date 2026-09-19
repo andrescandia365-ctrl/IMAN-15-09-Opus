@@ -5,10 +5,12 @@ import {
   applyEvents,
   keepStockAndLots,
   pulledPatch,
+  settingsEventPatch,
   stockCorrection,
   type ImanEvent,
 } from "./events.ts";
-import { addLot, consumeFifo } from "./lots.ts";
+import { mergeBackup } from "./cap.ts";
+import { addLot, consumeFifo, insertLot } from "./lots.ts";
 import type { Category, KioskPayload, Product, Refund, Sale, Settings, Supplier } from "./types.ts";
 
 const settings = { name: "Kiosco de Prueba", city: "Rosario", onboarded: true } as Settings;
@@ -141,6 +143,83 @@ test("syncNow saca la categoría borrada también de los proveedores del otro ap
   );
 });
 
+test("el PIN y el logo no viajan si este toque no los cambió", () => {
+  const prev = { ownerPinHash: "pin-viejo", storeLogo: "data:logo" };
+  assert.deepEqual(settingsEventPatch({ roundStep: 50, mpFeePct: 0.07, ...prev }, prev), {
+    roundStep: 50,
+    mpFeePct: 0.07,
+  });
+  assert.deepEqual(settingsEventPatch({ ownerPinHash: "pin-nuevo" }, prev), { ownerPinHash: "pin-nuevo" });
+  assert.deepEqual(settingsEventPatch({ storeLogo: "" }, prev), { storeLogo: "" });
+});
+
+test("PC cambia Fac A y redondeo, celu un proveedor: los dos órdenes dejan los dos cambios", () => {
+  const base = payload({
+    settings: {
+      ...settings,
+      roundStep: 100,
+      priceMarkupsA: { "c-bebidas": 1.8 },
+      ownerPinHash: "pin-viejo",
+      storeLogo: "data:logo",
+    },
+  });
+  const deLaPc = ev(
+    { priceMarkupsA: { "c-bebidas": 1.9 }, roundStep: 50 },
+    { id: "ev_ajustes", type: "settings", at: "2026-09-18T10:00:00.000Z", deviceId: "dev_pc" },
+  );
+  const delCelu = ev(
+    { op: "save", supplier: supplier({ name: "Omar Distribuidora", invoiceType: "A" }) },
+    { id: "ev_prov", type: "supplier", at: "2026-09-18T11:00:00.000Z", deviceId: "dev_celu" },
+  );
+
+  const unOrden = applyEvents(base, [deLaPc, delCelu]);
+  const otroOrden = applyEvents(base, [delCelu, deLaPc]);
+  assert.deepEqual(unOrden.settings.priceMarkupsA, otroOrden.settings.priceMarkupsA);
+  assert.equal(unOrden.settings.roundStep, otroOrden.settings.roundStep);
+  assert.equal(unOrden.suppliers[0]?.name, otroOrden.suppliers[0]?.name);
+  assert.equal(unOrden.settings.roundStep, 50);
+  assert.equal(unOrden.settings.priceMarkupsA?.["c-bebidas"], 1.9);
+  assert.equal(unOrden.suppliers[0]?.name, "Omar Distribuidora");
+  assert.equal(unOrden.suppliers[0]?.invoiceType, "A");
+  // El parche de márgenes no manda ni pisa PIN ni logo.
+  assert.equal(unOrden.settings.ownerPinHash, "pin-viejo");
+  assert.equal(unOrden.settings.storeLogo, "data:logo");
+
+  const alStore = pulledPatch(unOrden);
+  assert.equal(alStore.settings.roundStep, 50);
+  assert.equal(alStore.settings.priceMarkupsA?.["c-bebidas"], 1.9);
+  assert.equal(alStore.suppliers[0]?.name, "Omar Distribuidora");
+
+  // Tercer aparato: ya aplicó la cinta; una fotocopia vieja no pisa esos campos.
+  const tercer = mergeBackup(base, unOrden);
+  assert.equal(tercer.settings.roundStep, 50);
+  assert.equal(tercer.settings.priceMarkupsA?.["c-bebidas"], 1.9);
+  assert.equal(tercer.suppliers[0]?.name, "Omar Distribuidora");
+  assert.equal(tercer.settings.ownerPinHash, "pin-viejo");
+});
+
+test("un sobre incompleto de proveedor o de ajustes no toca nada", () => {
+  const antes = payload();
+  for (const body of [{ op: "save" }, { op: "save", supplier: { name: "Sin id" } }, { op: "delete" }, {}]) {
+    assert.equal(applyEvent(antes, ev(body, { type: "supplier" })), antes);
+  }
+  assert.equal(applyEvent(antes, ev({}, { type: "settings" })), antes);
+});
+
+test("borrar un proveedor por evento lo saca, y el mismo id dos veces no duplica", () => {
+  const alta = ev(
+    { op: "save", supplier: supplier({ id: "prov-nuevo", name: "Lácteos Juan" }) },
+    { id: "ev_alta_prov", type: "supplier" },
+  );
+  const una = applyEvent(payload(), alta);
+  const dos = applyEvent(una, alta);
+  assert.equal(dos.suppliers.filter((s) => s.id === "prov-nuevo").length, 1);
+  const baja = ev({ op: "delete", id: "prov-nuevo" }, { id: "ev_baja_prov", type: "supplier" });
+  const next = applyEvent(dos, baja);
+  assert.equal(next.suppliers.some((s) => s.id === "prov-nuevo"), false);
+  assert.equal(applyEvent(next, baja), next);
+});
+
 // Lotes: el aparato que recibe la venta tiene que quedar con los mismos lotes que la caja.
 function conLotes(): Product {
   return {
@@ -259,7 +338,9 @@ test("carrera: la caja vende 2 y el celu fecha sin saberlo; la caja no recupera 
 
   caja = applyEvents(caja, [loteNuevo, productoViejo]);
   assert.equal(caja.products[0]?.stock, 8);
-  assert.deepEqual(caja.products[0]?.lots, [{ id: fechado.lot.id, expiresAt: "2026-09-25", units: 4 }]);
+  assert.deepEqual(caja.products[0]?.lots, [
+    { id: fechado.lot.id, expiresAt: "2026-09-25", units: 4, createdAt: loteNuevo.at },
+  ]);
 
   // Celu: le llega la venta de la caja y queda con el mismo stock.
   const celu = applyEvent(payload({ products: [fechado.product] }), venta("v_caja", 2));
@@ -418,4 +499,68 @@ test("lo que devuelve el cliente vuelve sin fecha y no toca los lotes", () => {
   const next = applyEvent(payload({ products: [conLotes()] }), devolucion("cliente", 2));
   assert.equal(next.products[0]?.stock, 12);
   assert.deepEqual(next.products[0]?.lots, conLotes().lots);
+});
+
+const ayer = "2026-09-17T12:00:00.000Z";
+const hoy = "2026-09-18T12:00:00.000Z";
+const maniana = "2026-09-19T12:00:00.000Z";
+
+test("lote A vence antes, createdAt ayer: la venta de hoy come A", () => {
+  const p: Product = {
+    ...conLotes(),
+    stock: 8,
+    lots: [
+      { id: "lt_a", expiresAt: "2026-09-20", units: 3, createdAt: ayer },
+      { id: "lt_c", expiresAt: "2026-09-25", units: 5, createdAt: ayer },
+    ],
+  };
+  const comido = consumeFifo(p, 2, hoy);
+  assert.deepEqual(comido.lots, [
+    { id: "lt_a", expiresAt: "2026-09-20", units: 1, createdAt: ayer },
+    { id: "lt_c", expiresAt: "2026-09-25", units: 5, createdAt: ayer },
+  ]);
+  assert.equal(comido.stock, 6);
+
+  const sale = venta("v_hoy", 2);
+  sale.at = hoy;
+  const viaEvento = applyEvent(payload({ products: [p] }), sale).products[0];
+  assert.deepEqual(viaEvento, comido);
+  assert.equal("lots" in (sale.body as object), false);
+});
+
+test("lote fechado después de la venta no se toca, en cualquier orden", () => {
+  const a = { id: "lt_a", expiresAt: "2026-09-25", units: 5, createdAt: ayer };
+  const p: Product = { ...conLotes(), stock: 10, lots: [a], expiresAt: "2026-09-25" };
+  const sale = venta("v_race2", 3);
+  sale.at = hoy;
+  const lotB = ev(
+    { productId: "yogur", lotId: "lt_b", expiresAt: "2026-09-20", units: 4 },
+    { id: "ev_lot_b", type: "lot", at: maniana },
+  );
+
+  const antes = payload({ products: [p] });
+  const saleLuegoLot = applyEvents(antes, [sale, lotB]).products[0];
+  const lotLuegoSale = applyEvents(antes, [lotB, sale]).products[0];
+
+  assert.equal(saleLuegoLot?.stock, 7);
+  assert.equal(lotLuegoSale?.stock, 7);
+  assert.deepEqual(saleLuegoLot?.lots, lotLuegoSale?.lots);
+  assert.deepEqual(saleLuegoLot?.lots, [
+    { id: "lt_b", expiresAt: "2026-09-20", units: 4, createdAt: maniana },
+    { id: "lt_a", expiresAt: "2026-09-25", units: 2, createdAt: ayer },
+  ]);
+});
+
+test("el mismo id de lote dos veces: insertLot no duplica", () => {
+  const p = conLotes();
+  const lot = { id: "lt_a", expiresAt: "2026-12-01", units: 99, createdAt: hoy };
+  const una = insertLot(p, lot);
+  const dos = insertLot(una, { ...lot, units: 1, expiresAt: "2026-12-02" });
+  assert.equal(una, p);
+  assert.equal(dos, una);
+  assert.equal(dos.lots?.filter((l) => l.id === "lt_a").length, 1);
+  assert.deepEqual(
+    dos.lots?.find((l) => l.id === "lt_a"),
+    p.lots?.find((l) => l.id === "lt_a"),
+  );
 });

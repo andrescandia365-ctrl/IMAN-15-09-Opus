@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import type { Category, Product } from "./types";
-import { uid } from "./utils";
+import { uid } from "./utils.ts";
 
 export type CatalogPreviewRow = {
   name: string;
@@ -233,6 +233,21 @@ function splitCsv(line: string, sep: string): string[] {
   return out;
 }
 
+function sameCatalog(a: Product, b: Product): boolean {
+  return (
+    a.name === b.name &&
+    a.barcode === b.barcode &&
+    a.price === b.price &&
+    a.cost === b.cost &&
+    a.categoryId === b.categoryId
+  );
+}
+
+/**
+ * Aplica la planilla sobre una copia. Producto que ya existe: nombre, código,
+ * precio, costo y rubro. El stock de la fila se ignora (queda el del local, con
+ * sus lotes). Alta: stock de la planilla, sin lotes.
+ */
 export function applyCatalogPreview(
   rows: CatalogPreviewRow[],
   products: Product[],
@@ -252,13 +267,21 @@ export function applyCatalogPreview(
       (p) => (r.barcode && p.barcode === r.barcode) || p.name.toLowerCase() === r.name.toLowerCase(),
     );
     if (hit) {
+      const barcode = r.barcode || hit.barcode;
+      const cost = r.cost != null ? r.cost : hit.cost;
+      const changed =
+        hit.name !== r.name ||
+        hit.barcode !== barcode ||
+        hit.price !== r.price ||
+        hit.cost !== cost ||
+        hit.categoryId !== cat.id;
       hit.name = r.name;
-      if (r.barcode) hit.barcode = r.barcode;
+      hit.barcode = barcode;
       hit.price = r.price;
-      if (r.cost != null) hit.cost = r.cost;
-      hit.stock = r.stock;
+      hit.cost = cost;
       hit.categoryId = cat.id;
-      hit.priceUpdatedAt = new Date().toISOString();
+      if (changed) hit.priceUpdatedAt = new Date().toISOString();
+      // Stock y lotes no se tocan: la góndola manda, no la planilla.
     } else {
       nextProducts.push({
         id: uid("p"),
@@ -276,6 +299,22 @@ export function applyCatalogPreview(
     }
   }
   return { products: nextProducts, categories: cats };
+}
+
+/** Lo que hay que guardar con eventos: rubros nuevos y productos dados de alta o con catálogo distinto. */
+export function catalogImportTouched(
+  before: { products: Product[]; categories: Category[] },
+  after: { products: Product[]; categories: Category[] },
+): { newCategories: Category[]; upserts: Product[] } {
+  const hadCat = new Set(before.categories.map((c) => c.id));
+  const beforeById = new Map(before.products.map((p) => [p.id, p]));
+  return {
+    newCategories: after.categories.filter((c) => !hadCat.has(c.id)),
+    upserts: after.products.filter((p) => {
+      const cur = beforeById.get(p.id);
+      return !cur || !sameCatalog(cur, p);
+    }),
+  };
 }
 
 export function catalogExportRows(products: Product[], categories: Category[]): (string | number)[][] {

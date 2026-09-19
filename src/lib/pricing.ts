@@ -1,3 +1,4 @@
+import { shelfIncludesTaxOf, taxRateOf } from "./fiscal.ts";
 import type { Category, Product, Settings, Supplier } from "@/lib/types";
 
 export type InvoiceKind = "A" | "X";
@@ -10,8 +11,13 @@ function norm(name: string) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-/** Canonical keys after alias. */
-const DEFAULT_A: Record<string, number> = {
+/**
+ * Factores A como se VEN en góndola, escritos para Argentina con impuesto 21%.
+ * Por dentro: margen de negocio × (1 + tasa). La cuenta del mes no usa estos
+ * números: usa taxPct del local. No recatalogar al guardar la condición.
+ */
+const TASA_TABLA_A = 0.21;
+const DEFAULT_A_VISTO: Record<string, number> = {
   bebidas: 1.8,
   papas: 1.85,
   sandwiches: 2.12,
@@ -22,6 +28,10 @@ const DEFAULT_A: Record<string, number> = {
   lacteos: 1.7,
   speed: 1.55,
 };
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
 
 const DEFAULT_X: Record<string, number> = {
   bebidas: 1.5,
@@ -50,17 +60,23 @@ function canon(name: string): string {
   return ALIAS[n] ?? n;
 }
 
-export function defaultFactor(categoryName: string, kind: InvoiceKind): number | null {
+export function defaultFactor(categoryName: string, kind: InvoiceKind, settings?: Settings): number | null {
   const key = canon(categoryName);
-  const table = kind === "A" ? DEFAULT_A : DEFAULT_X;
-  return table[key] ?? null;
+  if (kind === "X") return DEFAULT_X[key] ?? null;
+  const visto = DEFAULT_A_VISTO[key];
+  if (visto == null) return null;
+  const neto = visto / (1 + TASA_TABLA_A);
+  if (settings && !shelfIncludesTaxOf(settings)) return round2(neto);
+  const tasa = settings ? taxRateOf(settings) : TASA_TABLA_A;
+  if (!(tasa > 0)) return round2(neto);
+  return round2(neto * (1 + tasa));
 }
 
 export function factorFor(category: Category, kind: InvoiceKind, settings: Settings): number {
   const map = kind === "A" ? settings.priceMarkupsA : settings.priceMarkups;
   const stored = map?.[category.id];
   if (typeof stored === "number" && stored > 0) return stored;
-  return defaultFactor(category.name, kind) ?? 1;
+  return defaultFactor(category.name, kind, settings) ?? 1;
 }
 
 /** Sin margen propio ni uno conocido, factorFor da 1: se vendería al costo. */
@@ -68,7 +84,7 @@ export function hasFactor(category: Category, kind: InvoiceKind, settings: Setti
   const map = kind === "A" ? settings.priceMarkupsA : settings.priceMarkups;
   const stored = map?.[category.id];
   if (typeof stored === "number" && stored > 0) return true;
-  return defaultFactor(category.name, kind) != null;
+  return defaultFactor(category.name, kind, settings) != null;
 }
 
 /** Un dedazo en el costo se ve en el precio: más de 40% arriba o abajo se pregunta. */

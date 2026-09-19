@@ -10,9 +10,11 @@ import type {
   Product,
   Refund,
   Sale,
+  Settings,
   StaffMember,
   StaffPayout,
   RosterSlot,
+  Supplier,
 } from "./types";
 import { richerOrder } from "./cap.ts";
 
@@ -40,10 +42,27 @@ export type ImanEvent = {
     | "order"
     | "staff"
     | "category"
-    | "lot";
+    | "lot"
+    | "supplier"
+    | "settings";
   body: Json;
   acked?: boolean;
 };
+
+/**
+ * El parche que viaja en un evento `settings`. El PIN y el logo solo salen
+ * si este toque los cambió: no se mandan en cada redondeo o margen.
+ */
+export function settingsEventPatch(patch: Partial<Settings>, prev?: Partial<Settings>): Partial<Settings> {
+  const body: Partial<Settings> = {};
+  for (const key of Object.keys(patch) as (keyof Settings)[]) {
+    const value = patch[key];
+    if (value === undefined) continue;
+    if (prev && (key === "ownerPinHash" || key === "storeLogo") && value === prev[key]) continue;
+    (body as Record<string, unknown>)[key] = value;
+  }
+  return body;
+}
 
 /**
  * Un `product` trae el catálogo. Stock y lotes se mueven solo con eventos de
@@ -92,10 +111,11 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
       return {
         ...payload,
         sales: [sale, ...payload.sales],
-        // La misma cuenta que hizo checkout en la caja: descuenta stock y lotes.
+        // La misma cuenta que hizo checkout en la caja: descuenta stock y lotes
+        // que ya existían en ev.at. El evento no manda el array de lotes.
         products: payload.products.map((p) => {
           const q = qty.get(p.id);
-          return q ? consumeFifo(p, q) : p;
+          return q ? consumeFifo(p, q, ev.at) : p;
         }),
       };
     }
@@ -106,7 +126,11 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
       return {
         ...payload,
         products: payload.products.map((p) =>
-          p.id !== b.productId ? p : b.delta < 0 ? consumeFifo(p, -b.delta) : { ...p, stock: p.stock + b.delta },
+          p.id !== b.productId
+            ? p
+            : b.delta < 0
+              ? consumeFifo(p, -b.delta, ev.at)
+              : { ...p, stock: p.stock + b.delta },
         ),
       };
     }
@@ -146,7 +170,7 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
       const b = ev.body as { productId?: string; lotId?: string; expiresAt?: string; units?: number };
       const units = Math.floor(Number(b?.units) || 0);
       if (!b?.productId || !b.lotId || !b.expiresAt || units <= 0) return payload;
-      const lot = { id: b.lotId, expiresAt: b.expiresAt, units };
+      const lot = { id: b.lotId, expiresAt: b.expiresAt, units, createdAt: ev.at };
       return {
         ...payload,
         products: payload.products.map((p) => (p.id === b.productId ? insertLot(p, lot) : p)),
@@ -173,7 +197,11 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
         // Igual que en el origen: lo del cliente vuelve sin fecha; lo que va al
         // proveedor sale de los lotes, como una venta.
         products: payload.products.map((p) =>
-          p.id !== r.productId ? p : r.kind === "cliente" ? { ...p, stock: p.stock + r.units } : consumeFifo(p, r.units),
+          p.id !== r.productId
+            ? p
+            : r.kind === "cliente"
+              ? { ...p, stock: p.stock + r.units }
+              : consumeFifo(p, r.units, ev.at),
         ),
       };
     }
@@ -281,6 +309,37 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
       }
       return payload;
     }
+    case "supplier": {
+      const b = ev.body as { op?: string; supplier?: Supplier; id?: string };
+      const s = b.supplier;
+      if (b.op === "save" && s?.id) {
+        const exists = payload.suppliers.some((x) => x.id === s.id);
+        return {
+          ...payload,
+          suppliers: exists
+            ? payload.suppliers.map((x) => (x.id === s.id ? s : x))
+            : [...payload.suppliers, s],
+        };
+      }
+      if (b.op === "delete" && b.id) {
+        if (!payload.suppliers.some((x) => x.id === b.id)) return payload;
+        // Igual que `deleteSupplier` en el store: los pedidos no mandados de
+        // ese proveedor también se van.
+        return {
+          ...payload,
+          suppliers: payload.suppliers.filter((x) => x.id !== b.id),
+          orders: payload.orders.filter((o) => o.supplierId !== b.id || o.sent || o.received),
+        };
+      }
+      return payload;
+    }
+    case "settings": {
+      const raw = ev.body;
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return payload;
+      const patch = settingsEventPatch(raw as Partial<Settings>);
+      if (!Object.keys(patch).length) return payload;
+      return { ...payload, settings: { ...payload.settings, ...patch } };
+    }
     default:
       return payload;
   }
@@ -293,14 +352,16 @@ export function applyEvents(payload: KioskPayload, events: ImanEvent[]): KioskPa
 /**
  * Lo que syncNow escribe al store después de aplicar los eventos de otro
  * aparato. Una clave que falte acá se aplica y se tira: le pasó a categories,
- * que bajaba el renombre y no lo guardaba nunca, y a suppliers, que perdía el
- * rubro borrado y el proveedor seguía apuntando a una categoría que ya no está.
+ * que bajaba el renombre y no lo guardaba nunca, y a settings, que perdía
+ * márgenes y redondeo. suppliers ya iba: el borrado de un rubro también los
+ * limpia.
  */
 export function pulledPatch(next: KioskPayload) {
   return {
     products: next.products,
     categories: next.categories,
     suppliers: next.suppliers,
+    settings: next.settings,
     sales: next.sales,
     books: next.books ?? [],
     refunds: next.refunds ?? [],

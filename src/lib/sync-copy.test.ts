@@ -219,17 +219,18 @@ describe("respaldo cuando chocan dos fotocopias", () => {
     assert.deepEqual(r.movements.map((m) => m.id), ["m2", "m1"]);
   });
 
-  it("ajustes y proveedores: gana el último que sube", () => {
-    const caja = payload({
+  it("ajustes y proveedores ya aplicados no los pisa una fotocopia vieja", () => {
+    const vieja = payload({
       settings: { ...settings, roundStep: 100 },
       suppliers: [{ id: "s1", name: "Omar", days: [1], notes: "", whatsapp: "" }],
     });
-    const celu = payload({
-      settings: { ...settings, roundStep: 50 },
+    const aplicado = payload({
+      settings: { ...settings, roundStep: 50, priceMarkupsA: { beb: 1.9 } },
       suppliers: [{ id: "s1", name: "Omar Distribuidora", days: [1], notes: "", whatsapp: "" }],
     });
-    const r = mergeBackup(caja, celu);
+    const r = mergeBackup(vieja, aplicado);
     assert.equal(r.settings.roundStep, 50);
+    assert.equal(r.settings.priceMarkupsA?.beb, 1.9);
     assert.equal(r.suppliers[0]?.name, "Omar Distribuidora");
   });
 

@@ -45,7 +45,8 @@ import { PAY_LABEL, formatARS, todayKey } from "@/lib/format";
 import type { StoreMeta, StoreRollup } from "@/lib/kiosk";
 import type { MyAccess } from "@/lib/license";
 import { unitCost } from "@/lib/pricing";
-import type { MonthAgg, PayMethod, Product, Refund, Sale } from "@/lib/types";
+import { margenDelMes } from "@/lib/mes";
+import type { MonthAgg, PayMethod, Product, Refund, Sale, Settings } from "@/lib/types";
 import { useImanStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { usePhoneUi } from "@/lib/device";
@@ -91,7 +92,8 @@ export function OwnerDesk({
   const monthAggs = useImanStore((s) => s.monthAggs);
   const payouts = useImanStore((s) => s.payouts);
   const monthExpenses = useImanStore((s) => s.settings.monthExpenses);
-  const mpFeePct = useImanStore((s) => s.settings.mpFeePct);
+  const settings = useImanStore((s) => s.settings);
+  const mpFeePct = settings.mpFeePct;
   const products = useImanStore((s) => s.products);
   const refunds = useImanStore((s) => s.refunds);
   const [salidaOpen, setSalidaOpen] = useState(false);
@@ -141,40 +143,60 @@ export function OwnerDesk({
     ] as const
   );
 
+  const tabBtn = (id: (typeof tabs)[number][0], label: string, Icon: (typeof tabs)[number][2]) => (
+    <button
+      key={id}
+      type="button"
+      onClick={() => setTab(id)}
+      className={cn(
+        "inline-flex h-11 items-center justify-center gap-1.5 rounded-full px-3 text-sm font-medium",
+        phone ? "shrink-0" : "min-w-0 flex-1",
+        tab === id ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
+      )}
+    >
+      <Icon className="size-3.5 shrink-0" />
+      {label}
+    </button>
+  );
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
-      <div className="flex shrink-0 items-center gap-2">
-        <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto no-scrollbar">
-          {tabs.map(([id, label, Icon]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setTab(id)}
-              className={cn(
-                "inline-flex h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-full px-3 text-sm font-medium",
-                tab === id ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
-              )}
-            >
-              <Icon className="size-3.5 shrink-0" />
-              {label}
-            </button>
-          ))}
+      {phone ? (
+        <div className="flex shrink-0 flex-col gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-medium uppercase tracking-[0.16em] text-subtle">Dueño</p>
+            <Button variant="secondary" onClick={onClose}>
+              Volver
+            </Button>
+          </div>
+          <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
+            {tabs.map(([id, label, Icon]) => tabBtn(id, label, Icon))}
+          </div>
         </div>
-        <div className="flex shrink-0 gap-2">
-          {phone ? null : (
+      ) : (
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto no-scrollbar">
+            {tabs.map(([id, label, Icon]) => tabBtn(id, label, Icon))}
+          </div>
+          <div className="flex shrink-0 gap-2">
             <Button variant="ghost" onClick={onHub}>
               Todos los locales
             </Button>
-          )}
-          <Button variant="secondary" onClick={onClose}>
-            {phone ? "Volver" : "Volver al mostrador"}
-          </Button>
+            <Button variant="secondary" onClick={onClose}>
+              Volver al mostrador
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {tab === "precios" ? (
-          <div className="h-full min-h-0 overflow-hidden rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+          <div
+            className={cn(
+              "h-full min-h-0 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]",
+              phone ? "overflow-y-auto" : "overflow-hidden",
+            )}
+          >
             <OwnerPrices />
           </div>
         ) : null}
@@ -234,11 +256,12 @@ export function OwnerDesk({
         ) : null}
 
         {tab === "mes" ? (
-          <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto">
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <PeriodoPicker ym={ym} nowYm={nowYm} onYm={setYm} />
-              <div className="ml-auto flex items-center gap-2">
+          <div className="flex h-full min-h-0 flex-col gap-3 overflow-x-hidden overflow-y-auto">
+            <div className={cn("flex shrink-0 gap-2", phone ? "flex-col" : "flex-wrap items-center")}>
+              <PeriodoPicker ym={ym} nowYm={nowYm} onYm={setYm} wide={phone} />
+              <div className={cn("flex items-center gap-2", phone ? "w-full" : "ml-auto")}>
                 <BajarCsv
+                  className={phone ? "flex-1" : undefined}
                   ym={ym}
                   onBajar={(label, yms) => {
                     const text = yms
@@ -257,7 +280,9 @@ export function OwnerDesk({
                         }
                   }
                 />
-                <Button onClick={() => setResultadoOpen(true)}>Calcular el mes</Button>
+                <Button className={phone ? "flex-1" : undefined} onClick={() => setResultadoOpen(true)}>
+                  Calcular el mes
+                </Button>
               </div>
             </div>
             <div className="flex shrink-0 flex-col gap-2">
@@ -429,6 +454,7 @@ export function OwnerDesk({
                   gastosPlanilla={cc.gastos}
                   gastosFijos={gastosFijos}
                   retiros={retiros}
+                  settings={settings}
                 />
               </DialogContent>
             </Dialog>
@@ -448,7 +474,7 @@ export function OwnerDesk({
         ) : null}
 
         {tab === "equipo" ? (
-          <div className="h-full min-h-0 overflow-hidden">
+          <div className="h-full min-h-0 overflow-y-auto">
             <TeamView />
           </div>
         ) : null}
@@ -602,7 +628,17 @@ function nombreMes(ym: string): string {
  * Las flechas mueven de a un mes, que es lo que se hace casi siempre. El resto
  * de la fecha (otro mes, otro año, un trimestre) vive en el popover del nombre.
  */
-function PeriodoPicker({ ym, nowYm, onYm }: { ym: string; nowYm: string; onYm: (ym: string) => void }) {
+function PeriodoPicker({
+  ym,
+  nowYm,
+  onYm,
+  wide,
+}: {
+  ym: string;
+  nowYm: string;
+  onYm: (ym: string) => void;
+  wide?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const year = Number(ym.slice(0, 4));
   const [vista, setVista] = useState(year);
@@ -615,7 +651,12 @@ function PeriodoPicker({ ym, nowYm, onYm }: { ym: string; nowYm: string; onYm: (
   }
 
   return (
-    <div className="flex items-center rounded-full bg-elevated shadow-[var(--shadow-border)]">
+    <div
+      className={cn(
+        "flex items-center rounded-full bg-elevated shadow-[var(--shadow-border)]",
+        wide && "w-full",
+      )}
+    >
       <button type="button" aria-label="Mes anterior" className={flecha} onClick={() => onYm(moverMes(ym, -1))}>
         <ChevronLeft className="size-4" />
       </button>
@@ -629,7 +670,10 @@ function PeriodoPicker({ ym, nowYm, onYm }: { ym: string; nowYm: string; onYm: (
         <PopoverTrigger asChild>
           <button
             type="button"
-            className="inline-flex h-11 min-w-[11.5rem] items-center justify-center gap-1.5 px-2 text-base font-medium"
+            className={cn(
+              "inline-flex h-11 items-center justify-center gap-1.5 px-2 text-base font-medium",
+              wide ? "min-w-0 flex-1" : "min-w-[11.5rem]",
+            )}
           >
             {nombreMes(ym)}
             <ChevronDown className="size-3.5 text-muted" />
@@ -699,10 +743,12 @@ function BajarCsv({
   ym,
   onBajar,
   onLiberar,
+  className,
 }: {
   ym: string;
   onBajar: (label: string, yms: string[]) => void;
   onLiberar?: () => void;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const year = Number(ym.slice(0, 4));
@@ -719,7 +765,7 @@ function BajarCsv({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="secondary">
+        <Button variant="secondary" className={className}>
           <Download className="size-4" />
           Bajar CSV
           <ChevronDown className="size-4 text-muted" />
@@ -846,7 +892,7 @@ function VentasSeisMeses({
   return acostado ? (
     <div className="mt-2 h-48">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={datos} layout="vertical" margin={{ top: 0, right: 92, bottom: 0, left: 0 }} barCategoryGap="22%">
+        <BarChart data={datos} layout="vertical" margin={{ top: 0, right: 108, bottom: 0, left: 0 }} barCategoryGap="22%">
           <XAxis type="number" hide domain={[0, "dataMax"]} />
           <YAxis
             type="category"
@@ -894,8 +940,8 @@ function ComoTePagaron({ mes }: { mes: MesVentas }) {
   const partes = MEDIOS.map((m) => ({ ...m, monto: mes[m.k], pct: (mes[m.k] / mes.ventas) * 100 }));
   const conPlata = partes.filter((p) => p.monto > 0);
   return (
-    <div className="mt-3">
-      <div className="flex gap-0.5">
+    <div className="mt-3 overflow-x-hidden">
+      <div className="flex flex-wrap gap-0.5">
         {conPlata.map((p) => (
           <span
             key={p.k}
@@ -915,7 +961,7 @@ function ComoTePagaron({ mes }: { mes: MesVentas }) {
           <div key={p.k} className="rounded-[4px]" style={{ flex: `${p.monto} 0 0%`, background: p.color }} />
         ))}
       </div>
-      <dl className="mt-3 grid grid-cols-3 gap-3">
+      <dl className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
         {partes.map((p) => (
           <div key={p.k} className="min-w-0">
             <dt className="flex items-center gap-1.5 text-xs text-muted">
@@ -1060,6 +1106,7 @@ function ResultadoDelMes({
   gastosPlanilla,
   gastosFijos,
   retiros,
+  settings,
 }: {
   ym: string;
   sales: Sale[];
@@ -1070,6 +1117,7 @@ function ResultadoDelMes({
   gastosPlanilla: number;
   gastosFijos: number;
   retiros: number;
+  settings: Settings;
 }) {
   const r = useMemo(() => {
     const byId = new Map(products.map((x) => [x.id, x]));
@@ -1126,7 +1174,16 @@ function ResultadoDelMes({
     }
     const comision = ventasMp * mpFeePct;
     const gastos = gastosPlanilla + gastosFijos;
-    const margen = ventas - devuelto - costo + devueltoCosto - comision - gastos;
+    const cuenta = margenDelMes({
+      ventas,
+      devuelto,
+      costo,
+      devueltoCosto,
+      comision,
+      gastos,
+      retiros,
+      settings,
+    });
     return {
       ventas,
       ventasMp,
@@ -1138,14 +1195,19 @@ function ResultadoDelMes({
       faltantes,
       comision,
       gastos,
-      margen,
-      quedo: margen - retiros,
+      margen: cuenta.margen,
+      quedo: cuenta.quedo,
+      stripsTax: cuenta.stripsTax,
+      ventasNetas: cuenta.ventasNetas,
+      etiquetaVentas: cuenta.etiquetaVentas,
+      etiquetaMargen: cuenta.etiquetaMargen,
+      etiquetaSinImpuesto: cuenta.etiquetaSinImpuesto,
       confiable: agg ? agg.cogsTrusted === true : true,
       fuente: vivas && agg ? "mixto" : agg ? "agregado" : "vivo",
       sinCosto: [...sinCosto],
       precioViejo: [...precioViejo],
     };
-  }, [ym, sales, refunds, aggs, products, mpFeePct, gastosPlanilla, gastosFijos, retiros]);
+  }, [ym, sales, refunds, aggs, products, mpFeePct, gastosPlanilla, gastosFijos, retiros, settings]);
 
   const fuenteVentas =
     r.fuente === "vivo"
@@ -1173,7 +1235,7 @@ function ResultadoDelMes({
       ) : null}
 
       <ul className="mt-3 flex flex-col">
-        <Renglon k="Ventas del mes" v={r.ventas} fuente={fuenteVentas} />
+        <Renglon k={r.etiquetaVentas} v={r.ventas} fuente={fuenteVentas} />
         {r.devuelto || r.devueltoCosto || r.aggSinDevoluciones ? (
           <>
             <Renglon
@@ -1186,6 +1248,13 @@ function ResultadoDelMes({
               }
             />
           </>
+        ) : null}
+        {r.stripsTax ? (
+          <Renglon
+            k={r.etiquetaSinImpuesto}
+            v={-(r.ventas - r.devuelto - r.ventasNetas)}
+            fuente="El precio de góndola trae el impuesto; eso no es ganancia"
+          />
         ) : null}
         <Renglon
           k="Costo de lo vendido"
@@ -1213,7 +1282,7 @@ function ResultadoDelMes({
           v={-r.gastos}
           fuente="Filas de gasto de la planilla del mes más los gastos fijos"
         />
-        <Subtotal k="Margen del negocio" v={r.margen} />
+        <Subtotal k={r.etiquetaMargen} v={r.margen} />
         <Renglon k="Lo que se llevó el dueño" v={-retiros} fuente="Fila RETIROS de la planilla" />
         <Subtotal k="Quedó en el negocio" v={r.quedo} />
       </ul>

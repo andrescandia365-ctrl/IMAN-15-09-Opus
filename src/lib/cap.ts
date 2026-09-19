@@ -278,6 +278,9 @@ export function mergePayload(server: KioskPayload, local: KioskPayload): KioskPa
   const vivos = new Set(products.map((p) => p.id));
   const deletedProducts = mergeDeleted(server.deletedProducts, local.deletedProducts).filter((d) => !vivos.has(d.id));
   const categories = local.categories.length ? local.categories : server.categories;
+  // Proveedores y ajustes viajan por la cinta. Este aparato ya los aplicó:
+  // la fotocopia del otro no los pisa (last-write es el evento, no quien sube).
+  const suppliers = local.suppliers;
   const settings = {
     ...server.settings,
     ...local.settings,
@@ -291,6 +294,7 @@ export function mergePayload(server: KioskPayload, local: KioskPayload): KioskPa
     ...local,
     products,
     categories,
+    suppliers,
     settings,
     sales,
     refunds,
@@ -353,9 +357,10 @@ export function backupRecords(
 /**
  * El respaldo cuando dos fotocopias chocan: lo de mergePayload (ventas,
  * devoluciones y pedidos sumados; el resto, de este aparato) más turnos,
- * retiros e historial sumados. Ajustes y proveedores siguen con "gana el
- * último". Antes de esto, quien sube ya bajó y aplicó la cinta, así que lo que
- * viaja por ella (productos, stock, planilla, lotes) ya está al día.
+ * retiros e historial sumados. Ajustes y proveedores ya van por la cinta:
+ * una foto vieja no los pisa. Antes de esto, quien sube ya bajó y aplicó
+ * los eventos, así que lo de la cinta (productos, stock, planilla, lotes,
+ * proveedores, márgenes) ya está al día.
  */
 export function mergeBackup(server: KioskPayload, local: KioskPayload): KioskPayload {
   // Ventas viejas y meses ya los cuida mergePayload: no cuenta dos veces lo mismo.

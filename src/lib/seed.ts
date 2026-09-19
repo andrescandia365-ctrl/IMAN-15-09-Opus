@@ -223,6 +223,10 @@ export const SEED_SETTINGS: Settings = {
   },
   taskRemindersEnabled: true,
   mpFeePct: 0.06,
+  fiscalCondition: "monotributo",
+  taxName: "IVA",
+  taxPct: 21,
+  shelfIncludesTax: true,
   roundMode: "up",
   roundStep: 100,
   priceMarkups: {

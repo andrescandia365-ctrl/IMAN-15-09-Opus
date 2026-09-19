@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Eye, ListChecks, Pencil, Plus, Printer, Search, Truck, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -12,12 +12,15 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatARS, formatDate, weekdayMon1 } from "@/lib/format";
-import { lineLabel, lineUnits, packOf, receiveSummary, waHref } from "@/lib/pack";
+import { findByScan, lineLabel, lineUnits, packOf, receiveSummary, waHref } from "@/lib/pack";
+import { BoletaCostoDialog, CostoEnLlegada, ScanPedidoField } from "@/components/costo-boleta";
+import { costoAGondola, orderLineKey } from "@/lib/receive-cost";
+import type { InvoiceKind } from "@/lib/pricing";
 import { printSlip } from "@/lib/print";
 import { orderCost } from "@/lib/suggest";
 import { useCashSnapshot, useImanStore } from "@/lib/store";
 import { supplierMatchesDay } from "@/lib/supplier-cadence";
-import type { OrderDraft, OrderLine, Product, Supplier } from "@/lib/types";
+import type { Category, OrderDraft, Product, Settings, Supplier } from "@/lib/types";
 import { cn, uid } from "@/lib/utils";
 import { ProveedorRefundDialog } from "@/components/refunds";
 import { useDragScroll } from "@/lib/drag-scroll";
@@ -589,6 +592,9 @@ export function OrdersView() {
       <ReviewArrivalDialog
         order={enCamino.find((o) => o.id === reviewId) ?? null}
         products={products}
+        suppliers={suppliers}
+        categories={categories}
+        settings={settings}
         onClose={() => setReviewId(null)}
         onConfirm={(receipts) => {
           const order = enCamino.find((o) => o.id === reviewId);
@@ -806,25 +812,42 @@ export function OrdersView() {
   );
 }
 
-function lineKey(l: OrderLine, i: number) {
-  return `${l.productId}-${l.asUnit ? "u" : "p"}-${i}`;
-}
-
 function ReviewArrivalDialog({
   order,
   products,
+  suppliers,
+  categories,
+  settings,
   onClose,
   onConfirm,
 }: {
   order: OrderDraft | null;
   products: Product[];
+  suppliers: Supplier[];
+  categories: Category[];
+  settings: Settings;
   onClose: () => void;
-  onConfirm: (receipts: { productId: string; units: number; asUnit?: boolean }[]) => void;
+  onConfirm: (
+    receipts: {
+      productId: string;
+      units: number;
+      asUnit?: boolean;
+      cost?: number | null;
+      desdeBulto?: boolean;
+    }[],
+  ) => void;
 }) {
-  const [marks, setMarks] = useState<Record<string, { struck: boolean; units: string }>>({});
+  type Mark = { status: "ok" | "missing" | "partial"; units: string; costo: string; bulto: string };
+  const [marks, setMarks] = useState<Record<string, Mark>>({});
+  const [scan, setScan] = useState("");
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  const [ejemplo, setEjemplo] = useState<InvoiceKind | null>(null);
+  const rowRefs = useRef<Record<string, HTMLLIElement | null>>({});
 
   useEffect(() => {
     setMarks({});
+    setScan("");
+    setFocusKey(null);
   }, [order?.id]);
 
   const rows = useMemo(() => {
@@ -832,18 +855,45 @@ function ReviewArrivalDialog({
     return order.lines.map((l, i) => {
       const p = products.find((x) => x.id === l.productId);
       const expected = lineUnits(p, l.qty, l.asUnit);
-      return { key: lineKey(l, i), line: l, product: p, expected };
+      return { key: orderLineKey(l, i), line: l, product: p, expected };
     });
   }, [order, products]);
 
   function got(key: string, expected: number): number {
     const m = marks[key];
-    if (!m) return 0;
-    if (m.struck) return expected;
+    if (!m || m.status === "missing") return 0;
+    if (m.status === "ok") return expected;
     return Math.max(0, Math.floor(Number(m.units) || 0));
   }
 
+  function setStatus(key: string, status: Mark["status"], expected: number) {
+    setMarks((cur) => ({
+      ...cur,
+      [key]: {
+        status,
+        units: status === "ok" ? String(expected) : status === "missing" ? "0" : cur[key]?.units ?? "",
+        costo: cur[key]?.costo ?? "",
+        bulto: cur[key]?.bulto ?? "",
+      },
+    }));
+  }
+
+  function findLine(raw: string): boolean {
+    const hit = findByScan(products, raw);
+    if (!hit) return false;
+    const row = rows.find((r) => r.line.productId === hit.product.id);
+    if (!row) {
+      toast.error("No está en este pedido");
+      return false;
+    }
+    setFocusKey(row.key);
+    rowRefs.current[row.key]?.scrollIntoView({ block: "nearest" });
+    toast(row.line.name || hit.product.name);
+    return true;
+  }
+
   return (
+    <>
     <Dialog
       open={Boolean(order)}
       onOpenChange={(o) => {
@@ -860,88 +910,125 @@ function ReviewArrivalDialog({
             {order?.supplierName || "Pedido"}
           </DialogTitle>
           <DialogDescription>
-            Tachá lo que llegó bien. Lo que no se tacha no entra. A medias: poné las unidades que sí llegaron.
+            Contra este pedido. Llegó, faltó o a medias. El costo de la boleta es opcional.
           </DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-hidden rounded-lg bg-paper p-3 text-ink shadow-[var(--shadow-ticket)] ticket-grain">
           {!order ? null : !rows.length ? (
             <p className="px-2 py-8 text-center text-sm text-ink-muted">No hay renglones en este pedido.</p>
           ) : (
-            <ul className="max-h-[min(28rem,50dvh)] space-y-1 overflow-y-auto">
-              {rows.map((row) => {
-                const m = marks[row.key];
-                const units = got(row.key, row.expected);
-                const full = Boolean(m?.struck) || units >= row.expected;
-                const partial = !full && units > 0;
-                return (
-                  <li key={row.key} className="rounded-md px-2 py-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setMarks((cur) => {
-                          const prev = cur[row.key];
-                          const nextStruck = !prev?.struck;
-                          return {
+            <>
+              <ScanPedidoField value={scan} onChange={setScan} onScan={findLine} ticket />
+              <ul className="max-h-[min(28rem,50dvh)] space-y-1 overflow-y-auto">
+                {rows.map((row) => {
+                  const m = marks[row.key];
+                  const units = got(row.key, row.expected);
+                  const full = m?.status === "ok" || units >= row.expected;
+                  const partial = m?.status === "partial" || (!full && units > 0);
+                  const costoN = m?.costo ? Number(m.costo) : 0;
+                  const patch =
+                    row.product && costoN > 0
+                      ? costoAGondola(row.product, costoN, categories, suppliers, settings, {
+                          desdeBulto: Boolean(m?.bulto),
+                        })
+                      : null;
+                  return (
+                    <li
+                      key={row.key}
+                      ref={(el) => {
+                        rowRefs.current[row.key] = el;
+                      }}
+                      className={cn("rounded-md px-2 py-2", focusKey === row.key && "bg-dato/40")}
+                    >
+                      <p className="truncate text-base font-medium tracking-tight">
+                        {row.line.name || row.product?.name || "Producto"}
+                      </p>
+                      <p className="num mt-0.5 text-sm text-ink-muted">
+                        Pedido {lineLabel(row.product, row.line.qty, row.line.asUnit)}
+                      </p>
+                      <div className="mt-2 grid grid-cols-3 gap-1.5">
+                        {(
+                          [
+                            ["ok", "Llegó"],
+                            ["missing", "Faltó"],
+                            ["partial", "A medias"],
+                          ] as const
+                        ).map(([id, label]) => (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => setStatus(row.key, id, row.expected)}
+                            className={cn(
+                              "h-11 rounded-md text-sm font-medium",
+                              m?.status === id ? "bg-accent text-accent-fg" : "bg-ink/8 text-ink-muted",
+                            )}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      {m && m.status === "partial" ? (
+                        <div className="mt-2 flex items-center gap-2">
+                          <label className="text-xs text-ink-muted">u. que llegaron</label>
+                          <Input
+                            inputMode="numeric"
+                            value={m.units}
+                            placeholder="0"
+                            onChange={(e) => {
+                              const raw = e.target.value.replace(/[^\d]/g, "");
+                              setMarks((cur) => ({
+                                ...cur,
+                                [row.key]: { ...m, units: raw },
+                              }));
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") e.preventDefault();
+                            }}
+                            className="h-11 w-24 bg-paper text-ink"
+                          />
+                        </div>
+                      ) : null}
+                      <CostoEnLlegada
+                        product={row.product}
+                        suppliers={suppliers}
+                        costo={m?.costo ?? ""}
+                        bulto={m?.bulto ?? ""}
+                        avisos={patch?.avisos ?? []}
+                        precioNuevo={patch?.price ?? null}
+                        ticket
+                        onCosto={(v) =>
+                          setMarks((cur) => ({
                             ...cur,
                             [row.key]: {
-                              struck: nextStruck,
-                              units: nextStruck ? String(row.expected) : "",
+                              status: cur[row.key]?.status ?? "missing",
+                              units: cur[row.key]?.units ?? "",
+                              costo: v,
+                              bulto: cur[row.key]?.bulto ?? "",
                             },
-                          };
-                        })
-                      }
-                      className="flex min-w-0 w-full items-center gap-3 rounded-md px-1 py-1.5 text-left hover:bg-ink/5"
-                    >
-                      <span
-                        className={cn(
-                          "min-w-0 flex-1 truncate text-base font-medium tracking-tight",
-                          full && "text-ink-muted line-through",
-                        )}
-                      >
-                        {row.line.name || row.product?.name || "Producto"}
-                      </span>
-                      <span className="num shrink-0 whitespace-nowrap text-sm text-ink-muted">
-                        Pedido {lineLabel(row.product, row.line.qty, row.line.asUnit)}
-                      </span>
-                      <span
-                        className={cn(
-                          "shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium",
-                          full
-                            ? "bg-sage/25 text-ink"
-                            : partial
-                              ? "bg-warn/25 text-ink"
-                              : "bg-ink/8 text-ink-muted",
-                        )}
-                      >
-                        {full ? "Llegó" : partial ? "A medias" : "Faltó"}
-                      </span>
-                    </button>
-                    {!full ? (
-                      <div className="mt-1 flex items-center gap-2 px-1 pb-1">
-                        <label className="text-xs text-ink-muted">u. que llegaron</label>
-                        <Input
-                          inputMode="numeric"
-                          value={m?.units ?? ""}
-                          placeholder="0"
-                          onChange={(e) => {
-                            const raw = e.target.value.replace(/[^\d]/g, "");
-                            const n = Math.max(0, Math.floor(Number(raw) || 0));
-                            setMarks((cur) => ({
-                              ...cur,
-                              [row.key]: {
-                                struck: n >= row.expected && row.expected > 0,
-                                units: raw,
-                              },
-                            }));
-                          }}
-                          className="h-11 w-24 bg-paper text-ink"
-                        />
-                      </div>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
+                          }))
+                        }
+                        onBulto={(v) =>
+                          setMarks((cur) => ({
+                            ...cur,
+                            [row.key]: {
+                              status: cur[row.key]?.status ?? "missing",
+                              units: cur[row.key]?.units ?? "",
+                              costo: cur[row.key]?.costo ?? "",
+                              bulto: v,
+                            },
+                          }))
+                        }
+                        onScan={findLine}
+                        onAskBoleta={setEjemplo}
+                      />
+                      {full || partial ? (
+                        <p className="mt-1 text-[11px] text-ink-muted">{full ? "Llegó" : "A medias"}</p>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           )}
         </div>
         <div className="mt-4 flex shrink-0 flex-wrap justify-end gap-2">
@@ -952,20 +1039,28 @@ function ReviewArrivalDialog({
             onClick={() => {
               if (!order) return;
               onConfirm(
-                rows.map((row) => ({
-                  productId: row.line.productId,
-                  units: got(row.key, row.expected),
-                  asUnit: row.line.asUnit,
-                })),
+                rows.map((row) => {
+                  const m = marks[row.key];
+                  const cost = m?.costo ? Number(m.costo) : null;
+                  return {
+                    productId: row.line.productId,
+                    units: got(row.key, row.expected),
+                    asUnit: row.line.asUnit,
+                    cost: cost && cost > 0 ? cost : null,
+                    desdeBulto: Boolean(m?.bulto),
+                  };
+                }),
               );
               setMarks({});
             }}
           >
-            Sumar lo tachado
+            Sumar lo que llegó
           </Button>
         </div>
       </DialogContent>
     </Dialog>
+    <BoletaCostoDialog openKind={ejemplo} onOpenKind={setEjemplo} />
+    </>
   );
 }
 

@@ -2,6 +2,7 @@ export type PayMethod = "efectivo" | "mercadopago" | "debito";
 export type ViewId = "taller" | "counter" | "inventory" | "orders" | "cash" | "expire" | "reports" | "settings";
 export type ThemeMode = "dark" | "light";
 export type KioskRubro = "kiosco" | "almacen" | "despensa" | "maxikiosco" | "otro";
+export type FiscalCondition = "responsable_inscripto" | "monotributo" | "en_negro";
 
 export interface Category {
   id: string;
@@ -24,7 +25,7 @@ export interface Product {
   categoryId: string;
   active: boolean;
   expiresAt: string | null;
-  lots?: { id: string; expiresAt: string; units: number }[];
+  lots?: { id: string; expiresAt: string; units: number; createdAt?: string }[];
   priceUpdatedAt: string;
   onOffer?: boolean;
   priceA?: number;
@@ -129,6 +130,14 @@ export interface Settings {
   tasks: Record<string, string[]>;
   taskRemindersEnabled: boolean;
   mpFeePct?: number;
+  /** Cómo facturás. Monotributo y en negro se guardan aparte aunque la cuenta sea la misma. */
+  fiscalCondition?: FiscalCondition;
+  /** Nombre del impuesto de góndola (IVA, IGV, ITBIS, VAT). */
+  taxName?: string;
+  /** Porcentaje entero: 21 es 21%. La cuenta usa este número, no un 21 fijo. */
+  taxPct?: number;
+  /** El precio de la góndola ya tiene el impuesto. En Argentina, sí. */
+  shelfIncludesTax?: boolean;
   monthExpenses?: { name: string; amount: number }[];
   ledgerTints?: Record<string, "sage" | "warn" | "danger" | "info">;
   ledgerLabels?: Record<string, string>;

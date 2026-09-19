@@ -3,10 +3,13 @@ import { ChevronLeft, ImagePlus, Truck, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { BoletaCostoDialog, CostoEnLlegada, ScanPedidoField } from "@/components/costo-boleta";
 import { formatDate } from "@/lib/format";
-import { lineLabel, lineUnits, packOf } from "@/lib/pack";
+import { findByScan, lineLabel, lineUnits, packOf } from "@/lib/pack";
+import { costoAGondola, orderLineKey } from "@/lib/receive-cost";
+import type { InvoiceKind } from "@/lib/pricing";
 import { useImanStore } from "@/lib/store";
-import type { OrderDraft, OrderLine, Product } from "@/lib/types";
+import type { Category, OrderDraft, Product, Settings, Supplier } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type LineStatus = "ok" | "missing" | "partial";
@@ -15,12 +18,17 @@ type LineMark = {
   status: LineStatus;
   units: string;
   asPack: boolean;
+  costo: string;
+  bulto: string;
 };
 
 export function PhoneReceiveView() {
   const orders = useImanStore((s) => s.orders);
   const products = useImanStore((s) => s.products);
   const receiveOrderUnits = useImanStore((s) => s.receiveOrderUnits);
+  const suppliers = useImanStore((s) => s.suppliers);
+  const categories = useImanStore((s) => s.categories);
+  const settings = useImanStore((s) => s.settings);
   const enCamino = orders.filter(
     (o) => o.sent && !o.received && ((o.supplierName ?? "").trim() || o.lines.length > 0),
   );
@@ -32,6 +40,9 @@ export function PhoneReceiveView() {
       <ReceiveSheet
         order={open}
         products={products}
+        suppliers={suppliers}
+        categories={categories}
+        settings={settings}
         onBack={() => setOpenId(null)}
         onConfirm={(receipts, photo) => {
           const r = receiveOrderUnits(open.id, receipts, photo);
@@ -107,24 +118,37 @@ export function PhoneReceiveView() {
 function ReceiveSheet({
   order,
   products,
+  suppliers,
+  categories,
+  settings,
   onBack,
   onConfirm,
 }: {
   order: OrderDraft;
   products: Product[];
+  suppliers: Supplier[];
+  categories: Category[];
+  settings: Settings;
   onBack: () => void;
-  onConfirm: (receipts: { productId: string; units: number }[], photo?: string) => void;
+  onConfirm: (
+    receipts: { productId: string; units: number; cost?: number | null; desdeBulto?: boolean }[],
+    photo?: string,
+  ) => void;
 }) {
   const [marks, setMarks] = useState<Record<string, LineMark>>({});
   const [photo, setPhoto] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [scan, setScan] = useState("");
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  const [ejemplo, setEjemplo] = useState<InvoiceKind | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const rowRefs = useRef<Record<string, HTMLLIElement | null>>({});
 
   const rows = useMemo(
     () =>
       order.lines.map((l, i) => {
         const p = products.find((x) => x.id === l.productId);
-        const key = lineKey(l, i);
+        const key = orderLineKey(l, i);
         const expected = lineUnits(p, l.qty, l.asUnit);
         const pack = packOf(p);
         return { key, line: l, product: p, expected, pack };
@@ -149,6 +173,8 @@ function ReceiveSheet({
         status,
         asPack: false,
         units: status === "ok" ? String(expected) : status === "missing" ? "0" : "",
+        costo: cur[key]?.costo ?? "",
+        bulto: cur[key]?.bulto ?? "",
       },
     }));
   }
@@ -167,6 +193,20 @@ function ReceiveSheet({
     return m.asPack && row.pack > 1 ? n * row.pack : n;
   }
 
+  function findLine(raw: string): boolean {
+    const hit = findByScan(products, raw);
+    if (!hit) return false;
+    const row = rows.find((r) => r.line.productId === hit.product.id);
+    if (!row) {
+      toast.error("No está en este pedido");
+      return false;
+    }
+    setFocusKey(row.key);
+    rowRefs.current[row.key]?.scrollIntoView({ block: "nearest" });
+    toast(row.line.name || hit.product.name);
+    return true;
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex items-start gap-2">
@@ -180,15 +220,33 @@ function ReceiveSheet({
         </button>
         <div className="min-w-0 flex-1">
           <h2 className="font-display text-2xl leading-tight tracking-tight">{order.supplierName}</h2>
-          <p className="text-xs text-subtle">Llegó / faltó / a medias. Unidades o packs.</p>
+          <p className="text-xs text-subtle">Contra este pedido. El costo de la boleta es opcional.</p>
         </div>
       </div>
+
+      <ScanPedidoField value={scan} onChange={setScan} onScan={findLine} />
 
       <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto pb-1">
         {rows.map((row) => {
           const m = marks[row.key];
+          const costoN = m?.costo ? Number(m.costo) : 0;
+          const patch =
+            row.product && costoN > 0
+              ? costoAGondola(row.product, costoN, categories, suppliers, settings, {
+                  desdeBulto: Boolean(m?.bulto),
+                })
+              : null;
           return (
-            <li key={row.key} className="rounded-xl bg-surface px-3 py-3 shadow-[var(--shadow-border)]">
+            <li
+              key={row.key}
+              ref={(el) => {
+                rowRefs.current[row.key] = el;
+              }}
+              className={cn(
+                "rounded-xl bg-surface px-3 py-3 shadow-[var(--shadow-border)]",
+                focusKey === row.key && "ring-2 ring-accent",
+              )}
+            >
               <p className="truncate font-medium">{row.line.name}</p>
               <p className="mt-0.5 text-xs text-subtle">
                 Pedido {lineLabel(row.product, row.line.qty, row.line.asUnit)}
@@ -246,9 +304,46 @@ function ReceiveSheet({
                     onChange={(e) => setUnits(row.key, e.target.value)}
                     placeholder={m.status === "ok" ? String(row.expected) : "Cuántas"}
                     className="mt-1.5 h-12 text-xl font-medium"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.preventDefault();
+                    }}
                   />
                 </div>
               ) : null}
+              <CostoEnLlegada
+                product={row.product}
+                suppliers={suppliers}
+                costo={m?.costo ?? ""}
+                bulto={m?.bulto ?? ""}
+                avisos={patch?.avisos ?? []}
+                precioNuevo={patch?.price ?? null}
+                onCosto={(v) =>
+                  setMarks((cur) => ({
+                    ...cur,
+                    [row.key]: {
+                      status: cur[row.key]?.status ?? "missing",
+                      units: cur[row.key]?.units ?? "",
+                      asPack: cur[row.key]?.asPack ?? false,
+                      costo: v,
+                      bulto: cur[row.key]?.bulto ?? "",
+                    },
+                  }))
+                }
+                onBulto={(v) =>
+                  setMarks((cur) => ({
+                    ...cur,
+                    [row.key]: {
+                      status: cur[row.key]?.status ?? "missing",
+                      units: cur[row.key]?.units ?? "",
+                      asPack: cur[row.key]?.asPack ?? false,
+                      costo: cur[row.key]?.costo ?? "",
+                      bulto: v,
+                    },
+                  }))
+                }
+                onScan={findLine}
+                onAskBoleta={setEjemplo}
+              />
             </li>
           );
         })}
@@ -297,7 +392,13 @@ function ReceiveSheet({
             setBusy(true);
             const receipts = rows.map((row, i) => {
               const m = marks[row.key]!;
-              return { productId: order.lines[i]!.productId, units: toUnits(row, m) };
+              const cost = m.costo ? Number(m.costo) : null;
+              return {
+                productId: order.lines[i]!.productId,
+                units: toUnits(row, m),
+                cost: cost && cost > 0 ? cost : null,
+                desdeBulto: Boolean(m.bulto),
+              };
             });
             onConfirm(receipts, photo ?? undefined);
             setBusy(false);
@@ -306,12 +407,9 @@ function ReceiveSheet({
           Sumar al stock
         </Button>
       </div>
+      <BoletaCostoDialog openKind={ejemplo} onOpenKind={setEjemplo} />
     </div>
   );
-}
-
-function lineKey(l: OrderLine, i: number) {
-  return `${l.productId}-${l.asUnit ? "u" : "p"}-${i}`;
 }
 
 function readRemito(file: File): Promise<string> {

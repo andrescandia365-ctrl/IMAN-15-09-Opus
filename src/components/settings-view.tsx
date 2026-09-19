@@ -16,7 +16,9 @@ import { pushCopy } from "@/lib/sync";
 import type { MyAccess } from "@/lib/license";
 import { PLAN_LABEL, type PlanMonths } from "@/lib/plan";
 import { RUBROS } from "@/lib/seed";
+import { FISCAL_CONDITIONS } from "@/lib/fiscal";
 import { useImanStore } from "@/lib/store";
+import { cn } from "@/lib/utils";
 
 /**
  * Cambios del dueño que no viajan por la cinta (nombre, rubro, ciudad, el
@@ -37,6 +39,8 @@ export function SettingsView({ access }: { access: MyAccess }) {
   const user = useCurrentUser();
   const [name, setName] = useState(settings.name);
   const [city, setCity] = useState(settings.city);
+  const [taxName, setTaxName] = useState(settings.taxName ?? "IVA");
+  const [taxPct, setTaxPct] = useState(String(settings.taxPct ?? 21));
   const [signingOut, setSigningOut] = useState(false);
   const [pin, setPin] = useState("");
   const [pin2, setPin2] = useState("");
@@ -96,7 +100,7 @@ export function SettingsView({ access }: { access: MyAccess }) {
         <h2 className="text-xs font-medium uppercase tracking-[0.14em] text-subtle">Este local</h2>
         <div className="mt-4">
           <Label htmlFor="kiosk-name">Nombre del kiosco</Label>
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             <Input
               id="kiosk-name"
               value={name}
@@ -104,6 +108,7 @@ export function SettingsView({ access }: { access: MyAccess }) {
               maxLength={40}
             />
             <Button
+              className="sm:shrink-0"
               onClick={() => {
                 const n = name.trim();
                 if (!n) return;
@@ -143,7 +148,7 @@ export function SettingsView({ access }: { access: MyAccess }) {
         <div className="mt-4">
           <Label htmlFor="kiosk-city">Ciudad de este local</Label>
           <p className="mb-1 text-xs text-subtle">Sale en el ticket.</p>
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             <Input
               id="kiosk-city"
               list="iman-cities"
@@ -159,6 +164,7 @@ export function SettingsView({ access }: { access: MyAccess }) {
             </datalist>
             <Button
               variant="secondary"
+              className="sm:shrink-0"
               onClick={() => {
                 saveSettings({ city: city.trim() });
                 toast.success("Ciudad actualizada");
@@ -170,6 +176,72 @@ export function SettingsView({ access }: { access: MyAccess }) {
               Guardar
             </Button>
           </div>
+        </div>
+        <div className="mt-4">
+          <Label>Cómo facturás</Label>
+          <div className="mt-1.5 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
+            {FISCAL_CONDITIONS.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => saveSettings({ fiscalCondition: c.id })}
+                className={cn(
+                  "h-11 rounded-md px-3 text-sm sm:h-auto sm:py-2",
+                  (settings.fiscalCondition ?? "monotributo") === c.id
+                    ? "bg-accent text-accent-fg"
+                    : "bg-elevated text-muted hover:text-fg",
+                )}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-subtle">
+            {(settings.fiscalCondition ?? "monotributo") === "responsable_inscripto"
+              ? "El impuesto de la góndola no es ganancia. El mes lo saca de las ventas."
+              : "El mes mira la plata que entró."}
+          </p>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_6.5rem]">
+          <div>
+            <Label htmlFor="tax-name">Impuesto</Label>
+            <Input
+              id="tax-name"
+              value={taxName}
+              maxLength={12}
+              onChange={(e) => setTaxName(e.target.value)}
+              onBlur={() => {
+                const n = taxName.trim() || "IVA";
+                setTaxName(n);
+                if (n !== (settings.taxName ?? "IVA")) saveSettings({ taxName: n });
+              }}
+            />
+          </div>
+          <div>
+            <Label htmlFor="tax-pct">Tasa %</Label>
+            <Input
+              id="tax-pct"
+              inputMode="numeric"
+              value={taxPct}
+              onChange={(e) => setTaxPct(e.target.value.replace(/[^\d.,]/g, ""))}
+              onBlur={() => {
+                const n = Number(taxPct.replace(",", "."));
+                const pct = Number.isFinite(n) && n >= 0 ? n : 0;
+                setTaxPct(String(pct));
+                if (pct !== (settings.taxPct ?? 21)) saveSettings({ taxPct: pct });
+              }}
+            />
+          </div>
+        </div>
+        <div className="mt-4 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium">El precio de la góndola ya tiene el impuesto</p>
+            <p className="text-xs text-subtle">En Argentina, sí. No se recataloga al cambiarlo.</p>
+          </div>
+          <Switch
+            checked={settings.shelfIncludesTax !== false}
+            onCheckedChange={(v) => saveSettings({ shelfIncludesTax: v })}
+          />
         </div>
         <div className="mt-4 flex items-center justify-between gap-4">
           <div>

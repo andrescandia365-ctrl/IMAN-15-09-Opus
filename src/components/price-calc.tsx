@@ -9,7 +9,6 @@ import {
 import { Lock, Maximize2, Minimize2, Search, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatARS, formatMiles } from "@/lib/format";
@@ -25,8 +24,6 @@ import {
   type InvoiceKind,
 } from "@/lib/pricing";
 import {
-  BOLETA_A,
-  BOLETA_X,
   POR_UNIDAD,
   QUE_NUMERO,
   avisosDeCosto,
@@ -35,6 +32,7 @@ import {
   recordatorioCosto,
   recordatorioEscaneoBulto,
 } from "@/lib/costo-guia";
+import { BoletaCostoDialog } from "@/components/costo-boleta";
 import { useImanStore } from "@/lib/store";
 import type { Category, Product } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -612,100 +610,14 @@ function PriceUpdate({ storeId }: { storeId: string }) {
         </div>
       ) : null}
 
-      <Dialog open={ejemplo != null} onOpenChange={(v) => !v && setEjemplo(null)}>
-        <DialogContent
-          // Al cerrar vuelve al costo, con lo que ya estaba cargado.
-          onCloseAutoFocus={(e) => {
-            e.preventDefault();
-            costoRef.current?.focus({ preventScroll: true });
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>Qué número copiar de la boleta</DialogTitle>
-            <DialogDescription>Una boleta de ejemplo. El renglón resaltado es el que va en el costo.</DialogDescription>
-          </DialogHeader>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            {(["A", "X"] as InvoiceKind[]).map((k) => (
-              <button
-                key={k}
-                type="button"
-                className={cn(
-                  "h-10 rounded-md text-sm font-medium",
-                  ejemplo === k ? "bg-accent text-accent-fg" : "bg-elevated text-muted",
-                )}
-                onClick={() => setEjemplo(k)}
-              >
-                Factura {k}
-              </button>
-            ))}
-          </div>
-          {ejemplo === "A" ? (
-            <BoletaEjemplo
-              titulo="Factura A"
-              renglones={[
-                ["Cantidad", `${BOLETA_A.unidades} unidades`],
-                ["Neto", formatARS(BOLETA_A.neto)],
-                ["Impuestos internos", formatARS(BOLETA_A.internos)],
-                ["Subtotal", formatARS(BOLETA_A.subtotal), true],
-                ["IVA 21%", formatARS(BOLETA_A.iva)],
-                ["TOTAL", formatARS(BOLETA_A.total)],
-              ]}
-              cuenta={`Costo por unidad = ${formatARS(BOLETA_A.subtotal)} ÷ ${BOLETA_A.unidades} = ${formatARS(porUnidad(BOLETA_A.subtotal, BOLETA_A.unidades))}`}
-              nota="Ojo: los impuestos internos SÍ van. El IVA NO."
-            />
-          ) : (
-            <BoletaEjemplo
-              titulo="Factura X"
-              renglones={[
-                ["Cantidad", `${BOLETA_X.unidades} unidades`],
-                ["TOTAL", formatARS(BOLETA_X.total), true],
-              ]}
-              cuenta={`Costo por unidad = ${formatARS(BOLETA_X.total)} ÷ ${BOLETA_X.unidades} = ${formatARS(porUnidad(BOLETA_X.total, BOLETA_X.unidades))}`}
-              nota="Acá va todo lo que pagaste. No se descuenta nada."
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+      <BoletaCostoDialog
+        openKind={ejemplo}
+        onOpenKind={setEjemplo}
+        onCloseAutoFocus={(e) => {
+          e.preventDefault();
+          costoRef.current?.focus({ preventScroll: true });
+        }}
+      />
     </section>
-  );
-}
-
-/** Una boleta de mentira: el renglón que se copia, resaltado; el resto, en gris. */
-function BoletaEjemplo({
-  titulo,
-  renglones,
-  cuenta,
-  nota,
-}: {
-  titulo: string;
-  renglones: [string, string, boolean?][];
-  cuenta: string;
-  nota: string;
-}) {
-  return (
-    <div className="mt-3">
-      <div className="ticket-grain rounded-lg bg-paper px-4 py-3 text-ink shadow-[var(--shadow-ticket)]">
-        <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-ink-muted">Boleta de ejemplo · {titulo}</p>
-        <ul className="mt-2 flex flex-col gap-0.5">
-          {renglones.map(([nombre, valor, este]) => (
-            <li
-              key={nombre}
-              className={cn(
-                "flex items-center justify-between gap-3 rounded-md px-2 py-1.5 text-sm",
-                este ? "bg-dato font-semibold text-dato-fg" : "text-ink-muted",
-              )}
-            >
-              <span>
-                {nombre}
-                {este ? <span className="ml-2 text-[11px] font-medium uppercase tracking-[0.08em]">← este</span> : null}
-              </span>
-              <span className="num">{valor}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-      <p className="num mt-3 text-sm font-medium">{cuenta}</p>
-      <p className="mt-1 text-sm text-muted">{nota}</p>
-    </div>
   );
 }

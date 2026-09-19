@@ -1,7 +1,8 @@
 import { create } from "zustand";
+import { catalogImportTouched } from "./catalog-io";
 import { prunePayload } from "./cap";
 import { todayKey } from "./format";
-import { keepStockAndLots, receiveBody } from "./events";
+import { keepStockAndLots, receiveBody, settingsEventPatch } from "./events";
 import { forgetDeleted, isDeleted, mergeDeleted, nombresBorrados } from "./deleted";
 import { bloqueoPorRubros } from "./rubros";
 import { appendSyncLog, lastKnownStore, queueCopy, recordEvent, saveLocalSnapshot } from "./local-db";
@@ -10,6 +11,7 @@ import { lineUnits, orderNote, packOf, suggestPacks } from "./pack";
 import { nextCadenceDates } from "./supplier-cadence";
 import { addLot, consumeFifo } from "./lots";
 import { marginPrice, repriceProducts, unitCost } from "./pricing";
+import { costoAGondola, planReceive } from "./receive-cost";
 import { uid } from "./utils";
 import {
   CATEGORY_SUPPLIER,
@@ -139,7 +141,7 @@ export interface ImanState {
   receiveOrder: (id: string) => void;
   receiveOrderUnits: (
     id: string,
-    receipts: { productId: string; units: number; asUnit?: boolean }[],
+    receipts: { productId: string; units: number; asUnit?: boolean; cost?: number | null; desdeBulto?: boolean }[],
     remitoPhoto?: string,
   ) => { ok: boolean; error?: string };
   receiveLoose: (supplierId: string, productId: string, qty?: number) => void;
@@ -254,6 +256,15 @@ function mergeSettings(raw: Settings): Settings {
     ownerPinHash: typeof raw.ownerPinHash === "string" ? raw.ownerPinHash : "",
     printerBaud: typeof raw.printerBaud === "number" ? raw.printerBaud : 9600,
     mpFeePct: typeof raw.mpFeePct === "number" ? raw.mpFeePct : 0.06,
+    fiscalCondition:
+      raw.fiscalCondition === "responsable_inscripto" ||
+      raw.fiscalCondition === "monotributo" ||
+      raw.fiscalCondition === "en_negro"
+        ? raw.fiscalCondition
+        : "monotributo",
+    taxName: typeof raw.taxName === "string" && raw.taxName.trim() ? raw.taxName.trim() : "IVA",
+    taxPct: typeof raw.taxPct === "number" && raw.taxPct >= 0 ? raw.taxPct : 21,
+    shelfIncludesTax: typeof raw.shelfIncludesTax === "boolean" ? raw.shelfIncludesTax : true,
     monthExpenses: Array.isArray(raw.monthExpenses)
       ? raw.monthExpenses
       : SEED_SETTINGS.monthExpenses?.map((e) => ({ ...e })),
@@ -451,7 +462,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         const products = st.products.map((p) => {
           const q = stockMap.get(p.id);
           if (!q) return p;
-          return consumeFifo(p, q);
+          return consumeFifo(p, q, sale.createdAt);
         });
         const movements: StockMove[] = [
           ...st.ticket.map((l) => ({
@@ -610,7 +621,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         };
         set({
           // Lo que vuelve al proveedor sale de los lotes igual que una venta.
-          products: st.products.map((x) => (x.id === p.id ? consumeFifo(x, qtyUnits) : x)),
+          products: st.products.map((x) => (x.id === p.id ? consumeFifo(x, qtyUnits, refund.createdAt) : x)),
           refunds: [refund, ...st.refunds].slice(0, 200),
           movements: [
             {
@@ -669,10 +680,11 @@ export const useImanStore = create<ImanState>()((set, get) => ({
       },
 
       adjustStock: (id, delta, reason) => {
+        const at = new Date().toISOString();
         set((st) => {
           const p = st.products.find((x) => x.id === id);
           if (!p) return st;
-          const product = delta < 0 ? consumeFifo(p, -delta) : { ...p, stock: p.stock + delta };
+          const product = delta < 0 ? consumeFifo(p, -delta, at) : { ...p, stock: p.stock + delta };
           return {
             products: st.products.map((x) => (x.id === id ? product : x)),
             movements: [
@@ -682,7 +694,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
                 productName: p.name,
                 delta,
                 reason,
-                createdAt: new Date().toISOString(),
+                createdAt: at,
               },
               ...st.movements,
             ].slice(0, 200),
@@ -691,8 +703,12 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         recordEvent("stock", { productId: id, delta, reason });
       },
 
-      saveSettings: (patch) =>
-        set((st) => ({ settings: { ...st.settings, ...patch } })),
+      saveSettings: (patch) => {
+        const st = get();
+        set({ settings: { ...st.settings, ...patch } });
+        const body = settingsEventPatch(patch, st.settings);
+        if (Object.keys(body).length) recordEvent("settings", body);
+      },
 
       applyCategoryPrices: (categoryId) => {
         const st = get();
@@ -722,7 +738,17 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         return r.changed.length;
       },
 
-      importCatalog: (products, categories) => set({ products, categories }),
+      importCatalog: (products, categories) => {
+        const st = get();
+        const { newCategories, upserts } = catalogImportTouched(
+          { products: st.products, categories: st.categories },
+          { products, categories },
+        );
+        // Uno por rubro nuevo y uno por producto: la cinta los ve. Un setState
+        // masivo dejaba el celu sin enterarse y pisaba el stock.
+        for (const c of newCategories) get().saveCategory(c);
+        for (const p of upserts) get().saveProduct(p);
+      },
 
       openShift: (opening) => {
         if (get().shifts.some((s) => s.status === "open")) {
@@ -1090,31 +1116,9 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         const st = get();
         const order = st.orders.find((o) => o.id === id);
         if (!order || order.received) return { ok: false, error: "Ese pedido ya se recibió" };
-        const used = new Set<number>();
-        const gotFor = (l: (typeof order.lines)[number]): number => {
-          const exact = receipts.findIndex(
-            (r, i) =>
-              !used.has(i) &&
-              r.productId === l.productId &&
-              r.asUnit !== undefined &&
-              Boolean(r.asUnit) === Boolean(l.asUnit),
-          );
-          const loose = receipts.findIndex((r, i) => !used.has(i) && r.productId === l.productId);
-          const hit = exact >= 0 ? exact : loose;
-          if (hit < 0) return 0;
-          used.add(hit);
-          return Math.max(0, Math.floor(Number(receipts[hit]!.units) || 0));
-        };
-        const qtyMap = new Map<string, number>();
-        let short = false;
-        const nextLines = order.lines.map((l) => {
-          const p = st.products.find((x) => x.id === l.productId);
-          const expected = lineUnits(p, l.qty, l.asUnit);
-          const units = gotFor(l);
-          if (units < expected) short = true;
-          if (units > 0) qtyMap.set(l.productId, (qtyMap.get(l.productId) ?? 0) + units);
-          return { ...l, receivedUnits: units };
-        });
+        const plan = planReceive(order.lines, st.products, receipts);
+        const qtyMap = plan.qtyByProduct;
+        const nextLines = plan.nextLines;
         const now = new Date().toISOString();
         const moves: StockMove[] = [...qtyMap.entries()].map(([productId, units]) => {
           const p = st.products.find((x) => x.id === productId);
@@ -1133,7 +1137,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           received: true,
           sent: true,
           remitoPhoto: remitoPhoto || order.remitoPhoto,
-          receiptStatus: short ? "short" : "complete",
+          receiptStatus: plan.short ? "short" : "complete",
         };
         set({
           products: st.products.map((p) => {
@@ -1150,6 +1154,22 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           orderLines: nextLines,
         });
         recordEvent("order", next);
+        // Costo/precio por catálogo: el stock ya lo movió receive. keepStockAndLots no lo pisa.
+        for (const c of plan.costs) {
+          const p = get().products.find((x) => x.id === c.productId);
+          if (!p) continue;
+          const patch = costoAGondola(p, c.cost, get().categories, get().suppliers, get().settings, {
+            desdeBulto: c.desdeBulto,
+          });
+          const price = patch.price ?? p.price;
+          if (patch.cost === unitCost(p) && price === p.price) continue;
+          get().saveProduct({
+            ...p,
+            cost: patch.cost,
+            price,
+            priceUpdatedAt: price !== p.price ? now : p.priceUpdatedAt,
+          });
+        }
         pushOrderCopy(get);
         return { ok: true };
       },
@@ -1194,21 +1214,25 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         return { ok: true };
       },
 
-      saveSupplier: (s) =>
-        set((st) => {
-          const exists = st.suppliers.some((x) => x.id === s.id);
-          return {
-            suppliers: exists
-              ? st.suppliers.map((x) => (x.id === s.id ? s : x))
-              : [...st.suppliers, s],
-          };
-        }),
+      saveSupplier: (s) => {
+        const st = get();
+        const exists = st.suppliers.some((x) => x.id === s.id);
+        set({
+          suppliers: exists
+            ? st.suppliers.map((x) => (x.id === s.id ? s : x))
+            : [...st.suppliers, s],
+        });
+        recordEvent("supplier", { op: "save", supplier: s });
+      },
 
-      deleteSupplier: (id) =>
-        set((st) => ({
+      deleteSupplier: (id) => {
+        const st = get();
+        set({
           suppliers: st.suppliers.filter((s) => s.id !== id),
           orders: st.orders.filter((o) => o.supplierId !== id || o.sent || o.received),
-        })),
+        });
+        recordEvent("supplier", { op: "delete", id });
+      },
 
       resetDemo: () => set({ ...seedState(), hydrated: true }),
 

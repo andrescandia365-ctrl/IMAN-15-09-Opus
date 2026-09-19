@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  defaultFactor,
   hasFactor,
   invoiceForProduct,
   isBigPriceJump,
@@ -38,6 +39,15 @@ describe("shelfInvoice", () => {
 
   it("falls back to X when nobody with Fac brings it", () => {
     assert.equal(shelfInvoice(p, []), "X");
+  });
+});
+
+describe("factores A en pantalla", () => {
+  it("golosinas Fac A se sigue viendo 2,12 en Argentina, salido del margen × tasa", () => {
+    assert.equal(defaultFactor("Golosinas", "A"), 2.12);
+    assert.equal(defaultFactor("Bebidas", "A"), 1.8);
+    const ar = { taxPct: 21, shelfIncludesTax: true } as Settings;
+    assert.equal(defaultFactor("Golosinas", "A", ar), 2.12);
   });
 });
 
