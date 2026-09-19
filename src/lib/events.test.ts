@@ -4,6 +4,7 @@ import {
   applyEvent,
   applyEvents,
   keepStockAndLots,
+  productEventBody,
   pulledPatch,
   settingsEventPatch,
   stockCorrection,
@@ -141,6 +142,24 @@ test("syncNow saca la categoría borrada también de los proveedores del otro ap
     alStore.suppliers.map((s) => `${s.id}:${(s.categoryIds ?? []).join("+")}`),
     ["prov-omar:c-bebidas", "prov-lacteos:"],
   );
+});
+
+test("las filas de la planilla viajan en settings y pulledPatch las guarda", () => {
+  const filas = [
+    { id: "saldo_inicial", label: "SALDO INICIAL", kind: "formula" as const },
+    { id: "fac_a", label: "Fac A", kind: "input" as const, tag: "proveedor" },
+    { id: "caja", label: "CAJA", kind: "input" as const, tag: "venta" },
+    { id: "total_proveedores", label: "TOTAL PROVEEDORES", kind: "formula" as const },
+    { id: "total_ventas", label: "TOTAL VENTAS", kind: "formula" as const },
+    { id: "fumigacion", label: "Fumigación", kind: "input" as const, tag: "fumigacion" },
+  ];
+  const deLaPc = ev(
+    { ledgerRows: filas },
+    { id: "ev_filas", type: "settings", at: "2026-09-18T10:00:00.000Z", deviceId: "dev_pc" },
+  );
+  const next = applyEvent(payload(), deLaPc);
+  assert.equal(next.settings.ledgerRows?.find((r) => r.id === "fumigacion")?.label, "Fumigación");
+  assert.equal(pulledPatch(next).settings.ledgerRows?.find((r) => r.id === "fumigacion")?.tag, "fumigacion");
 });
 
 test("el PIN y el logo no viajan si este toque no los cambió", () => {
@@ -377,6 +396,50 @@ test("la corrección a mano viaja como diferencia y no pisa las ventas del otro 
   assert.equal(otro.products[0]?.stock, 14);
   // Sin tocar el campo, nunca hay corrección.
   assert.equal(stockCorrection(null, 15, 8), 0);
+});
+
+test("un update de producto no manda stock ni lots", () => {
+  const antes = yogurSuelto(10);
+  const body = productEventBody(antes, { ...antes, price: 1600 });
+  assert.equal("stock" in body, false);
+  assert.equal("lots" in body, false);
+  assert.equal((body as { price: number }).price, 1600);
+  assert.equal((body as { id: string }).id, "yogur");
+  assert.equal("name" in body, false);
+
+  const celu = applyEvent(payload({ products: [yogurSuelto(8)] }), ev(body, { id: "ev_precio", type: "product" }));
+  assert.equal(celu.products[0]?.price, 1600);
+  assert.equal(celu.products[0]?.stock, 8);
+  assert.equal(celu.products[0]?.name, "Yogur");
+});
+
+test("alta de producto sí lleva stock inicial y lots vacíos", () => {
+  const alta = { ...yogurSuelto(5), id: "flan", name: "Flan", lots: undefined };
+  const body = productEventBody(undefined, alta as Product);
+  assert.equal((body as { stock: number }).stock, 5);
+  assert.deepEqual((body as { lots: unknown }).lots, []);
+});
+
+test("PC nombre y PC costo en dos toques: cada campo se queda, el stock no viaja", () => {
+  const base = payload({ products: [{ ...yogurSuelto(8), name: "Yogur", cost: 900, price: 1400 }] });
+  const nombre = ev(
+    { id: "yogur", name: "Yogur frutilla" },
+    { id: "ev_nombre", type: "product", at: "2026-09-18T10:00:00.000Z" },
+  );
+  const costo = ev(
+    { id: "yogur", cost: 1100 },
+    { id: "ev_costo", type: "product", at: "2026-09-18T10:01:00.000Z" },
+  );
+  for (const orden of [
+    [nombre, costo],
+    [costo, nombre],
+  ]) {
+    const next = applyEvents(base, orden);
+    assert.equal(next.products[0]?.name, "Yogur frutilla");
+    assert.equal(next.products[0]?.cost, 1100);
+    assert.equal(next.products[0]?.price, 1400);
+    assert.equal(next.products[0]?.stock, 8);
+  }
 });
 
 test("aplicar precios no toca el stock del que recibe", () => {

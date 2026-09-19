@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { backupRecords, incomingCopy, mergeBackup, mergeOrders, mergePayload, richerOrder, richerShift } from "./cap.ts";
-import { haceCuanto, pruneSyncLog, trimSyncLog, type SyncLogItem } from "./sync-log.ts";
+import { backupRecords, incomingCopy, mergeBackup, mergeOrders, mergePayload, preferLiveCopy, richerOrder, richerShift } from "./cap.ts";
+import { haceCuanto, pruneSyncLog, syncAgeTone, trimSyncLog, type SyncLogItem } from "./sync-log.ts";
 import type { CashShift, KioskPayload, MonthAgg, OrderDraft, Sale, Settings } from "./types.ts";
 
 const settings = { name: "Faro", city: "", onboarded: true } as Settings;
@@ -73,6 +73,45 @@ describe("incomingCopy", () => {
     assert.equal(got.emptyRemote, false);
     assert.equal(got.newOrders, 1);
     assert.equal(got.payload.orders[0]?.lines[0]?.qty, 2);
+  });
+
+  it("una fotocopia vieja no pisa un stock más nuevo ni el ticket a medio armar", () => {
+    const live = payload({
+      products: [
+        {
+          id: "p1",
+          name: "Coca 2L",
+          barcode: "1",
+          price: 100,
+          cost: 50,
+          stock: 8,
+          stockMin: 2,
+          categoryId: "kio",
+          active: true,
+          expiresAt: null,
+          lots: [{ id: "lt1", expiresAt: "2026-10-01", units: 8, createdAt: "2026-09-18T12:00:00.000Z" }],
+          priceUpdatedAt: "2026-04-01T00:00:00.000Z",
+        },
+      ],
+      ticket: [{ productId: "p1", name: "Coca 2L", barcode: "1", price: 100, qty: 1 }],
+    });
+    const snap = payload({
+      products: [{ ...live.products[0]!, stock: 10, lots: [] }],
+      ticket: [],
+    });
+    const remote = payload({
+      products: [{ ...live.products[0]!, stock: 10, lots: [] }],
+      orders: [order({ id: "or1" })],
+    });
+    const local = preferLiveCopy(live, snap);
+    assert.equal(local.products[0]?.stock, 8);
+    assert.equal(local.ticket.length, 1);
+
+    const got = incomingCopy(remote, local);
+    assert.equal(got.payload.products[0]?.stock, 8);
+    assert.equal(got.payload.products[0]?.lots?.[0]?.id, "lt1");
+    assert.equal(got.payload.ticket[0]?.qty, 1);
+    assert.equal(got.newOrders, 1);
   });
 });
 
@@ -281,5 +320,9 @@ describe("la última vez que se sincronizó", () => {
     assert.equal(haceCuanto("2026-09-18T14:35:00.000Z", now), "hace 25 min");
     assert.equal(haceCuanto("2026-09-18T13:00:00.000Z", now), "hace 2 h");
     assert.equal(haceCuanto("2026-09-15T15:00:00.000Z", now), "hace 3 días");
+    assert.equal(syncAgeTone(11), "sage");
+    assert.equal(syncAgeTone(12), "warn");
+    assert.equal(syncAgeTone(23), "warn");
+    assert.equal(syncAgeTone(24), "danger");
   });
 });

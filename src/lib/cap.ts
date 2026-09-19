@@ -373,6 +373,12 @@ function remoteHasWork(p: KioskPayload | null | undefined): boolean {
   return (p.orders ?? []).some((o) => o.sent && namedLines(o) > 0);
 }
 
+/** El estado vivo gana a una fotocopia guardada: stock, lotes y ticket a medio armar. */
+export function preferLiveCopy(live: KioskPayload, snap: KioskPayload | null | undefined): KioskPayload {
+  if (hasCatalog(live) || (live.ticket?.length ?? 0) > 0) return live;
+  return snap ?? live;
+}
+
 /** Pull: never replace a live local with an empty cloud. Count new sent orders. */
 export function incomingCopy(
   remote: KioskPayload | null | undefined,
@@ -384,7 +390,8 @@ export function incomingCopy(
     }
     return { payload: local, newOrders: 0, emptyRemote: true };
   }
-  const payload = hasCatalog(local) ? mergePayload(remote, local) : prunePayload(remote);
+  const payload =
+    hasCatalog(local) || (local.ticket?.length ?? 0) > 0 ? mergeBackup(remote, local) : prunePayload(remote);
   const had = new Set((local.orders ?? []).filter((o) => o.sent).map((o) => o.id));
   const newOrders = (payload.orders ?? []).filter(
     (o) => o.sent && namedLines(o) > 0 && !had.has(o.id),

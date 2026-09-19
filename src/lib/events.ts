@@ -1,4 +1,4 @@
-import { emptyBook, cellsOf } from "./ledger.ts";
+import { emptyBook, cellsOf, adoptLedgerSettings, takeMonthExpenses, depositLedgerAmounts } from "./ledger.ts";
 import { isDeleted, mergeDeleted } from "./deleted.ts";
 import { consumeFifo, insertLot, lotsOf } from "./lots.ts";
 import { packOf } from "./pack.ts";
@@ -64,6 +64,48 @@ export function settingsEventPatch(patch: Partial<Settings>, prev?: Partial<Sett
   return body;
 }
 
+/** Catálogo: no es stock ni lotes. Un update solo manda los que cambió. */
+const CATALOG_KEYS = [
+  "name",
+  "barcode",
+  "shortCode",
+  "price",
+  "cost",
+  "stockMin",
+  "packQty",
+  "packBarcode",
+  "categoryId",
+  "active",
+  "expiresAt",
+  "priceUpdatedAt",
+  "onOffer",
+  "priceA",
+] as const;
+
+function catalogEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (a == null && b == null) return true;
+  return false;
+}
+
+/**
+ * Lo que viaja en un evento `product`. Alta: el producto entero, con stock
+ * inicial y lots []. Update: catálogo que cambió, sin stock ni lots. El body
+ * viejo que los traía se ignora al aplicar (keepStockAndLots / merge).
+ */
+export function productEventBody(prev: Product | undefined, next: Product): { [key: string]: Json } {
+  if (!prev) {
+    return { ...(next as unknown as Record<string, Json>), lots: (next.lots ?? []) as unknown as Json };
+  }
+  const body: { [key: string]: Json } = { id: next.id };
+  for (const key of CATALOG_KEYS) {
+    if (catalogEqual(prev[key], next[key])) continue;
+    const v = next[key];
+    body[key] = (v === undefined ? null : v) as Json;
+  }
+  return body;
+}
+
 /**
  * Un `product` trae el catálogo. Stock y lotes se mueven solo con eventos de
  * cantidad (sale, stock, refund, receive, lot): si el producto ya está, se
@@ -72,15 +114,26 @@ export function settingsEventPatch(patch: Partial<Settings>, prev?: Partial<Sett
  * ventas que ese aparato todavía no había visto. La fecha también se queda
  * cuando sale de los lotes; si ninguno de los dos tiene lotes, es la fecha
  * del producto y viaja como catálogo.
+ *
+ * Dos toques (nombre vs costo) no se pisan: cada campo que viene en el body
+ * se aplica; el que no viene se queda. Stock nunca entra en ese merge.
  */
 export function keepStockAndLots(local: Product, incoming: Product): Product {
+  return mergeProductCatalog(local, incoming);
+}
+
+function mergeProductCatalog(local: Product, incoming: Partial<Product>): Product {
+  const next: Product = { ...local };
+  for (const key of CATALOG_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(incoming, key)) continue;
+    (next as unknown as Record<string, unknown>)[key] = (incoming as Record<string, unknown>)[key];
+  }
+  next.id = local.id;
+  next.stock = local.stock;
+  next.lots = local.lots;
   const fechaDeLotes = lotsOf(local).length > 0 || lotsOf(incoming).length > 0;
-  return {
-    ...incoming,
-    stock: local.stock,
-    lots: local.lots,
-    expiresAt: fechaDeLotes ? local.expiresAt : incoming.expiresAt,
-  };
+  if (fechaDeLotes) next.expiresAt = local.expiresAt;
+  return next;
 }
 
 /**
@@ -158,11 +211,12 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
       // Un borrado no se revive: el evento llegó tarde (un cambio de precio de
       // otro aparato, un editor que se abrió antes del borrado).
       if (!exists && isDeleted(payload.deletedProducts, p.id)) return payload;
-      // Un alta se toma entera, con su stock inicial; uno que ya está solo cambia el catálogo.
+      // Un alta se toma entera, con su stock inicial; uno que ya está solo
+      // cambia el catálogo (el body nuevo no manda stock/lots; el viejo se ignora).
       return {
         ...payload,
         products: exists
-          ? payload.products.map((x) => (x.id === p.id ? keepStockAndLots(x, p) : x))
+          ? payload.products.map((x) => (x.id === p.id ? mergeProductCatalog(x, p) : x))
           : [...payload.products, p],
       };
     }
@@ -338,7 +392,19 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) return payload;
       const patch = settingsEventPatch(raw as Partial<Settings>);
       if (!Object.keys(patch).length) return payload;
-      return { ...payload, settings: { ...payload.settings, ...patch } };
+      const merged = { ...payload.settings, ...patch };
+      const shouldAdopt =
+        "ledgerRows" in patch ||
+        "ledgerTags" in patch ||
+        "monthExpenses" in patch ||
+        (Array.isArray(merged.monthExpenses) && merged.monthExpenses.length > 0);
+      if (!shouldAdopt) return { ...payload, settings: merged };
+      const taken = takeMonthExpenses(merged);
+      return {
+        ...payload,
+        settings: adoptLedgerSettings(merged),
+        books: depositLedgerAmounts(payload.books ?? [], taken.deposits),
+      };
     }
     default:
       return payload;

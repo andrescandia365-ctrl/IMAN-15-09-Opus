@@ -24,7 +24,7 @@ import { withKeyLock } from "@/lib/key-lock";
 import { alreadyInCopy, fromCopyStart, pullMode, pullStartAfter } from "@/lib/pull-start";
 import { pullEvents, pushEvents, saveKiosk, selectStore } from "@/lib/kiosk";
 import { snapshotKiosk, useImanStore } from "@/lib/store";
-import { backupRecords, incomingCopy, mergeBackup, prunePayload } from "@/lib/cap";
+import { backupRecords, incomingCopy, mergeBackup, preferLiveCopy, prunePayload } from "@/lib/cap";
 import { chunk } from "@/lib/event-queue";
 import { nombresBorrados, quitadosPor } from "@/lib/deleted";
 import type { ImanEvent } from "@/lib/events";
@@ -333,7 +333,9 @@ export async function pullCopy(storeId: string): Promise<CloudReview> {
   }
   try {
     const remote = await selectStore({ data: { storeId } });
-    const local = (await loadLocalSnapshot(storeId)) ?? prunePayload(snapshotKiosk(useImanStore.getState()));
+    const live = prunePayload(snapshotKiosk(useImanStore.getState()));
+    const snap = await loadLocalSnapshot(storeId);
+    const local = preferLiveCopy(live, snap);
     const { payload, newOrders, emptyRemote } = incomingCopy(remote.payload, local);
     if (emptyRemote) {
       return {

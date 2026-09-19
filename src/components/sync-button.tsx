@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, RefreshCw } from "lucide-react";
 import { onQueueChange, listSyncLog, syncMeta, type SyncLogItem } from "@/lib/local-db";
-import { haceCuanto } from "@/lib/sync-log";
+import { haceCuanto, SYNC_AMARILLO_H, syncAgeTone } from "@/lib/sync-log";
 import { reviewCloud } from "@/lib/sync";
 import { usePhoneUi } from "@/lib/device";
 import { cn } from "@/lib/utils";
@@ -71,8 +71,10 @@ export function SyncButton({ storeId }: { storeId: string }) {
   }
 
   const ageH = last ? (now - new Date(last).getTime()) / 3_600_000 : 99;
-  const tone = !last || ageH >= 3 ? "text-danger" : ageH >= 2 ? "text-warn" : "text-sage";
-  const Icon = !last || ageH >= 2 ? RefreshCw : Check;
+  const toneName = !last ? "danger" : syncAgeTone(ageH);
+  const tone =
+    toneName === "danger" ? "text-danger" : toneName === "warn" ? "text-warn" : "text-sage";
+  const Icon = !last || ageH >= SYNC_AMARILLO_H ? RefreshCw : Check;
 
   return (
     <div ref={boxRef} className="relative">

@@ -109,6 +109,41 @@ export interface ShiftDef {
   start: number;
 }
 
+export const LEDGER_TAG_IDS = [
+  "gasto",
+  "empleado",
+  "alquiler",
+  "contador",
+  "arca",
+  "iibb",
+  "expensas",
+  "fumigacion",
+  "retiro",
+  "proveedor",
+  "venta",
+  "otro",
+] as const;
+
+export type BuiltinLedgerTag = (typeof LEDGER_TAG_IDS)[number];
+/** Tag de una fila de input. Los de fábrica más los que arma el dueño. */
+export type LedgerTag = BuiltinLedgerTag | (string & {});
+export type LedgerKind = "input" | "formula" | "spacer";
+
+export interface LedgerRow {
+  id: string;
+  label: string;
+  kind: LedgerKind;
+  /** Solo las de input. Las fórmulas no llevan tag. */
+  tag?: string;
+  /** Ocultar no borra las celdas que ya se cargaron. */
+  hidden?: boolean;
+}
+
+export interface LedgerTagDef {
+  id: string;
+  label: string;
+}
+
 export interface Settings {
   name: string;
   rubro: KioskRubro;
@@ -138,9 +173,14 @@ export interface Settings {
   taxPct?: number;
   /** El precio de la góndola ya tiene el impuesto. En Argentina, sí. */
   shelfIncludesTax?: boolean;
+  /** Viejo cajón de gastos del mes. Una pasada los pasa a filas y no se vuelve a sumar. */
   monthExpenses?: { name: string; amount: number }[];
   ledgerTints?: Record<string, "sage" | "warn" | "danger" | "info">;
   ledgerLabels?: Record<string, string>;
+  /** Filas de Asientos que arma el dueño. Viaja en el evento settings. */
+  ledgerRows?: LedgerRow[];
+  /** Tags que creó el dueño, además de los de fábrica. */
+  ledgerTags?: LedgerTagDef[];
   ticketHeader?: string;
   ticketFooter?: string;
   ticketThanks?: string;
@@ -249,6 +289,8 @@ export interface MonthSheet {
   ym: string;
   archivedAt: string;
   labels?: Record<string, string>;
+  /** Filas que había cuando se archivó. Septiembre viejo muestra estas, no las de ahora. */
+  rows?: LedgerRow[];
   days: { date: string; cells: Record<string, number> }[];
 }
 

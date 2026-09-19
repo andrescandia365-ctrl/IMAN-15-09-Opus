@@ -15,6 +15,7 @@ import {
 import { Bar, BarChart, Cell, LabelList, ResponsiveContainer, XAxis, YAxis, type LabelProps } from "recharts";
 import { toast } from "sonner";
 import { LedgerSheet } from "@/components/ledger-grid";
+import { LedgerRowsConfig } from "@/components/ledger-rows-config";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Dialog,
@@ -25,12 +26,11 @@ import {
 } from "@/components/ui/dialog";
 import {
   booksForYm,
-  cellValue,
   currentYm,
   downloadText,
   ledgerCsv,
+  ledgerRowsForYm,
   monthCc,
-  monthDates,
   monthTitle,
   monthsOfQuarter,
   monthsOfYear,
@@ -76,23 +76,25 @@ export function OwnerDesk({
 }) {
   const [tab, setTab] = useState<Tab>("precios");
   const [newName, setNewName] = useState("");
-  const [gastosOpen, setGastosOpen] = useState(false);
+  const [filasOpen, setFilasOpen] = useState(false);
   const books = useImanStore((s) => s.books);
   const sheets = useImanStore((s) => s.monthSheets);
-  const labels = useImanStore((s) => s.settings.ledgerLabels);
   const releaseMonth = useImanStore((s) => s.releaseMonth);
   const nowYm = currentYm();
   const [ym, setYm] = useState(nowYm);
   const year = Number(ym.slice(0, 4));
+  const settings = useImanStore((s) => s.settings);
+  const viewRows = useMemo(
+    () => ledgerRowsForYm(ym, settings, sheets),
+    [ym, sheets, settings],
+  );
   const viewBooks = useMemo(() => booksForYm(books, sheets, ym), [books, sheets, ym]);
-  const cc = useMemo(() => monthCc(viewBooks, ym), [viewBooks, ym]);
+  const cc = useMemo(() => monthCc(viewBooks, ym, viewRows), [viewBooks, ym, viewRows]);
   const current = ym === nowYm;
   const phone = usePhoneUi();
   const sales = useImanStore((s) => s.sales);
   const monthAggs = useImanStore((s) => s.monthAggs);
   const payouts = useImanStore((s) => s.payouts);
-  const monthExpenses = useImanStore((s) => s.settings.monthExpenses);
-  const settings = useImanStore((s) => s.settings);
   const mpFeePct = settings.mpFeePct;
   const products = useImanStore((s) => s.products);
   const refunds = useImanStore((s) => s.refunds);
@@ -102,9 +104,13 @@ export function OwnerDesk({
   const anterior = prevYm(ym);
   const mes = useMemo(() => ventasDelMes(ym, sales, monthAggs), [ym, sales, monthAggs]);
   const mesPasado = useMemo(() => ventasDelMes(anterior, sales, monthAggs), [anterior, sales, monthAggs]);
+  const rowsPasado = useMemo(
+    () => ledgerRowsForYm(anterior, settings, sheets),
+    [anterior, sheets, settings],
+  );
   const ccPasado = useMemo(
-    () => monthCc(booksForYm(books, sheets, anterior), anterior),
-    [books, sheets, anterior],
+    () => monthCc(booksForYm(books, sheets, anterior), anterior, rowsPasado),
+    [books, sheets, anterior, rowsPasado],
   );
   // Un mes viejo puede haber perdido sus tickets y conservar la planilla.
   const ventasMes = mes?.ventas ?? (cc.totalVentas > 0 ? cc.totalVentas : null);
@@ -112,16 +118,12 @@ export function OwnerDesk({
   const dif = ventasMes != null && ventasPasado != null ? ventasMes - ventasPasado : null;
   const difPct = dif != null && ventasPasado ? (dif / ventasPasado) * 100 : null;
 
-  const retiros = useMemo(
-    () => monthDates(ym).reduce((a, d) => a + cellValue(viewBooks, d, "retiros"), 0),
-    [viewBooks, ym],
-  );
-  const gastosFijos = (monthExpenses ?? []).reduce((a, r) => a + (r.amount || 0), 0);
+  const retiros = cc.retiros;
   const sueldos = useMemo(
     () => payouts.filter((x) => ymLocal(x.createdAt) === ym).reduce((a, x) => a + x.amount, 0),
     [payouts, ym],
   );
-  const salio = cc.proveedores + cc.gastos + gastosFijos + sueldos;
+  const salio = cc.proveedores + cc.gastos + sueldos;
   // Un mes al que nunca se le cargó nada no tuvo cero de gastos: no tuvo datos.
   const hayEgresos = salio > 0 || retiros > 0;
 
@@ -265,7 +267,9 @@ export function OwnerDesk({
                   ym={ym}
                   onBajar={(label, yms) => {
                     const text = yms
-                      .map((mo) => ledgerCsv(mo, booksForYm(books, sheets, mo), labels))
+                      .map((mo) =>
+                        ledgerCsv(mo, booksForYm(books, sheets, mo), ledgerRowsForYm(mo, settings, sheets)),
+                      )
                       .join("\n\n");
                     downloadText(`iman-planilla-${label.toLowerCase()}-${year}.csv`, text);
                     toast.success("CSV descargado");
@@ -318,7 +322,6 @@ export function OwnerDesk({
                     <ul className="mt-2 space-y-0.5 border-t border-border pt-2 text-xs">
                       <Linea k="Proveedores" v={cc.proveedores} />
                       <Linea k="Gastos de la planilla" v={cc.gastos} />
-                      <Linea k="Gastos fijos" v={gastosFijos} />
                       <Linea k="Sueldos y adelantos" v={sueldos} />
                     </ul>
                   ) : null}
@@ -369,9 +372,9 @@ export function OwnerDesk({
                   accion={
                     <button
                       type="button"
-                      aria-label="Gastos fijos"
-                      title="Gastos fijos"
-                      onClick={() => setGastosOpen(true)}
+                      aria-label="Armar filas"
+                      title="Armar filas"
+                      onClick={() => setFilasOpen(true)}
                       className="-my-1.5 -mr-1.5 grid size-8 place-items-center rounded-md text-muted hover:bg-elevated hover:text-fg"
                     >
                       <Settings2 className="size-4" />
@@ -383,19 +386,18 @@ export function OwnerDesk({
                   ) : (
                   <ul className="mt-1.5 space-y-0.5 text-sm">
                     <Linea k="Proveedores" v={cc.proveedores} grande />
-                    <li className="flex flex-wrap gap-x-3 gap-y-0.5 pl-3 text-xs text-subtle">
-                      <span>
-                        Fac X <span className="num">{formatARS(cc.facX)}</span>
-                      </span>
-                      <span>
-                        Fac A <span className="num">{formatARS(cc.facA)}</span>
-                      </span>
-                      <span>
-                        Cigarrillos <span className="num">{formatARS(cc.cigarrillos)}</span>
-                      </span>
-                    </li>
+                    {cc.proveedorRows.some((r) => r.amount) ? (
+                      <li className="flex flex-wrap gap-x-3 gap-y-0.5 pl-3 text-xs text-subtle">
+                        {cc.proveedorRows
+                          .filter((r) => r.amount)
+                          .map((r) => (
+                            <span key={r.id}>
+                              {r.label} <span className="num">{formatARS(r.amount)}</span>
+                            </span>
+                          ))}
+                      </li>
+                    ) : null}
                     <Linea k="Gastos de la planilla" v={cc.gastos} grande />
-                    <Linea k="Gastos fijos" v={gastosFijos} grande />
                     <Linea k="Sueldos y adelantos" v={sueldos} grande />
                     <Linea k="Retiros del dueño" v={retiros} grande />
                   </ul>
@@ -452,22 +454,21 @@ export function OwnerDesk({
                   products={products}
                   mpFeePct={mpFeePct ?? 0.06}
                   gastosPlanilla={cc.gastos}
-                  gastosFijos={gastosFijos}
                   retiros={retiros}
                   settings={settings}
                 />
               </DialogContent>
             </Dialog>
-            <Dialog open={gastosOpen} onOpenChange={setGastosOpen}>
-              <DialogContent className="w-[min(36rem,calc(100vw-48px))] max-w-none p-6">
+            <Dialog open={filasOpen} onOpenChange={setFilasOpen}>
+              <DialogContent className="w-[min(36rem,calc(100vw-24px))] max-h-[min(90dvh,44rem)] max-w-none overflow-y-auto p-6">
                 <DialogHeader className="mb-4 pr-10">
-                  <p className="text-xs font-medium uppercase tracking-[0.16em] text-subtle">El mes</p>
+                  <p className="text-xs font-medium uppercase tracking-[0.16em] text-subtle">Asientos</p>
                   <DialogTitle className="mt-1 font-display text-3xl leading-none tracking-tight">
-                    Gastos fijos
+                    Filas de la planilla
                   </DialogTitle>
-                  <DialogDescription>Alquiler y los que no cambian.</DialogDescription>
+                  <DialogDescription>Ocultar no borra lo que ya se cargó.</DialogDescription>
                 </DialogHeader>
-                <ExpenseEditor />
+                <LedgerRowsConfig />
               </DialogContent>
             </Dialog>
           </div>
@@ -989,31 +990,6 @@ function Linea({ k, v, grande }: { k: string; v: number; grande?: boolean }) {
   );
 }
 
-function ExpenseEditor() {
-  const settings = useImanStore((s) => s.settings);
-  const saveSettings = useImanStore((s) => s.saveSettings);
-  const rows = settings.monthExpenses ?? [];
-  return (
-    <ul className="space-y-2">
-      {rows.map((e, i) => (
-        <li key={e.name} className="flex gap-2">
-          <Input className="flex-1" value={e.name} readOnly />
-          <Input
-            className="w-32 text-right"
-            inputMode="numeric"
-            value={e.amount || ""}
-            onChange={(ev) => {
-              const amount = Number(ev.target.value.replace(/[^\d]/g, "")) || 0;
-              const next = rows.map((r, idx) => (idx === i ? { ...r, amount } : r));
-              saveSettings({ monthExpenses: next });
-            }}
-          />
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function OwnerFactura() {
   const settings = useImanStore((s) => s.settings);
   const saveSettings = useImanStore((s) => s.saveSettings);
@@ -1104,7 +1080,6 @@ function ResultadoDelMes({
   products,
   mpFeePct,
   gastosPlanilla,
-  gastosFijos,
   retiros,
   settings,
 }: {
@@ -1115,7 +1090,6 @@ function ResultadoDelMes({
   products: Product[];
   mpFeePct: number;
   gastosPlanilla: number;
-  gastosFijos: number;
   retiros: number;
   settings: Settings;
 }) {
@@ -1173,7 +1147,7 @@ function ResultadoDelMes({
       devueltoCosto += agg.devolucionesCogs ?? 0;
     }
     const comision = ventasMp * mpFeePct;
-    const gastos = gastosPlanilla + gastosFijos;
+    const gastos = gastosPlanilla;
     const cuenta = margenDelMes({
       ventas,
       devuelto,
@@ -1207,7 +1181,7 @@ function ResultadoDelMes({
       sinCosto: [...sinCosto],
       precioViejo: [...precioViejo],
     };
-  }, [ym, sales, refunds, aggs, products, mpFeePct, gastosPlanilla, gastosFijos, retiros, settings]);
+  }, [ym, sales, refunds, aggs, products, mpFeePct, gastosPlanilla, retiros, settings]);
 
   const fuenteVentas =
     r.fuente === "vivo"
@@ -1280,7 +1254,7 @@ function ResultadoDelMes({
         <Renglon
           k="Gastos"
           v={-r.gastos}
-          fuente="Filas de gasto de la planilla del mes más los gastos fijos"
+          fuente="Filas de gasto de la planilla"
         />
         <Subtotal k={r.etiquetaMargen} v={r.margen} />
         <Renglon k="Lo que se llevó el dueño" v={-retiros} fuente="Fila RETIROS de la planilla" />

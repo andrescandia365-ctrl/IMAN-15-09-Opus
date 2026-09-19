@@ -2,11 +2,22 @@ import { create } from "zustand";
 import { catalogImportTouched } from "./catalog-io";
 import { prunePayload } from "./cap";
 import { todayKey } from "./format";
-import { keepStockAndLots, receiveBody, settingsEventPatch } from "./events";
+import { keepStockAndLots, productEventBody, receiveBody, settingsEventPatch } from "./events";
 import { forgetDeleted, isDeleted, mergeDeleted, nombresBorrados } from "./deleted";
 import { bloqueoPorRubros } from "./rubros";
 import { appendSyncLog, lastKnownStore, queueCopy, recordEvent, saveLocalSnapshot } from "./local-db";
-import { archiveClosedMonths, emptyBook, cellsOf, currentYm, sameCell, type FacLine } from "./ledger";
+import {
+  adoptLedgerSettings,
+  archiveClosedMonths,
+  depositLedgerAmounts,
+  emptyBook,
+  cellsOf,
+  currentYm,
+  resolveLedgerRows,
+  sameCell,
+  takeMonthExpenses,
+  type FacLine,
+} from "./ledger";
 import { lineUnits, orderNote, packOf, suggestPacks } from "./pack";
 import { nextCadenceDates } from "./supplier-cadence";
 import { addLot, consumeFifo } from "./lots";
@@ -244,7 +255,7 @@ function seedShift(opening = SEED_SETTINGS.cashFloat): CashShift {
 }
 
 function mergeSettings(raw: Settings): Settings {
-  return {
+  const base: Settings = {
     ...SEED_SETTINGS,
     ...raw,
     phrases: Array.isArray(raw.phrases) ? raw.phrases : [...SEED_SETTINGS.phrases],
@@ -267,10 +278,15 @@ function mergeSettings(raw: Settings): Settings {
     shelfIncludesTax: typeof raw.shelfIncludesTax === "boolean" ? raw.shelfIncludesTax : true,
     monthExpenses: Array.isArray(raw.monthExpenses)
       ? raw.monthExpenses
-      : SEED_SETTINGS.monthExpenses?.map((e) => ({ ...e })),
+      : Array.isArray(raw.ledgerRows) && raw.ledgerRows.length
+        ? []
+        : SEED_SETTINGS.monthExpenses?.map((e) => ({ ...e })),
     ledgerTints: raw.ledgerTints && typeof raw.ledgerTints === "object" ? raw.ledgerTints : {},
     ledgerLabels: raw.ledgerLabels && typeof raw.ledgerLabels === "object" ? raw.ledgerLabels : {},
+    ledgerRows: Array.isArray(raw.ledgerRows) ? raw.ledgerRows.map((r) => ({ ...r })) : raw.ledgerRows,
+    ledgerTags: Array.isArray(raw.ledgerTags) ? raw.ledgerTags.map((t) => ({ ...t })) : [],
   };
+  return adoptLedgerSettings(base);
 }
 
 function emptyBooks(opening: number) {
@@ -307,7 +323,12 @@ function seedState() {
     products: SEED_PRODUCTS.map((p) => ({ ...p })),
     categories: SEED_CATEGORIES.map((c) => ({ ...c })),
     sales: seedSales(),
-    settings: { ...SEED_SETTINGS, phrases: [...SEED_SETTINGS.phrases], shifts: SEED_SETTINGS.shifts.map((s) => ({ ...s })), tasks: { ...SEED_SETTINGS.tasks } },
+    settings: mergeSettings({
+      ...SEED_SETTINGS,
+      phrases: [...SEED_SETTINGS.phrases],
+      shifts: SEED_SETTINGS.shifts.map((s) => ({ ...s })),
+      tasks: { ...SEED_SETTINGS.tasks },
+    }),
     suppliers: SEED_SUPPLIERS.map((s) => ({ ...s, days: [...s.days] })),
     shifts: [seedShift()],
     drops: [] as CashDrop[],
@@ -657,11 +678,12 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         // los de la copia que hizo el diálogo al abrirse: si entró una venta en el
         // medio, guardar la devolvía. La corrección a mano del stock viaja aparte,
         // como evento `stock` (ver stockCorrection).
-        const next = cur ? keepStockAndLots(cur, p) : p;
+        const next = cur ? keepStockAndLots(cur, p) : { ...p, lots: p.lots ?? [] };
         set({
           products: cur ? st.products.map((x) => (x.id === p.id ? next : x)) : [...st.products, next],
         });
-        recordEvent("product", next);
+        const body = productEventBody(cur, next);
+        if (!cur || Object.keys(body).length > 1) recordEvent("product", body);
         return { ok: true };
       },
 
@@ -724,17 +746,24 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         if (!r.changed.length) return 0;
         set({ products: r.products });
         // Uno por producto, como saveProduct: sin esto el celu seguía vendiendo al precio viejo.
-        for (const p of r.changed) recordEvent("product", p);
+        for (const p of r.changed) {
+          const prev = st.products.find((x) => x.id === p.id);
+          recordEvent("product", productEventBody(prev, p));
+        }
         return r.changed.length;
       },
 
       setProductPrices: (updates) => {
         if (!updates.length) return 0;
+        const prevs = get().products;
         const map = new Map(updates.map((u) => [u.id, u.price]));
-        const r = repriceProducts(get().products, (p) => map.get(p.id) ?? null, new Date().toISOString());
+        const r = repriceProducts(prevs, (p) => map.get(p.id) ?? null, new Date().toISOString());
         if (!r.changed.length) return 0;
         set({ products: r.products });
-        for (const p of r.changed) recordEvent("product", p);
+        for (const p of r.changed) {
+          const prev = prevs.find((x) => x.id === p.id);
+          recordEvent("product", productEventBody(prev, p));
+        }
         return r.changed.length;
       },
 
@@ -1296,13 +1325,21 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         }),
 
       hydrateKiosk: (p, opts) => {
+        const settings = mergeSettings(p.settings);
+        const taken = takeMonthExpenses({
+          ledgerRows: settings.ledgerRows,
+          ledgerLabels: settings.ledgerLabels,
+          ledgerTags: settings.ledgerTags,
+          monthExpenses: p.settings?.monthExpenses,
+        });
         const folded = archiveClosedMonths(
-          p.books ?? [],
+          depositLedgerAmounts(p.books ?? [], taken.deposits),
           p.monthSheets ?? [],
-          p.settings?.ledgerLabels,
+          resolveLedgerRows(settings),
         );
         const pruned = prunePayload({
           ...p,
+          settings,
           orders: p.orders ?? [],
           books: folded.books,
           monthAggs: p.monthAggs ?? [],
@@ -1322,7 +1359,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           products: pruned.products,
           categories: pruned.categories,
           sales: pruned.sales,
-          settings: mergeSettings(pruned.settings),
+          settings: pruned.settings,
           suppliers: pruned.suppliers,
           shifts,
           drops: pruned.drops,

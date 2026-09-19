@@ -1,58 +1,81 @@
-import type { DayBook, MonthSheet } from "@/lib/types";
+import type { DayBook, LedgerKind, LedgerRow, LedgerTagDef, MonthSheet, Settings } from "./types.ts";
+import { LEDGER_TAG_IDS } from "./types.ts";
 import { todayKey } from "./format.ts";
 
-export type LedgerKind = "input" | "formula" | "spacer";
+export type { LedgerKind, LedgerRow, LedgerTagDef };
+export { LEDGER_TAG_IDS };
 
 export const LOCKED_LEDGER = new Set(["saldo_inicial", "total_proveedores", "total_ventas"]);
+/** Sin esta fila no se cuadra el efectivo. El dueño no la oculta. */
+export const CAJA_LEDGER = new Set(["caja"]);
 
-export function rowTitle(
-  row: LedgerRow,
-  labels?: Record<string, string>,
-): string {
+export const LEDGER_TAG_LABEL: Record<(typeof LEDGER_TAG_IDS)[number], string> = {
+  gasto: "Gasto",
+  empleado: "Empleado",
+  alquiler: "Alquiler",
+  contador: "Contador",
+  arca: "ARCA",
+  iibb: "IIBB",
+  expensas: "Expensas",
+  fumigacion: "Fumigación",
+  retiro: "Retiro",
+  proveedor: "Proveedor",
+  venta: "Venta",
+  otro: "Otro",
+};
+
+/** Lo que no es plata de caja: entra en Gastos de El mes. */
+export const MES_GASTO_TAGS = new Set([
+  "gasto",
+  "alquiler",
+  "contador",
+  "arca",
+  "iibb",
+  "expensas",
+  "fumigacion",
+  "empleado",
+]);
+
+export function rowTitle(row: LedgerRow, labels?: Record<string, string>): string {
   const custom = labels?.[row.id]?.trim();
   if (custom) return custom;
   return row.label;
 }
 
-export type LedgerRow = {
-  id: string;
-  label: string;
-  kind: LedgerKind;
-};
+export function tagLabel(tag: string | undefined, extra?: LedgerTagDef[]): string {
+  if (!tag) return "";
+  const known = (LEDGER_TAG_IDS as readonly string[]).includes(tag)
+    ? LEDGER_TAG_LABEL[tag as (typeof LEDGER_TAG_IDS)[number]]
+    : undefined;
+  if (known) return known;
+  const custom = extra?.find((t) => t.id === tag)?.label?.trim();
+  return custom || tag;
+}
 
 /** Caja to square + empty named gastos. Not Aylen's people. */
-export const LEDGER_ROWS: LedgerRow[] = [
+export const DEFAULT_LEDGER_ROWS: LedgerRow[] = [
   { id: "saldo_inicial", label: "SALDO INICIAL", kind: "formula" },
-  { id: "fac_x", label: "FAC X", kind: "input" },
-  { id: "fac_a", label: "FAC A", kind: "input" },
-  { id: "cigarrillos", label: "CIGARRILLOS", kind: "input" },
-  { id: "caja", label: "CAJA", kind: "input" },
-  { id: "ventas_virtuales", label: "VENTAS VIRTUALES", kind: "input" },
-  { id: "pagos_virtuales", label: "PAGOS VIRTUALES", kind: "input" },
+  { id: "fac_x", label: "FAC X", kind: "input", tag: "proveedor" },
+  { id: "fac_a", label: "FAC A", kind: "input", tag: "proveedor" },
+  { id: "cigarrillos", label: "CIGARRILLOS", kind: "input", tag: "proveedor" },
+  { id: "caja", label: "CAJA", kind: "input", tag: "venta" },
+  { id: "ventas_virtuales", label: "VENTAS VIRTUALES", kind: "input", tag: "venta" },
+  { id: "pagos_virtuales", label: "PAGOS VIRTUALES", kind: "input", tag: "venta" },
   { id: "total_proveedores", label: "TOTAL PROVEEDORES", kind: "formula" },
   { id: "total_ventas", label: "TOTAL VENTAS", kind: "formula" },
-  { id: "retiros", label: "RETIROS", kind: "input" },
+  { id: "retiros", label: "RETIROS", kind: "input", tag: "retiro" },
   { id: "sp1", label: "", kind: "spacer" },
-  { id: "gasto_1", label: "", kind: "input" },
-  { id: "gasto_2", label: "", kind: "input" },
-  { id: "gasto_3", label: "", kind: "input" },
-  { id: "gasto_4", label: "", kind: "input" },
-  { id: "gasto_5", label: "", kind: "input" },
-  { id: "gasto_6", label: "", kind: "input" },
-  { id: "gasto_7", label: "", kind: "input" },
-  { id: "gasto_8", label: "", kind: "input" },
+  { id: "gasto_1", label: "", kind: "input", tag: "gasto" },
+  { id: "gasto_2", label: "", kind: "input", tag: "gasto" },
+  { id: "gasto_3", label: "", kind: "input", tag: "gasto" },
+  { id: "gasto_4", label: "", kind: "input", tag: "gasto" },
+  { id: "gasto_5", label: "", kind: "input", tag: "gasto" },
+  { id: "gasto_6", label: "", kind: "input", tag: "gasto" },
+  { id: "gasto_7", label: "", kind: "input", tag: "gasto" },
+  { id: "gasto_8", label: "", kind: "input", tag: "gasto" },
 ];
 
-const GASTO_IDS = [
-  "gasto_1",
-  "gasto_2",
-  "gasto_3",
-  "gasto_4",
-  "gasto_5",
-  "gasto_6",
-  "gasto_7",
-  "gasto_8",
-] as const;
+export const LEDGER_ROWS = DEFAULT_LEDGER_ROWS;
 
 export const FAC_LINES = [
   { id: "fac_x", label: "FAC X" },
@@ -71,21 +94,233 @@ export const LEDGER_TINTS: { id: LedgerTint; label: string; swatch: string; cell
   { id: "info", label: "Azul", swatch: "bg-info", cell: "bg-info/40" },
 ];
 
-export function defaultTint(rowId: string): LedgerTint {
-  if (rowId === "fac_x" || rowId === "fac_a" || rowId === "cigarrillos" || rowId === "total_proveedores") {
-    return "warn";
+export function cloneLedgerRows(rows: LedgerRow[]): LedgerRow[] {
+  return rows.map((r) => ({ ...r }));
+}
+
+function applyLabels(rows: LedgerRow[], labels?: Record<string, string>): LedgerRow[] {
+  if (!labels) return cloneLedgerRows(rows);
+  return rows.map((r) => {
+    const name = labels[r.id]?.trim();
+    return name ? { ...r, label: name } : { ...r };
+  });
+}
+
+function ensureFixed(rows: LedgerRow[]): LedgerRow[] {
+  const have = new Set(rows.map((r) => r.id));
+  const missing = DEFAULT_LEDGER_ROWS.filter(
+    (d) => (LOCKED_LEDGER.has(d.id) || CAJA_LEDGER.has(d.id)) && !have.has(d.id),
+  );
+  return missing.length ? [...missing.map((r) => ({ ...r })), ...rows] : rows;
+}
+
+export function normalizeLedgerRows(raw: unknown, labels?: Record<string, string>): LedgerRow[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const rows: LedgerRow[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const r = item as LedgerRow;
+    if (!r.id || typeof r.id !== "string") continue;
+    const kind: LedgerKind = r.kind === "formula" || r.kind === "spacer" ? r.kind : "input";
+    const label = labels?.[r.id]?.trim() || (typeof r.label === "string" ? r.label : "");
+    const row: LedgerRow = { id: r.id, label, kind };
+    if (kind === "input") row.tag = typeof r.tag === "string" && r.tag.trim() ? r.tag.trim() : "otro";
+    if (r.hidden) row.hidden = true;
+    rows.push(row);
   }
-  if (rowId === "retiros" || (GASTO_IDS as readonly string[]).includes(rowId)) return "danger";
+  return rows.length ? ensureFixed(rows) : null;
+}
+
+export function visibleLedgerRows(rows: LedgerRow[]): LedgerRow[] {
+  return rows.filter((r) => r.kind === "spacer" || !r.hidden);
+}
+
+export function slugLedger(name: string): string {
+  const s = name
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "")
+    .slice(0, 40);
+  return s || "fila";
+}
+
+function uniqueRowId(base: string, rows: LedgerRow[]): string {
+  if (!rows.some((r) => r.id === base)) return base;
+  let i = 2;
+  while (rows.some((r) => r.id === `${base}_${i}`)) i += 1;
+  return `${base}_${i}`;
+}
+
+function tagForExpenseName(name: string): string {
+  const s = slugLedger(name);
+  const map: Record<string, string> = {
+    alquiler: "alquiler",
+    expensas: "expensas",
+    contador: "contador",
+    sueldos: "empleado",
+    sueldo: "empleado",
+    empleado: "empleado",
+    arca: "arca",
+    iibb: "iibb",
+    ingresos_brutos: "iibb",
+    fumigacion: "fumigacion",
+    luz: "gasto",
+    gas: "gasto",
+  };
+  return map[s] ?? "gasto";
+}
+
+export type LedgerSettingsBit = {
+  ledgerRows?: LedgerRow[];
+  ledgerLabels?: Record<string, string>;
+  ledgerTags?: LedgerTagDef[];
+  monthExpenses?: { name: string; amount: number }[];
+};
+
+export type LedgerAdopt = {
+  rows: LedgerRow[];
+  tags: LedgerTagDef[];
+  deposits: { rowId: string; amount: number }[];
+  adoptedExpenses: boolean;
+};
+
+function normalizeTags(raw: unknown): LedgerTagDef[] {
+  if (!Array.isArray(raw)) return [];
+  const out: LedgerTagDef[] = [];
+  const seen = new Set<string>(LEDGER_TAG_IDS);
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const t = item as LedgerTagDef;
+    const id = typeof t.id === "string" ? slugLedger(t.id) : "";
+    const label = typeof t.label === "string" ? t.label.trim() : "";
+    if (!id || seen.has(id) || !label) continue;
+    seen.add(id);
+    out.push({ id, label });
+  }
+  return out;
+}
+
+/**
+ * Arma las filas de ahora. Si venían gastos fijos en settings.monthExpenses,
+ * los pasa a filas (una vez) y deja los montos para depositar en el día 1.
+ */
+export function takeMonthExpenses(s: LedgerSettingsBit): LedgerAdopt {
+  const labels = s.ledgerLabels ?? {};
+  let rows =
+    normalizeLedgerRows(s.ledgerRows, labels) ?? applyLabels(cloneLedgerRows(DEFAULT_LEDGER_ROWS), labels);
+  const tags = normalizeTags(s.ledgerTags);
+  const deposits: { rowId: string; amount: number }[] = [];
+  const expenses = Array.isArray(s.monthExpenses) ? s.monthExpenses : [];
+  for (const e of expenses) {
+    const name = (e?.name ?? "").trim();
+    if (!name) continue;
+    const needle = name.toLowerCase();
+    const slug = slugLedger(name);
+    let row = rows.find(
+      (r) => r.kind === "input" && (r.label.trim().toLowerCase() === needle || r.id === slug),
+    );
+    if (!row) {
+      const id = uniqueRowId(slug, rows);
+      row = { id, label: name, kind: "input", tag: tagForExpenseName(name) };
+      rows = [...rows, row];
+    } else if (!row.label.trim()) {
+      const id = row.id;
+      const tag = row.tag || tagForExpenseName(name);
+      rows = rows.map((r) => (r.id === id ? { ...r, label: name, tag, hidden: false } : r));
+      row = rows.find((r) => r.id === id)!;
+    }
+    if (e.amount > 0) deposits.push({ rowId: row.id, amount: e.amount });
+  }
+  return { rows, tags, deposits, adoptedExpenses: expenses.length > 0 };
+}
+
+export function resolveLedgerRows(s?: LedgerSettingsBit): LedgerRow[] {
+  return takeMonthExpenses(s ?? {}).rows;
+}
+
+export function adoptLedgerSettings(s: Settings): Settings {
+  const taken = takeMonthExpenses(s);
+  const hadRows = Array.isArray(s.ledgerRows) && s.ledgerRows.length > 0;
+  if (!taken.adoptedExpenses && !hadRows) return s;
+  return {
+    ...s,
+    ledgerRows: taken.rows,
+    ledgerTags: taken.tags.length ? taken.tags : s.ledgerTags ?? [],
+    monthExpenses: [],
+  };
+}
+
+export function depositLedgerAmounts(
+  books: DayBook[],
+  deposits: { rowId: string; amount: number }[],
+  ym = currentYm(),
+): DayBook[] {
+  if (!deposits.length) return books;
+  const date = `${ym}-01`;
+  let next = books;
+  for (const d of deposits) {
+    if (!(d.amount > 0)) continue;
+    const cur = next.find((b) => b.date === date) ?? emptyBook(date);
+    const cells = cellsOf(cur);
+    if ((cells[d.rowId] ?? 0) !== 0) continue;
+    next = upsertBook(next, { ...cur, date, cells: { ...cells, [d.rowId]: d.amount } });
+  }
+  return next;
+}
+
+function upsertBook(books: DayBook[], row: DayBook): DayBook[] {
+  const i = books.findIndex((b) => b.date === row.date);
+  if (i < 0) return [row, ...books];
+  const copy = books.slice();
+  copy[i] = { ...books[i]!, ...row };
+  return copy;
+}
+
+export function ledgerRowsForYm(
+  ym: string,
+  settings: LedgerSettingsBit,
+  sheets: MonthSheet[],
+  now?: Date,
+): LedgerRow[] {
+  if (ym < currentYm(now)) {
+    const sheet = sheets.find((s) => s.ym === ym);
+    if (sheet?.rows && sheet.rows.length) return cloneLedgerRows(sheet.rows);
+    if (sheet) return applyLabels(cloneLedgerRows(DEFAULT_LEDGER_ROWS), sheet.labels);
+  }
+  return resolveLedgerRows(settings);
+}
+
+export function defaultTint(rowId: string, tag?: string): LedgerTint {
+  const t = tag ?? "";
+  if (t === "proveedor" || rowId === "total_proveedores") return "warn";
+  if (t === "retiro" || MES_GASTO_TAGS.has(t)) return "danger";
   if (rowId === "pagos_virtuales") return "info";
   return "sage";
 }
 
-export function tintOf(rowId: string, tints?: Record<string, LedgerTint>): LedgerTint {
-  return tints?.[rowId] ?? defaultTint(rowId);
+export function tintOf(
+  rowId: string,
+  tints?: Record<string, LedgerTint>,
+  tag?: string,
+): LedgerTint {
+  return tints?.[rowId] ?? defaultTint(rowId, tag);
 }
 
 function n(cells: Record<string, number>, id: string): number {
   return Number(cells[id] ?? 0) || 0;
+}
+
+function sumTagged(cells: Record<string, number>, rows: LedgerRow[], tag: string | Set<string>): number {
+  let t = 0;
+  for (const r of rows) {
+    if (r.kind !== "input") continue;
+    const ok = typeof tag === "string" ? r.tag === tag : tag.has(r.tag ?? "");
+    if (ok) t += n(cells, r.id);
+  }
+  return t;
 }
 
 export function emptyBook(date: string): DayBook {
@@ -123,6 +358,7 @@ export function cellValue(
   rows: DayBook[],
   date: string,
   id: string,
+  ledgerRows: LedgerRow[] = DEFAULT_LEDGER_ROWS,
 ): number {
   const book = rows.find((b) => b.date === date);
   const cells = cellsOf(book);
@@ -132,18 +368,19 @@ export function cellValue(
     return n(p, "caja");
   }
   if (id === "total_proveedores") {
-    return n(cells, "fac_x") + n(cells, "fac_a") + n(cells, "cigarrillos");
+    return sumTagged(cells, ledgerRows, "proveedor");
   }
   if (id === "total_ventas") {
-    const proveedores = n(cells, "fac_x") + n(cells, "fac_a") + n(cells, "cigarrillos");
-    const gastos = GASTO_IDS.reduce((a, k) => a + n(cells, k), 0);
-    const saldo = cellValue(rows, date, "saldo_inicial");
+    const proveedores = sumTagged(cells, ledgerRows, "proveedor");
+    const gastos = sumTagged(cells, ledgerRows, "gasto");
+    const retiros = sumTagged(cells, ledgerRows, "retiro");
+    const saldo = cellValue(rows, date, "saldo_inicial", ledgerRows);
     return (
       n(cells, "caja") -
       saldo +
       proveedores +
       gastos +
-      n(cells, "retiros") +
+      retiros +
       n(cells, "pagos_virtuales") -
       n(cells, "ventas_virtuales")
     );
@@ -184,14 +421,20 @@ export type MonthCc = {
   facA: number;
   cigarrillos: number;
   proveedores: number;
+  proveedorRows: { id: string; label: string; amount: number }[];
   totalVentas: number;
   ingresoMp: number;
   ingresoCaja: number;
   gastos: number;
+  retiros: number;
   ganancias: number;
 };
 
-export function monthCc(books: DayBook[], ym: string): MonthCc {
+export function monthCc(
+  books: DayBook[],
+  ym: string,
+  ledgerRows: LedgerRow[] = DEFAULT_LEDGER_ROWS,
+): MonthCc {
   const dates = monthDates(ym);
   let facX = 0;
   let facA = 0;
@@ -199,18 +442,38 @@ export function monthCc(books: DayBook[], ym: string): MonthCc {
   let totalVentas = 0;
   let ingresoMp = 0;
   let gastos = 0;
+  let proveedores = 0;
+  let retiros = 0;
+  const proveedorRows = ledgerRows
+    .filter((r) => r.kind === "input" && r.tag === "proveedor")
+    .map((r) => ({ id: r.id, label: rowTitle(r) || r.id, amount: 0 }));
   for (const date of dates) {
-    facX += cellValue(books, date, "fac_x");
-    facA += cellValue(books, date, "fac_a");
-    cigarrillos += cellValue(books, date, "cigarrillos");
-    totalVentas += cellValue(books, date, "total_ventas");
-    ingresoMp += cellValue(books, date, "ventas_virtuales");
-    for (const id of GASTO_IDS) gastos += cellValue(books, date, id);
+    const cells = cellsOf(books.find((b) => b.date === date));
+    facX += n(cells, "fac_x");
+    facA += n(cells, "fac_a");
+    cigarrillos += n(cells, "cigarrillos");
+    totalVentas += cellValue(books, date, "total_ventas", ledgerRows);
+    ingresoMp += cellValue(books, date, "ventas_virtuales", ledgerRows);
+    gastos += sumTagged(cells, ledgerRows, MES_GASTO_TAGS);
+    proveedores += sumTagged(cells, ledgerRows, "proveedor");
+    retiros += sumTagged(cells, ledgerRows, "retiro");
+    for (const line of proveedorRows) line.amount += n(cells, line.id);
   }
-  const proveedores = facX + facA + cigarrillos;
   const ingresoCaja = totalVentas - ingresoMp;
   const ganancias = ingresoCaja + ingresoMp - gastos - proveedores;
-  return { facX, facA, cigarrillos, proveedores, totalVentas, ingresoMp, ingresoCaja, gastos, ganancias };
+  return {
+    facX,
+    facA,
+    cigarrillos,
+    proveedores,
+    proveedorRows,
+    totalVentas,
+    ingresoMp,
+    ingresoCaja,
+    gastos,
+    retiros,
+    ganancias,
+  };
 }
 
 export function currentYm(d = new Date()): string {
@@ -261,9 +524,16 @@ export function booksForYm(books: DayBook[], sheets: MonthSheet[], ym: string): 
 export function archiveClosedMonths(
   books: DayBook[],
   sheets: MonthSheet[],
-  labels: Record<string, string> | undefined,
+  rows: LedgerRow[] | Record<string, string> | undefined,
   now = new Date(),
 ): { books: DayBook[]; monthSheets: MonthSheet[] } {
+  const ledgerRows = Array.isArray(rows)
+    ? cloneLedgerRows(rows)
+    : applyLabels(cloneLedgerRows(DEFAULT_LEDGER_ROWS), rows);
+  const labels: Record<string, string> = {};
+  for (const r of ledgerRows) {
+    if (r.label) labels[r.id] = r.label;
+  }
   const cur = currentYm(now);
   const firstOfCur = `${cur}-01`;
   const carry = prevDate(firstOfCur);
@@ -276,13 +546,14 @@ export function archiveClosedMonths(
     arr.push(b);
     byYm.set(ym, arr);
   }
-  for (const [ym, rows] of byYm) {
+  for (const [ym, monthBooks] of byYm) {
     if (ym >= cur || have.has(ym)) continue;
     nextSheets.push({
       ym,
       archivedAt: now.toISOString(),
-      labels: labels ?? {},
-      days: rows.map((r) => ({ date: r.date, cells: cellsOf(r) })),
+      labels,
+      rows: cloneLedgerRows(ledgerRows),
+      days: monthBooks.map((r) => ({ date: r.date, cells: cellsOf(r) })),
     });
     have.add(ym);
   }
@@ -295,18 +566,21 @@ export function archiveClosedMonths(
 export function ledgerCsv(
   ym: string,
   books: DayBook[],
+  rows: LedgerRow[] = DEFAULT_LEDGER_ROWS,
   labels?: Record<string, string>,
 ): string {
   const dates = monthDates(ym);
   const header = ["Dato", ...dates.map(formatDayTitle)].join(",");
-  const lines = LEDGER_ROWS.filter((r) => r.kind !== "spacer").map((row) => {
-    const name = (rowTitle(row, labels) || row.id).replace(/,/g, " ");
-    const vals = dates.map((d) => {
-      const v = cellValue(books, d, row.id);
-      return v ? String(v) : "";
+  const lines = rows
+    .filter((r) => r.kind !== "spacer")
+    .map((row) => {
+      const name = (rowTitle(row, labels) || row.id).replace(/,/g, " ");
+      const vals = dates.map((d) => {
+        const v = cellValue(books, d, row.id, rows);
+        return v ? String(v) : "";
+      });
+      return [name, ...vals].join(",");
     });
-    return [name, ...vals].join(",");
-  });
   return [header, ...lines].join("\n");
 }
 

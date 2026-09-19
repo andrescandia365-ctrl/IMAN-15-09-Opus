@@ -42,6 +42,16 @@ export function formatSyncLogLine(item: SyncLogItem): string {
   return `${item.title} — ${item.detail}`;
 }
 
+/** Un turno sin Sincronizar: ámbar a las 12 h, rojo a las 24 h. No es reloj de oficina. */
+export const SYNC_AMARILLO_H = 12;
+export const SYNC_ROJO_H = 24;
+
+export function syncAgeTone(ageH: number): "sage" | "warn" | "danger" {
+  if (ageH >= SYNC_ROJO_H) return "danger";
+  if (ageH >= SYNC_AMARILLO_H) return "warn";
+  return "sage";
+}
+
 /** "hace 2 h", para la línea de la última vez que el aparato puso su trabajo a salvo. */
 export function haceCuanto(iso: string, now = Date.now()): string {
   const t = new Date(iso).getTime();

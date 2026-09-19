@@ -3,22 +3,20 @@ import { ChevronDown, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatARS, formatMiles, todayKey } from "@/lib/format";
 import {
-  LEDGER_ROWS,
   LEDGER_TINTS,
-  LOCKED_LEDGER,
   cellValue,
   currentYm,
   formatDayHead,
+  ledgerRowsForYm,
   monthDates,
   monthTitle,
   rowTitle,
   tintOf,
+  visibleLedgerRows,
 } from "@/lib/ledger";
 import { useImanStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { useDragScroll } from "@/lib/drag-scroll";
-
-const INPUT_ROWS = LEDGER_ROWS.filter((r) => r.kind === "input").map((r) => r.id);
 
 function focusLedger(rowId: string, date: string) {
   const el = document.querySelector<HTMLInputElement>(`input[data-ld="${rowId}:${date}"]`);
@@ -27,8 +25,14 @@ function focusLedger(rowId: string, date: string) {
   el.select();
 }
 
-function onLedgerKey(e: KeyboardEvent<HTMLInputElement>, rowId: string, date: string, dates: string[]) {
-  const ri = INPUT_ROWS.indexOf(rowId);
+function onLedgerKey(
+  e: KeyboardEvent<HTMLInputElement>,
+  rowId: string,
+  date: string,
+  dates: string[],
+  inputRows: string[],
+) {
+  const ri = inputRows.indexOf(rowId);
   const ci = dates.indexOf(date);
   if (ri < 0 || ci < 0) return;
   let nr = ri;
@@ -38,9 +42,9 @@ function onLedgerKey(e: KeyboardEvent<HTMLInputElement>, rowId: string, date: st
   else if (e.key === "ArrowDown" || e.key === "Enter") nr += 1;
   else if (e.key === "ArrowUp") nr -= 1;
   else return;
-  if (nr < 0 || nr >= INPUT_ROWS.length || nc < 0 || nc >= dates.length) return;
+  if (nr < 0 || nr >= inputRows.length || nc < 0 || nc >= dates.length) return;
   e.preventDefault();
-  focusLedger(INPUT_ROWS[nr]!, dates[nc]!);
+  focusLedger(inputRows[nr]!, dates[nc]!);
 }
 
 const LINE = "border-b border-r border-ink/25";
@@ -101,8 +105,13 @@ export function LedgerSheet({
   const books = useImanStore((s) => s.books);
   const sheets = useImanStore((s) => s.monthSheets);
   const setLedgerCell = useImanStore((s) => s.setLedgerCell);
-  const saveSettings = useImanStore((s) => s.saveSettings);
-  const labels = useImanStore((s) => s.settings.ledgerLabels);
+  const settings = useImanStore((s) => s.settings);
+  const allRows = useMemo(() => ledgerRowsForYm(ym, settings, sheets), [ym, sheets, settings]);
+  const rows = useMemo(() => visibleLedgerRows(allRows), [allRows]);
+  const inputRows = useMemo(
+    () => rows.filter((r) => r.kind === "input").map((r) => r.id),
+    [rows],
+  );
   const dates = useMemo(() => monthDates(ym), [ym]);
   const today = todayKey();
   const scroller = useDragScroll<HTMLDivElement>();
@@ -131,10 +140,6 @@ export function LedgerSheet({
       cells: d.cells,
     }));
   }, [books, sheets, ym]);
-
-  function setRowLabel(rowId: string, name: string) {
-    saveSettings({ ledgerLabels: { ...(labels ?? {}), [rowId]: name } });
-  }
 
   /**
    * Lo tipeado en una celda se guarda cuando el campo pierde el foco. Al salir
@@ -224,7 +229,7 @@ export function LedgerSheet({
             </tr>
           </thead>
           <tbody>
-            {LEDGER_ROWS.map((row) => {
+            {rows.map((row) => {
               if (row.kind === "spacer") {
                 return (
                   <tr key={row.id} className="h-1.5">
@@ -239,26 +244,16 @@ export function LedgerSheet({
                   </tr>
                 );
               }
-              const tint = tintOf(row.id);
+              const tint = tintOf(row.id, settings.ledgerTints, row.tag);
               const tintDef = LEDGER_TINTS.find((t) => t.id === tint)!;
-              const title = rowTitle(row, labels);
-              const locked = LOCKED_LEDGER.has(row.id);
+              const title = rowTitle(row, settings.ledgerLabels);
               return (
                 <tr key={row.id}>
                   <th className={cn(RUBRO, LINE, "align-middle")}>
-                    {editable && !locked ? (
-                      <input
-                        className="w-full bg-transparent text-sm font-medium leading-tight tracking-tight text-ink outline-none placeholder:text-ink-muted"
-                        defaultValue={title}
-                        placeholder="Gasto"
-                        onBlur={(e) => setRowLabel(row.id, e.target.value.trim())}
-                      />
-                    ) : (
-                      <span className="block text-sm font-medium leading-tight tracking-tight">{title || "—"}</span>
-                    )}
+                    <span className="block text-sm font-medium leading-tight tracking-tight">{title || "—"}</span>
                   </th>
                   {dates.map((d) => {
-                    const v = cellValue(live, d, row.id);
+                    const v = cellValue(live, d, row.id, allRows);
                     const filled = v !== 0;
                     const todayCol = d === today;
                     const paint = filled ? tintDef.cell : "bg-paper";
@@ -299,7 +294,7 @@ export function LedgerSheet({
                             e.currentTarget.value = v ? String(v) : "";
                             e.currentTarget.select();
                           }}
-                          onKeyDown={(e) => onLedgerKey(e, row.id, d, dates)}
+                          onKeyDown={(e) => onLedgerKey(e, row.id, d, dates, inputRows)}
                           onBlur={(e) => {
                             const n = Number(e.target.value.replace(/[^\d]/g, "")) || 0;
                             e.currentTarget.value = n ? formatMiles(n) : "";

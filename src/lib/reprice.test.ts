@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { appendEvent, chunk, emptyQueue, pendingOf, PUSH_BATCH } from "./event-queue.ts";
-import { applyEvents, type ImanEvent } from "./events.ts";
+import { applyEvents, productEventBody, type ImanEvent } from "./events.ts";
 import { quotedPrice, repriceProducts } from "./pricing.ts";
 import type { KioskPayload, Product, Settings } from "./types.ts";
 
@@ -24,8 +24,15 @@ function product(id: string, categoryId: string, cost: number, price: number): P
 }
 
 /** El mismo evento que arma recordEvent("product", p): lo que manda saveProduct. */
-function productEvent(p: Product, i: number): ImanEvent {
-  return { id: `ev-${i}`, at: AT, deviceId: "pc", storeId: "s1", type: "product", body: p as unknown as ImanEvent["body"] };
+function productEvent(prev: Product | undefined, p: Product, i: number): ImanEvent {
+  return {
+    id: `ev-${i}`,
+    at: AT,
+    deviceId: "pc",
+    storeId: "s1",
+    type: "product",
+    body: productEventBody(prev, p),
+  };
 }
 
 /** Lo que hace applyCategoryPrices: precio del rubro con factor 1,5 y redondeo 100 arriba. */
@@ -69,8 +76,15 @@ describe("precios del dueño a la cinta de sync", () => {
     assert.equal(r.products.find((p) => p.id === "sprite"), antes[1]);
     assert.equal(r.products.find((p) => p.id === "alfajor"), antes[3]);
 
+    const cocaBody = productEventBody(antes[0], r.changed[0]!);
+    assert.equal("stock" in cocaBody, false);
+    assert.equal("lots" in cocaBody, false);
+
     // Otro aparato que baja esos eventos queda con los precios nuevos.
-    const otro = applyEvents(payload(antes), r.changed.map(productEvent));
+    const otro = applyEvents(
+      payload(antes),
+      r.changed.map((p, i) => productEvent(antes.find((x) => x.id === p.id), p, i)),
+    );
     assert.deepEqual(
       otro.products.map((p) => [p.id, p.price]),
       [
@@ -103,7 +117,7 @@ describe("precios del dueño a la cinta de sync", () => {
 
     let q = emptyQueue();
     r.changed.forEach((p, i) => {
-      q = appendEvent(q, productEvent(p, i));
+      q = appendEvent(q, productEvent(antes.find((x) => x.id === p.id), p, i));
     });
     const pendientes = pendingOf(q);
     assert.equal(pendientes.length, 200);
@@ -113,7 +127,7 @@ describe("precios del dueño a la cinta de sync", () => {
     );
 
     // Uno más (una venta del mismo rato) pasa a una segunda tanda, sin perder nada.
-    q = appendEvent(q, { ...productEvent(antes[0]!, 999), type: "sale" });
+    q = appendEvent(q, { ...productEvent(antes[0], antes[0]!, 999), type: "sale" });
     assert.deepEqual(
       chunk(pendingOf(q)).map((t) => t.length),
       [200, 1],

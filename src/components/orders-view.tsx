@@ -18,6 +18,7 @@ import { costoAGondola, orderLineKey } from "@/lib/receive-cost";
 import type { InvoiceKind } from "@/lib/pricing";
 import { printSlip } from "@/lib/print";
 import { orderCost } from "@/lib/suggest";
+import { cellValue, currentYm, monthDates, resolveLedgerRows, rowTitle } from "@/lib/ledger";
 import { useCashSnapshot, useImanStore } from "@/lib/store";
 import { supplierMatchesDay } from "@/lib/supplier-cadence";
 import type { Category, OrderDraft, Product, Settings, Supplier } from "@/lib/types";
@@ -53,6 +54,7 @@ export function OrdersView() {
   const receiveOrder = useImanStore((s) => s.receiveOrder);
   const receiveOrderUnits = useImanStore((s) => s.receiveOrderUnits);
   const settings = useImanStore((s) => s.settings);
+  const books = useImanStore((s) => s.books);
   const cash = useCashSnapshot();
   const today = weekdayMon1();
   const [day, setDay] = useState(today);
@@ -90,7 +92,15 @@ export function OrdersView() {
       ? orders.find((o) => o.supplierId === craftId && !o.received)
       : orders.find((o) => o.supplierId === craftId && !o.sent);
   const cost = draft ? orderCost(draft.lines, products) : 0;
-  const rent = (settings.monthExpenses ?? []).filter((e) => e.amount > 0);
+  const rentYm = currentYm();
+  const rentRows = resolveLedgerRows(settings);
+  const rent = rentRows
+    .filter((r) => r.kind === "input" && (r.tag === "alquiler" || r.tag === "expensas") && !r.hidden)
+    .map((r) => ({
+      name: rowTitle(r, settings.ledgerLabels) || r.id,
+      amount: monthDates(rentYm).reduce((a, d) => a + cellValue(books, d, r.id, rentRows), 0),
+    }))
+    .filter((e) => e.amount > 0);
   const enCamino = orders.filter((o) => o.sent && !o.received);
   const catNames = (ids: string[]) =>
     ids

@@ -19,6 +19,7 @@ import { RUBROS } from "@/lib/seed";
 import { FISCAL_CONDITIONS } from "@/lib/fiscal";
 import { useImanStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { LedgerRowsConfig } from "@/components/ledger-rows-config";
 
 /**
  * Cambios del dueño que no viajan por la cinta (nombre, rubro, ciudad, el
@@ -437,6 +438,14 @@ export function SettingsView({ access }: { access: MyAccess }) {
             checked={settings.blockZeroStock}
             onCheckedChange={(v) => saveSettings({ blockZeroStock: v })}
           />
+        </div>
+      </section>
+
+      <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)] lg:col-span-2">
+        <h2 className="text-xs font-medium uppercase tracking-[0.14em] text-subtle">Asientos</h2>
+        <p className="mt-1 text-sm text-muted">Filas de la planilla de Caja.</p>
+        <div className="mt-4">
+          <LedgerRowsConfig />
         </div>
       </section>
 
