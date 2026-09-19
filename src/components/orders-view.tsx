@@ -678,6 +678,10 @@ export function OrdersView() {
               </button>
             ))}
           </div>
+          {/* Lo mismo que lee invoiceForProduct: sin rubros guardados, trae todo. */}
+          {form.categoryIds.length === 0 ? (
+            <p className="mt-1.5 text-xs text-muted">Sin rubros: para la factura cuenta como que trae de todo.</p>
+          ) : null}
           <Label className="mt-3">Cadencia</Label>
           <div className="mt-1 flex gap-2">
             <button
