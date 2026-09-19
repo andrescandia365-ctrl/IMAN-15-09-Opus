@@ -33,6 +33,7 @@ import { VenceField } from "@/components/vence-field";
 import { lotsOf } from "@/lib/lots";
 import { stockCorrection } from "@/lib/events";
 import { BORRADO_MIENTRAS_EDITABAS } from "@/lib/deleted";
+import { bloqueoPorRubros } from "@/lib/rubros";
 import { findByScan, packOf, productMatchesQuery, shortCodeOf, stockBreakdown } from "@/lib/pack";
 import { buildSuggestions } from "@/lib/suggest";
 import { useImanStore } from "@/lib/store";
@@ -1236,8 +1237,16 @@ function CategoriesPopover({
     toast.success("Nombre cambiado");
   }
 
+  /** Antes de preguntar ni mover nada: un proveedor no puede quedar sin rubros. */
+  function bloqueado(c: Category): boolean {
+    const bloqueo = bloqueoPorRubros(useImanStore.getState().suppliers, c.id);
+    if (bloqueo) toast.error(bloqueo);
+    return Boolean(bloqueo);
+  }
+
   function pedirBorrado(c: Category) {
     setRenombrando(null);
+    if (bloqueado(c)) return;
     if (countOf(c.id) > 0) {
       setBorrando(c.id);
       setDestino(categories.find((x) => x.id !== c.id)?.id ?? "");
@@ -1258,6 +1267,10 @@ function CategoriesPopover({
    */
   function moverYBorrar(c: Category) {
     if (!destino) return;
+    if (bloqueado(c)) {
+      setBorrando(null);
+      return;
+    }
     const mudanza = products.filter((p) => p.categoryId === c.id);
     const nombreDestino = categories.find((x) => x.id === destino)?.name ?? "";
     for (const p of mudanza) onSaveProduct({ ...p, categoryId: destino });

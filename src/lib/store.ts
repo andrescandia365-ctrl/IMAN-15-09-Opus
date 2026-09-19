@@ -3,6 +3,7 @@ import { prunePayload } from "./cap";
 import { todayKey } from "./format";
 import { keepStockAndLots, receiveBody } from "./events";
 import { forgetDeleted, isDeleted, mergeDeleted, nombresBorrados } from "./deleted";
+import { bloqueoPorRubros } from "./rubros";
 import { appendSyncLog, lastKnownStore, queueCopy, recordEvent, saveLocalSnapshot } from "./local-db";
 import { archiveClosedMonths, emptyBook, cellsOf, currentYm, sameCell, type FacLine } from "./ledger";
 import { lineUnits, orderNote, packOf, suggestPacks } from "./pack";
@@ -1180,6 +1181,8 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         if (st.products.some((p) => p.categoryId === id)) {
           return { ok: false, error: "Hay productos en esa categoría" };
         }
+        const bloqueo = bloqueoPorRubros(st.suppliers, id);
+        if (bloqueo) return { ok: false, error: bloqueo };
         set({
           categories: st.categories.filter((c) => c.id !== id),
           suppliers: st.suppliers.map((s) => ({
