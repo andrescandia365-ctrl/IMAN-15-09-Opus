@@ -23,6 +23,7 @@ import {
   quotedPrice,
   type InvoiceKind,
 } from "@/lib/pricing";
+import { usePhoneUi } from "@/lib/device";
 import { useImanStore } from "@/lib/store";
 import type { Category, Product, Settings, Supplier } from "@/lib/types";
 import { cn, uid } from "@/lib/utils";
@@ -84,6 +85,10 @@ export function OwnerPrices() {
   const saveCategory = useImanStore((s) => s.saveCategory);
   const setProductPrices = useImanStore((s) => s.setProductPrices);
   const applyCategoryPrices = useImanStore((s) => s.applyCategoryPrices);
+  // En el celu se mira y no se toca: sus ajustes no viajan todavía (siguen siendo
+  // los de su primer arranque), y alinear desde ahí repreciaba la góndola con
+  // márgenes viejos. Márgenes y precios se cambian en la caja.
+  const soloVer = usePhoneUi();
 
   const [factorX, setFactorX] = useState<Record<string, string>>(() =>
     Object.fromEntries(categories.map((c) => [c.id, shownFactor(c.id, c.name, "X", settings.priceMarkups)])),
@@ -256,6 +261,11 @@ export function OwnerPrices() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[minmax(17rem,0.9fr)_minmax(0,1.2fr)]">
         <div className="flex min-h-0 flex-col gap-3 overflow-hidden">
+          {soloVer ? (
+            <p className="shrink-0 rounded-lg bg-elevated px-3 py-2 text-sm text-muted">
+              Desde el celu se mira. Márgenes y precios se cambian en la caja.
+            </p>
+          ) : null}
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.14em] text-subtle">Redondeo</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -267,6 +277,7 @@ export function OwnerPrices() {
                     "h-11 min-w-14 rounded-full px-3 text-sm font-medium",
                     step === s ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
                   )}
+                  disabled={soloVer}
                   onClick={() => saveSettings({ roundStep: s })}
                 >
                   {s}
@@ -276,6 +287,7 @@ export function OwnerPrices() {
                 className="h-11 w-20"
                 inputMode="numeric"
                 value={String(step)}
+                readOnly={soloVer}
                 onChange={(e) => saveSettings({ roundStep: Math.max(1, Number(e.target.value) || 100) })}
                 aria-label="Paso de redondeo"
               />
@@ -285,6 +297,7 @@ export function OwnerPrices() {
                   "h-11 flex-1 rounded-full px-3 text-sm font-medium",
                   mode === "up" ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
                 )}
+                disabled={soloVer}
                 onClick={() => saveSettings({ roundMode: "up" })}
               >
                 Arriba
@@ -295,6 +308,7 @@ export function OwnerPrices() {
                   "h-11 flex-1 rounded-full px-3 text-sm font-medium",
                   mode === "down" ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
                 )}
+                disabled={soloVer}
                 onClick={() => saveSettings({ roundMode: "down" })}
               >
                 Abajo
@@ -312,6 +326,7 @@ export function OwnerPrices() {
               <Button
                 size="sm"
                 className="ml-auto"
+                disabled={soloVer}
                 onClick={() => alinear(categories.filter((c) => (desalineados.get(c.id) ?? 0) > 0).map((c) => c.id))}
               >
                 Alinear todo
@@ -342,6 +357,7 @@ export function OwnerPrices() {
                             className="ml-auto h-10 w-[4.5rem] text-right"
                             inputMode="decimal"
                             value={factorX[c.id] ?? shownFactor(c.id, c.name, "X", settings.priceMarkups)}
+                            readOnly={soloVer}
                             onFocus={(e) => (alEntrar.current = { id: c.id, raw: e.target.value })}
                             onBlur={(e) => alSalirDelMargen(c.id, e.target.value)}
                             onChange={(e) => {
@@ -356,6 +372,7 @@ export function OwnerPrices() {
                             className="ml-auto h-10 w-[4.5rem] text-right"
                             inputMode="decimal"
                             value={factorA[c.id] ?? shownFactor(c.id, c.name, "A", settings.priceMarkupsA)}
+                            readOnly={soloVer}
                             onFocus={(e) => (alEntrar.current = { id: c.id, raw: e.target.value })}
                             onBlur={(e) => alSalirDelMargen(c.id, e.target.value)}
                             onChange={(e) => {
@@ -372,7 +389,8 @@ export function OwnerPrices() {
                               <button
                                 type="button"
                                 aria-label={`Alinear ${c.name}`}
-                                className="h-8 rounded-full bg-elevated px-2.5 text-xs font-medium text-muted hover:text-fg"
+                                disabled={soloVer}
+                                className="h-8 rounded-full bg-elevated px-2.5 text-xs font-medium text-muted hover:text-fg disabled:opacity-50"
                                 onClick={() => alinear([c.id])}
                               >
                                 Alinear
@@ -390,7 +408,7 @@ export function OwnerPrices() {
                                 {n === 1 ? "precio" : "precios"} de góndola.
                               </p>
                               <div className="ml-auto flex gap-2">
-                                <Button size="sm" onClick={() => alinear([c.id])}>
+                                <Button size="sm" disabled={soloVer} onClick={() => alinear([c.id])}>
                                   Aplicar ahora
                                 </Button>
                                 <Button size="sm" variant="secondary" onClick={() => setAviso(null)}>
@@ -407,7 +425,13 @@ export function OwnerPrices() {
               </tbody>
             </table>
           </div>
-          <Button variant="secondary" size="sm" className="shrink-0 self-start" onClick={() => setAddOpen(true)}>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="shrink-0 self-start"
+            disabled={soloVer}
+            onClick={() => setAddOpen(true)}
+          >
             Agregar rubro
           </Button>
         </div>
@@ -469,7 +493,7 @@ export function OwnerPrices() {
               <Button variant="secondary" onClick={listar}>
                 Listar
               </Button>
-              <Button disabled={!previewed || !ready.length} onClick={confirm}>
+              <Button disabled={soloVer || !previewed || !ready.length} onClick={confirm}>
                 Confirmar {ready.length ? `(${ready.length})` : ""}
               </Button>
               <Button variant="secondary" onClick={limpiar}>
