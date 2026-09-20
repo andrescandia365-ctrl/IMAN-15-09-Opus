@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { getSql } from "@/lib/db";
+import { getSql } from "@/lib/db.server";
 import { MAX_JSON_BYTES, prunePayload } from "@/lib/cap";
 import { LOCAL_TOO_HEAVY } from "@/lib/errors";
 import { startOfDay } from "@/lib/format";

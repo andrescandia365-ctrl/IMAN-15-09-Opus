@@ -1,6 +1,6 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { getSql } from "@/lib/db";
+import { getSql } from "@/lib/db.server";
 import type { PayMethod, TicketLine } from "@/lib/types";
 
 export type DeskTicket = {
@@ -146,7 +146,8 @@ export const takeDeskTicket = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-export async function pendingDeskTickets(userId: string, storeId: string): Promise<DeskTicket[]> {
+/** De servidor: la usa la ruta del buzón. Marcada para que no cruce al navegador. */
+export const pendingDeskTickets = createServerOnlyFn(async (userId: string, storeId: string): Promise<DeskTicket[]> => {
   const sql = await getSql();
   const rows = await sql<{ payload: unknown }>`
     select payload from kiosk_desk_ticket
@@ -158,4 +159,4 @@ export async function pendingDeskTickets(userId: string, storeId: string): Promi
     limit 8
   `;
   return rows.map((r) => asTicket(r.payload)).filter((t): t is DeskTicket => Boolean(t));
-}
+});

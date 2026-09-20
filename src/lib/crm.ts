@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { hashPassword } from "better-auth/crypto";
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { getSql } from "@/lib/db";
+import { getSql } from "@/lib/db.server";
 import { FOUNDER_EMAIL } from "@/lib/founder-public";
 import { assertEstudio, localeCapFor, MAX_LOCALES } from "@/lib/license";
 import { clampSeats, PLAN_LABEL, type PlanMonths } from "@/lib/plan";

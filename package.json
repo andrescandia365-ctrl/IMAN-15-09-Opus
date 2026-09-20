@@ -10,7 +10,7 @@
     "dev": "node scripts/with-app-env.mjs vite dev --host 0.0.0.0 --port 8080",
     "dev:local": "sh scripts/dev-local.sh",
     "seed:prueba": "node scripts/seed-prueba.mjs",
-    "build": "node scripts/with-app-env.mjs vite build && node scripts/iman-sw-headers.mjs && npm run db:migrate",
+    "build": "node scripts/with-app-env.mjs vite build && node scripts/copy-pglite-assets.mjs && node scripts/iman-sw-headers.mjs && npm run db:migrate",
     "db:migrate": "node scripts/migrate.mjs",
     "build:dev": "node scripts/with-app-env.mjs vite build --mode development",
     "preview": "node scripts/with-app-env.mjs vite preview",

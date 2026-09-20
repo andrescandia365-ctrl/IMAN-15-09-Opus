@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { hashPassword } from "better-auth/crypto";
-import { getSql } from "@/lib/db";
+import { getSql } from "@/lib/db.server";
 import { FOUNDER_EMAIL, FOUNDER_NAME } from "@/lib/founder-public";
 
 export { FOUNDER_EMAIL, FOUNDER_NAME, isFounderEmail } from "@/lib/founder-public";

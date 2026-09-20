@@ -1,6 +1,6 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { getSql } from "@/lib/db";
+import { getSql } from "@/lib/db.server";
 import { FOUNDER_EMAIL, isFounderEmail } from "@/lib/founder-public";
 import {
   attachLicenseChecksum,
@@ -266,7 +266,14 @@ async function accessOf(userId: string, email?: string): Promise<MyAccess> {
   return toAccess({ userId, vendor, license, email: mail, trial, extraSeats });
 }
 
-export async function assertEstudio(userId: string): Promise<void> {
+/**
+ * Las tres de abajo son de servidor y se exportan planas (no son server fn):
+ * las llaman kiosk, crm y la ruta de Woo. Sin marcarlas, el cuerpo viaja al
+ * navegador y arrastra la base entera: el bundle terminaba con `pg` adentro y
+ * la app no levantaba en desarrollo. `createServerOnlyFn` las vacía del lado
+ * del cliente y tira si alguien las llama desde ahí.
+ */
+export const assertEstudio = createServerOnlyFn(async (userId: string): Promise<void> => {
   const { ensureFounder } = await import("@/lib/founder");
   await ensureFounder();
   const email = await emailOf(userId);
@@ -274,12 +281,12 @@ export async function assertEstudio(userId: string): Promise<void> {
   if (!isFounderEmail(email) && vendor?.user_id !== userId) {
     throw new Error("Solo el Estudio");
   }
-}
+});
 
-export async function localeCapFor(userId: string): Promise<number> {
+export const localeCapFor = createServerOnlyFn(async (userId: string): Promise<number> => {
   const access = await accessOf(userId);
   return access.seatsAllowed;
-}
+});
 
 async function latestLicense(userId: string): Promise<LicenseDb | null> {
   const sql = await getSql();
@@ -661,11 +668,11 @@ function monthsFromWooPayload(body: Record<string, unknown>): PlanMonths | null 
   return null;
 }
 
-export async function fulfillWooLicense(opts: {
+export const fulfillWooLicense = createServerOnlyFn(async (opts: {
   rawBody: string;
   bearer: string | null;
   signature: string | null;
-}): Promise<WooIssueResult> {
+}): Promise<WooIssueResult> => {
   const vendor = await vendorRow();
   if (!vendor?.shop_secret) {
     return { ok: false, error: "La tienda no tiene clave de IMAN", status: 503 };
@@ -742,7 +749,7 @@ export async function fulfillWooLicense(opts: {
     activate_path: `/activar?codigo=${encodeURIComponent(code)}`,
     email,
   };
-}
+});
 
 export const purgeForgottenAccounts = createServerFn({ method: "POST" })
   .middleware([authMiddleware])

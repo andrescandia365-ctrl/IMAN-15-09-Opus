@@ -34,7 +34,7 @@ import { bearer, genericOAuth } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { getCookie } from "@tanstack/react-start/server";
 import { randomBytes } from "node:crypto";
-import { ensureDbReady, getPgPool, getPglite } from "../db";
+import { ensureDbReady, getPgPool, getPglite } from "../db.server";
 import { emailAndPasswordEnabled, minPasswordLength } from "./email-password";
 import { GATE_PROVIDER_ID, gateIdentitySessions } from "./gate-session.server";
 import { GROK_PROVIDERS } from "./providers";
@@ -94,9 +94,10 @@ const explicitBaseURL = env("BETTER_AUTH_URL");
 // Explicit `string[]` (not a readonly tuple) — Better Auth's DynamicBaseURLConfig
 // requires a mutable `allowedHosts: string[]`.
 const previewAllowedHosts: string[] = [...PREVIEW_ALLOWED_HOSTS];
-// Local `npm run dev` (port 8080 contract). Browsers may send Origin as any of
-// these for the same server — trusting only `localhost` rejects `127.0.0.1` and
-// breaks email/password with "Invalid origin".
+// Local `npm run dev` (port 8080 por defecto). Browsers may send Origin as any
+// of these for the same server — trusting only `localhost` rejects `127.0.0.1`
+// and breaks email/password with "Invalid origin". Otro puerto (dos servidores
+// a la vez, un preview del build) lo resuelve `isLoopbackDevOrigin` abajo.
 const LOCAL_DEV_ORIGINS: string[] = [
   "http://localhost:8080",
   "http://127.0.0.1:8080",
@@ -116,6 +117,22 @@ const LAN_DEV_HOSTS: string[] = [
   "*.local",
   "*.local:8080",
 ];
+
+/**
+ * Loopback en cualquier puerto. El puerto de dev no es siempre 8080: dos
+ * servidores a la vez, o `vite preview` del build, y el alta moría con
+ * "Invalid origin". Solo cuenta en dev (los deploys fijan BETTER_AUTH_URL) y
+ * solo para loopback, que ya implica estar sentado en esta máquina.
+ */
+function isLoopbackDevOrigin(origin: string): boolean {
+  try {
+    const u = new URL(origin);
+    if (u.protocol !== "http:") return false;
+    return u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]";
+  } catch {
+    return false;
+  }
+}
 
 function isLanDevOrigin(origin: string): boolean {
   try {
@@ -168,7 +185,8 @@ const trustedOriginsStatic: string[] = explicitBaseURL
 // Missing entries here surface as FORBIDDEN "Invalid origin".
 const trustedOrigins = (request?: Request): string[] => {
   const origin = request?.headers.get("origin") ?? "";
-  if (!explicitBaseURL && origin && isLanDevOrigin(origin) && !trustedOriginsStatic.includes(origin)) {
+  const dev = isLanDevOrigin(origin) || isLoopbackDevOrigin(origin);
+  if (!explicitBaseURL && origin && dev && !trustedOriginsStatic.includes(origin)) {
     return [...trustedOriginsStatic, origin];
   }
   return trustedOriginsStatic;

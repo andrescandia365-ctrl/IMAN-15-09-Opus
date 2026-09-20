@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { dbSource, getSql } from "@/lib/db";
+import { dbSource, getSql } from "@/lib/db.server";
 
 export type DashboardAccount = {
   id: string;

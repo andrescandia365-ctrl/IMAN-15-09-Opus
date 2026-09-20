@@ -8,7 +8,7 @@ import { createMiddleware } from "@tanstack/react-start";
  * thread it themselves.
  *
  *   import { createServerFn } from "@tanstack/react-start";
- *   import { getSql } from "@/lib/db";
+ *   import { getSql } from "@/lib/db.server";
  *   import { authMiddleware } from "@/lib/auth/middleware";
  *
  *   export const listTodos = createServerFn({ method: "GET" })

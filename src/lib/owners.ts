@@ -1,6 +1,6 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { getSql } from "@/lib/db";
+import { getSql } from "@/lib/db.server";
 import { FOUNDER_EMAIL, isFounderEmail } from "@/lib/founder-public";
 import { blankKiosk } from "@/lib/kiosk-blank";
 import { TRIAL_DAYS } from "@/lib/plan";
@@ -19,10 +19,15 @@ function asIso(value: unknown): string {
   return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
 }
 
-export async function claimOwnerRow(
+/**
+ * De servidor, exportada plana porque la llama `license` al canjear. Sin
+ * marcarla viaja al navegador con la base atrás: `login-screen` importa
+ * `claimOwner` de este mismo archivo, así que todo el módulo cruza.
+ */
+export const claimOwnerRow = createServerOnlyFn(async (
   userId: string,
   opts?: { name?: string },
-): Promise<ClaimedOwner> {
+): Promise<ClaimedOwner> => {
   const sql = await getSql();
   const users = await sql<{ email: string; name: string; createdAt: unknown }>`
     select email, name, "createdAt" as "createdAt" from "user" where id = ${userId} limit 1
@@ -89,7 +94,7 @@ export async function claimOwnerRow(
     storeId,
     trialExpiresAt: asIso(trial[0]?.expires_at) || expires.toISOString(),
   };
-}
+});
 
 export const claimOwner = createServerFn({ method: "POST" })
   .middleware([authMiddleware])

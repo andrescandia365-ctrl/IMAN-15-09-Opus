@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { getSql } from "@/lib/db";
+import { getSql } from "@/lib/db.server";
 
 export const NOTE_TAGS = ["precio", "pack", "bug", "decisión", "venta"] as const;
 export type NoteTag = (typeof NOTE_TAGS)[number] | "";
