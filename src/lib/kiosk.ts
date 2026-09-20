@@ -4,6 +4,7 @@ import { getSql } from "@/lib/db";
 import { MAX_JSON_BYTES, prunePayload } from "@/lib/cap";
 import { LOCAL_TOO_HEAVY } from "@/lib/errors";
 import { startOfDay } from "@/lib/format";
+import { eventRows } from "@/lib/event-rows";
 import { blankKiosk, MAX_STORES } from "@/lib/kiosk-blank";
 import { localeCapFor } from "@/lib/license";
 import type { KioskPayload, Sale } from "@/lib/types";
@@ -516,27 +517,11 @@ export const pushEvents = createServerFn({ method: "POST" })
   })
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    // Solo se confirma lo que entró: el aparato marca como subido exactamente
-    // esto, así un recorte del servidor no borra ventas del local.
-    const accepted: string[] = [];
-    for (const ev of data.events) {
-      if (!ev?.id || !ev.type) continue;
-      const body = JSON.stringify(ev.body ?? {});
-      await sql`
-        insert into kiosk_event (user_id, store_id, event_id, at, device_id, type, body)
-        values (
-          ${context.userId},
-          ${data.storeId},
-          ${ev.id},
-          ${ev.at}::timestamptz,
-          ${ev.deviceId || "dev"},
-          ${ev.type},
-          CAST(${body} AS jsonb)
-        )
-        on conflict (user_id, store_id, event_id) do nothing
-      `;
-      accepted.push(ev.id);
-    }
+    // Una sola ida a Neon por tanda. Solo se confirma lo que entró: el aparato
+    // marca como subido exactamente esto, así un recorte del servidor no borra
+    // ventas del local (ver event-rows.ts).
+    const { text, params, accepted } = eventRows(context.userId, data.storeId, data.events);
+    if (text) await sql.query(text, params);
     return { ok: true as const, n: accepted.length, accepted };
   });
 
