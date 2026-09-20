@@ -3,6 +3,8 @@ import { isDeleted, mergeDeleted } from "./deleted.ts";
 import { consumeFifo, insertLot, lotsOf } from "./lots.ts";
 import { packOf } from "./pack.ts";
 import type {
+  CashDrop,
+  CashShift,
   Category,
   DayBook,
   KioskPayload,
@@ -45,7 +47,9 @@ export type ImanEvent = {
     | "lot"
     | "supplier"
     | "settings"
-    | "price";
+    | "price"
+    | "shift"
+    | "drop";
   body: Json;
   acked?: boolean;
 };
@@ -180,6 +184,15 @@ export function stockCorrection(alAbrir: number | null, escrito: number, ahora: 
   if (alAbrir == null || escrito === alAbrir) return 0;
   return escrito - ahora;
 }
+
+/** Lo que el cierre de caja escribe en la fila del día. La fecha viaja hecha. */
+export type ShiftBookPatch = {
+  date: string;
+  safeCount?: number;
+  virtualCel?: number;
+  virtualSube?: number;
+  notes?: string;
+};
 
 function upsertBook(books: DayBook[], row: DayBook): DayBook[] {
   const i = books.findIndex((b) => b.date === row.date);
@@ -464,6 +477,47 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
         books: depositLedgerAmounts(payload.books ?? [], taken.deposits),
       };
     }
+    case "shift": {
+      // La caja la lleva un aparato solo (invariante 4): no hay dos turnos que
+      // juntar, alcanza con que sobrevivan al borrado de datos de Chrome. El
+      // cierre manda el turno entero, así un aparato que no vio la apertura
+      // igual queda con el turno completo.
+      const b = ev.body as { op?: string; shift?: CashShift; book?: ShiftBookPatch };
+      const shift = b.shift;
+      if (!shift?.id) return payload;
+      const shifts = payload.shifts ?? [];
+      const exists = shifts.some((s) => s.id === shift.id);
+      if (b.op === "open") {
+        // El mismo evento dos veces no abre dos turnos.
+        if (exists) return payload;
+        return { ...payload, shifts: [shift, ...shifts] };
+      }
+      if (b.op !== "close") return payload;
+      const next = exists ? shifts.map((s) => (s.id === shift.id ? shift : s)) : [shift, ...shifts];
+      const cierre = b.book;
+      if (!cierre?.date) return { ...payload, shifts: next };
+      // Lo mismo que escribe closeShift en la planilla. La fecha viene en el
+      // body, calculada con el día LOCAL de quien cerró (invariante 11): acá no
+      // se vuelve a deducir de la hora.
+      const cur = (payload.books ?? []).find((x) => x.date === cierre.date) ?? emptyBook(cierre.date);
+      return {
+        ...payload,
+        shifts: next,
+        books: upsertBook(payload.books ?? [], {
+          ...cur,
+          date: cierre.date,
+          safeCount: cierre.safeCount ?? cur.safeCount,
+          virtualCel: cierre.virtualCel ?? cur.virtualCel,
+          virtualSube: cierre.virtualSube ?? cur.virtualSube,
+          notes: cierre.notes ?? cur.notes,
+        }),
+      };
+    }
+    case "drop": {
+      const d = ev.body as unknown as CashDrop;
+      if (!d?.id || (payload.drops ?? []).some((x) => x.id === d.id)) return payload;
+      return { ...payload, drops: [d, ...(payload.drops ?? [])] };
+    }
     default:
       return payload;
   }
@@ -478,7 +532,8 @@ export function applyEvents(payload: KioskPayload, events: ImanEvent[]): KioskPa
  * aparato. Una clave que falte acá se aplica y se tira: le pasó a categories,
  * que bajaba el renombre y no lo guardaba nunca, y a settings, que perdía
  * márgenes y redondeo. suppliers ya iba: el borrado de un rubro también los
- * limpia.
+ * limpia. shifts y drops entraron con los eventos de caja: sin esto, una PC
+ * que se recupera baja los turnos de la cinta y no los guarda.
  */
 export function pulledPatch(next: KioskPayload) {
   return {
@@ -487,6 +542,8 @@ export function pulledPatch(next: KioskPayload) {
     suppliers: next.suppliers,
     settings: next.settings,
     sales: next.sales,
+    shifts: next.shifts ?? [],
+    drops: next.drops ?? [],
     books: next.books ?? [],
     refunds: next.refunds ?? [],
     orders: next.orders,

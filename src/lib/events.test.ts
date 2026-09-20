@@ -14,7 +14,17 @@ import {
 import { mergeBackup } from "./cap.ts";
 import { isDeleted } from "./deleted.ts";
 import { addLot, consumeFifo, insertLot, lotsOf } from "./lots.ts";
-import type { Category, KioskPayload, Product, Refund, Sale, Settings, Supplier } from "./types.ts";
+import type {
+  CashDrop,
+  CashShift,
+  Category,
+  KioskPayload,
+  Product,
+  Refund,
+  Sale,
+  Settings,
+  Supplier,
+} from "./types.ts";
 
 const settings = { name: "Kiosco de Prueba", city: "Rosario", onboarded: true } as Settings;
 
@@ -753,4 +763,168 @@ test("la herramienta de actualizar precios (costo y góndola) emite price", () =
     price: 1700,
     priceUpdatedAt: "2026-09-19T12:00:00.000Z",
   });
+});
+
+/* === La caja en la cinta === */
+
+function turno(partial: Partial<CashShift> = {}): CashShift {
+  return {
+    id: "sh_1",
+    status: "open",
+    openingCash: 5000,
+    closingCash: null,
+    expectedCash: null,
+    salesTotal: null,
+    salesCount: null,
+    note: null,
+    openedAt: "2026-09-18T12:00:00.000Z",
+    closedAt: null,
+    ...partial,
+  };
+}
+
+function cerrado(partial: Partial<CashShift> = {}): CashShift {
+  return turno({
+    status: "closed",
+    closingCash: 21000,
+    expectedCash: 20800,
+    salesTotal: 18000,
+    salesCount: 24,
+    note: "faltaron 200",
+    safeCount: 20000,
+    virtualCel: 3400,
+    virtualSube: 1200,
+    closedAt: "2026-09-18T23:30:00.000Z",
+    ...partial,
+  });
+}
+
+const abrir = (over: Partial<ImanEvent> = {}) =>
+  ev({ op: "open", shift: turno() }, { id: "ev_abre", type: "shift", ...over });
+
+const cerrar = (over: Partial<ImanEvent> = {}) =>
+  ev(
+    {
+      op: "close",
+      shift: cerrado(),
+      book: {
+        date: "2026-09-18",
+        safeCount: 20000,
+        virtualCel: 3400,
+        virtualSube: 1200,
+        notes: "faltaron 200",
+      },
+    },
+    { id: "ev_cierra", type: "shift", ...over },
+  );
+
+test("una PC que se recupera baja el turno abierto de la cinta", () => {
+  const next = applyEvent(payload(), abrir());
+  assert.equal(next.shifts.length, 1);
+  assert.equal(next.shifts[0]?.status, "open");
+  assert.equal(next.shifts[0]?.openingCash, 5000);
+});
+
+test("el mismo evento de apertura dos veces no abre dos cajas", () => {
+  const una = applyEvent(payload(), abrir());
+  assert.equal(applyEvent(una, abrir()), una);
+});
+
+test("el cierre trae el turno entero aunque el aparato no haya visto la apertura", () => {
+  const next = applyEvent(payload(), cerrar());
+  assert.equal(next.shifts.length, 1);
+  assert.equal(next.shifts[0]?.status, "closed");
+  assert.equal(next.shifts[0]?.closingCash, 21000);
+  assert.equal(next.shifts[0]?.safeCount, 20000);
+});
+
+test("el cierre escribe la fila del día con el efectivo contado y lo virtual", () => {
+  const next = applyEvents(payload(), [abrir(), cerrar()]);
+  assert.equal(next.shifts.length, 1);
+  const fila = next.books?.find((b) => b.date === "2026-09-18");
+  assert.equal(fila?.safeCount, 20000);
+  assert.equal(fila?.virtualCel, 3400);
+  assert.equal(fila?.virtualSube, 1200);
+  assert.equal(fila?.notes, "faltaron 200");
+});
+
+test("el cierre no le pisa a la fila lo que el dueño ya había cargado a mano", () => {
+  const antes = payload({
+    books: [
+      {
+        date: "2026-09-18",
+        safeCount: 0,
+        virtualCel: 0,
+        virtualSube: 0,
+        facA: 90000,
+        facX: 12000,
+        cigarrillos: 4000,
+        expenses: [],
+        notes: "",
+        cells: { fac_a: 90000, proveedor_omar: 15000 },
+      },
+    ],
+  });
+  const fila = applyEvent(antes, cerrar()).books?.find((b) => b.date === "2026-09-18");
+  assert.equal(fila?.facA, 90000);
+  assert.equal(fila?.cells?.proveedor_omar, 15000);
+  assert.equal(fila?.safeCount, 20000);
+});
+
+test("la fecha de la fila viene hecha en el evento: no se deduce de la hora", () => {
+  // Turno abierto 21:30 en Argentina = 00:30 UTC del día siguiente. La fila es
+  // la del 30, la del día local en que se abrió (invariante 11).
+  const tarde = ev(
+    {
+      op: "close",
+      shift: cerrado({ openedAt: "2026-10-01T00:30:00.000Z" }),
+      book: { date: "2026-09-30", safeCount: 20000 },
+    },
+    { id: "ev_tarde", type: "shift" },
+  );
+  const next = applyEvent(payload(), tarde);
+  assert.ok(next.books?.some((b) => b.date === "2026-09-30"));
+  assert.ok(!next.books?.some((b) => b.date === "2026-10-01"));
+});
+
+test("un retiro de caja chica viaja y no se duplica", () => {
+  const drop: CashDrop = {
+    id: "dr_1",
+    shiftId: "sh_1",
+    amount: 15000,
+    note: "Retiro a caja fuerte",
+    createdAt: "2026-09-18T20:00:00.000Z",
+  };
+  const retiro = ev(drop, { id: "ev_retiro", type: "drop" });
+  const una = applyEvent(payload(), retiro);
+  assert.equal(una.drops.length, 1);
+  assert.equal(una.drops[0]?.amount, 15000);
+  assert.equal(applyEvent(una, retiro), una);
+});
+
+test("turnos y retiros quedan en el store: sin esto se bajan y se tiran", () => {
+  const next = applyEvents(payload(), [abrir(), cerrar()]);
+  const alStore = pulledPatch(next);
+  assert.equal(alStore.shifts.length, 1);
+  assert.equal(alStore.shifts[0]?.closingCash, 21000);
+  assert.ok("drops" in alStore);
+});
+
+test("un body sin turno, o de un tipo que no se entiende, no toca nada", () => {
+  const antes = payload({ shifts: [turno()] });
+  assert.equal(applyEvent(antes, ev({ op: "open" }, { type: "shift" })), antes);
+  assert.equal(applyEvent(antes, ev({ op: "raro", shift: turno() }, { type: "shift" })), antes);
+  assert.equal(applyEvent(antes, ev({}, { type: "drop" })), antes);
+});
+
+test("el celu que no actualizó ignora los eventos de caja y no pierde nada", () => {
+  // Contra el applyEvent congelado de 79191af: tipos nuevos, así que cae en el
+  // default y devuelve el payload tal cual. Es la regla de compatibilidad.
+  const antes = payload({ products: [yogurSuelto(8)], books: [] });
+  assert.equal(applyEvent79191af(antes, abrir()), antes);
+  assert.equal(applyEvent79191af(antes, cerrar()), antes);
+  assert.equal(
+    applyEvent79191af(antes, ev({ id: "dr_9", shiftId: "sh_1", amount: 100 }, { type: "drop" })),
+    antes,
+  );
 });

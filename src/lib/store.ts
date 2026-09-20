@@ -2,7 +2,13 @@ import { create } from "zustand";
 import { catalogImportTouched } from "./catalog-io";
 import { prunePayload } from "./cap";
 import { todayKey } from "./format";
-import { catalogSaveEvent, keepStockAndLots, receiveBody, settingsEventPatch } from "./events";
+import {
+  catalogSaveEvent,
+  keepStockAndLots,
+  receiveBody,
+  settingsEventPatch,
+  type ShiftBookPatch,
+} from "./events";
 import { forgetDeleted, isDeleted, mergeDeleted, nombresBorrados } from "./deleted";
 import { bloqueoPorRubros } from "./rubros";
 import { appendSyncLog, lastKnownStore, queueCopy, recordEvent, saveLocalSnapshot } from "./local-db";
@@ -798,6 +804,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           closedAt: null,
         };
         set((st) => ({ shifts: [shift, ...st.shifts] }));
+        recordEvent("shift", { op: "open", shift });
         return { ok: true };
       },
 
@@ -813,37 +820,45 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           .filter((d) => d.shiftId === open.id)
           .reduce((a, d) => a + d.amount, 0);
         const expected = open.openingCash + efectivo - drops;
-        const bookDate = open.openedAt.slice(0, 10);
+        // El día LOCAL en que se abrió el turno (invariante 11). Con la fecha
+        // del ISO, un turno abierto después de las 21:00 caía en la fila del
+        // día siguiente y le dejaba la plata al día equivocado.
+        const bookDate = todayKey(new Date(open.openedAt));
         const virtualCel = extra?.virtualCel ?? 0;
         const virtualSube = extra?.virtualSube ?? 0;
         const safeCount = extra?.safeCount ?? closing;
+        const notes = extra?.note ?? st.books.find((b) => b.date === bookDate)?.notes ?? "";
+        // Tipado a propósito: recordEvent toma el body como unknown, así que sin
+        // esto un campo mal escrito acá llegaría a la cinta sin que nadie chille.
+        const fila: ShiftBookPatch = { date: bookDate, safeCount, virtualCel, virtualSube, notes };
+        const closed: CashShift = {
+          ...open,
+          status: "closed",
+          closingCash: closing,
+          expectedCash: expected,
+          salesTotal: salesIn.reduce((a, x) => a + x.total, 0),
+          salesCount: salesIn.length,
+          note: extra?.note || null,
+          virtualCel,
+          virtualSube,
+          safeCount,
+          closedAt: new Date().toISOString(),
+        };
         set({
-          shifts: st.shifts.map((s) =>
-            s.id === open.id
-              ? {
-                  ...s,
-                  status: "closed" as const,
-                  closingCash: closing,
-                  expectedCash: expected,
-                  salesTotal: salesIn.reduce((a, x) => a + x.total, 0),
-                  salesCount: salesIn.length,
-                  note: extra?.note || null,
-                  virtualCel,
-                  virtualSube,
-                  safeCount,
-                  closedAt: new Date().toISOString(),
-                }
-              : s,
-          ),
+          shifts: st.shifts.map((s) => (s.id === open.id ? closed : s)),
           books: upsertBookRow(st.books, {
             ...(st.books.find((b) => b.date === bookDate) ?? emptyBook(bookDate)),
             date: bookDate,
             safeCount,
             virtualCel,
             virtualSube,
-            notes: extra?.note ?? st.books.find((b) => b.date === bookDate)?.notes ?? "",
+            notes,
           }),
         });
+        // El turno entero, no un parche: un aparato que no vio la apertura queda
+        // igual con el turno completo. La fila del día va en el mismo evento
+        // porque es el mismo gesto; separada podría llegar sin su turno.
+        recordEvent("shift", { op: "close", shift: closed, book: fila });
         return { ok: true };
       },
 
@@ -950,6 +965,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           createdAt: new Date().toISOString(),
         };
         set((st) => ({ drops: [drop, ...st.drops] }));
+        recordEvent("drop", drop);
         return { ok: true };
       },
 
