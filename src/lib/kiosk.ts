@@ -449,22 +449,40 @@ async function migrateAndLoad(userId: string): Promise<AccountBundle | null> {
   return { stores, activeStoreId, payload: row.payload, rev: row.rev };
 }
 
+type SaveKioskIn =
+  | KioskPayload
+  | { storeId?: string; payload: KioskPayload; rev?: number }
+  | { storeId?: string; gzip: string; rev?: number };
+
 export const saveKiosk = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((data: KioskPayload | { storeId?: string; payload: KioskPayload; rev?: number }) => {
-    if (data && typeof data === "object" && "payload" in data && isPayload(data.payload)) {
-      return { storeId: data.storeId ?? "", payload: data.payload, rev: data.rev };
+  .validator((data: SaveKioskIn) => {
+    if (data && typeof data === "object" && "payload" in data && isPayload((data as { payload: unknown }).payload)) {
+      const d = data as { storeId?: string; payload: KioskPayload; rev?: number };
+      return { storeId: d.storeId ?? "", payload: d.payload, gzip: undefined as string | undefined, rev: d.rev };
     }
-    if (isPayload(data)) return { storeId: "", payload: data, rev: undefined as number | undefined };
+    if (data && typeof data === "object" && typeof (data as { gzip?: unknown }).gzip === "string") {
+      const d = data as { storeId?: string; gzip: string; rev?: number };
+      return { storeId: d.storeId ?? "", payload: undefined as KioskPayload | undefined, gzip: d.gzip, rev: d.rev };
+    }
+    if (isPayload(data)) return { storeId: "", payload: data, gzip: undefined as string | undefined, rev: undefined as number | undefined };
     throw new Error("Invalid kiosk payload");
   })
   .handler(async ({ context, data }) => {
+    let payload = data.payload;
+    if (!payload && data.gzip) {
+      const { gunzipB64ToJson } = await import("@/lib/copy-gzip.server");
+      const parsed = gunzipB64ToJson(data.gzip);
+      if (!isPayload(parsed)) throw new Error("Invalid kiosk payload");
+      payload = parsed;
+    }
+    if (!payload) throw new Error("Invalid kiosk payload");
     let storeId = data.storeId;
     if (!storeId) {
       const acc = await migrateAndLoad(context.userId);
       storeId = acc?.activeStoreId ?? "s1";
     }
-    return saveActive(context.userId, storeId, data.payload, data.rev);
+    return saveActive(context.userId, storeId, payload, data.rev);
   });
 
 function asEvent(row: {

@@ -23,6 +23,7 @@ import {
 import { withKeyLock } from "@/lib/key-lock";
 import { alreadyInCopy, fromCopyStart, pullMode, pullStartAfter } from "@/lib/pull-start";
 import { pullEvents, pushEvents, saveKiosk, selectStore } from "@/lib/kiosk";
+import { encodeCopyPayload } from "@/lib/copy-gzip";
 import { snapshotKiosk, useImanStore } from "@/lib/store";
 import { backupRecords, incomingCopy, mergeBackup, preferLiveCopy, prunePayload } from "@/lib/cap";
 import { chunk } from "@/lib/event-queue";
@@ -169,7 +170,8 @@ async function saveBlob(storeId: string, opts: { juntar?: boolean } = {}): Promi
     if (!body.products.length && !body.sales.length) return 0;
     // Sin rev conocido se manda 0: el servidor contesta con lo suyo y se junta.
     const rev = (await readBlobRev(storeId)) ?? 0;
-    const res = await saveKiosk({ data: { storeId, payload: body, rev } });
+    const packed = await encodeCopyPayload(body);
+    const res = await saveKiosk({ data: { storeId, rev, ...packed } });
     if (res.ok) {
       await writeBlobRev(storeId, res.rev);
       return 0;
@@ -182,7 +184,8 @@ async function saveBlob(storeId: string, opts: { juntar?: boolean } = {}): Promi
     // La marca es la de esta foto, no la que traía la fotocopia del otro aparato.
     const merged = { ...mergeBackup(res.payload, local), mark: local.mark };
     if (!merged.mark) delete merged.mark;
-    const again = await saveKiosk({ data: { storeId, payload: merged, rev: res.rev } });
+    const packedAgain = await encodeCopyPayload(merged);
+    const again = await saveKiosk({ data: { storeId, rev: res.rev, ...packedAgain } });
     if (!again.ok) throw new Error("Otro aparato estaba subiendo al mismo tiempo. Tocá Sincronizar de nuevo.");
     await writeBlobRev(storeId, again.rev);
     return pulled;
