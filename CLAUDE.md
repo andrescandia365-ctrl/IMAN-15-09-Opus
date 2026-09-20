@@ -246,6 +246,34 @@ ficha completa en `product`, filas de Asientos por tags, meses archivados con
 sus filas, condición fiscal y `margenDelMes`, `importCatalog` por eventos,
 guía de costo en Actualizar precios, `pullCopy` que no pisa el estado vivo.
 
+### Archivado: que el servidor mantenga la fotocopia
+
+La idea era que el servidor aplicara los eventos sobre su propia fotocopia, así
+ningún aparato tendría que subirla entera ~15 veces por día. **No va**, y estos
+son los números por los que no va:
+
+- **Aplicar evento por evento sale más caro, no más barato.** Postgres no
+  actualiza un pedazo de un jsonb: `jsonb_set` reescribe el valor entero y toda
+  su cadena TOAST. Hoy son 15 reescrituras de 1,19 MB por día y por local;
+  evento por evento serían 225. Y desde que la fotocopia viaja gzip (58 KB) no
+  queda tráfico para ahorrar: el problema económico ya está resuelto.
+- **Materializar solo al bajar** — el servidor aplica la cinta cuando alguien
+  pide la fotocopia, no en cada evento — baja las escrituras, pero no libera de
+  subir: hay que resolver igual el plegado de meses y las claves que no tienen
+  evento. Solo espacia las subidas.
+- **Filas de verdad en vez de un blob** es la respuesta correcta a esa escala y
+  es reescribir la persistencia entera. Hoy no hay evidencia de que haga falta.
+
+**Cuándo se retoma:** cuando algo que no sea un aparato necesite el estado al
+día del local — un tablero web donde el dueño mire sus locales con las PC
+apagadas — o cuando la carga probada de 10k lo pida. Ahí la respuesta son filas,
+no aplicar eventos sobre el blob.
+
+**Qué no se toca al acercarse a esto:** `rev`, el juntar y reintentar, `mark` y
+el arranque desde la foto; `mergePayload`, `mergeAggs`, `prunePayload` y el
+plegado de meses (plegar dos veces cuenta el mes de más); la cinta, el cursor
+por `seq` y las tandas de 200.
+
 ---
 
 ## Cómo trabajamos
