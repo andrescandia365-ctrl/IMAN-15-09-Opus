@@ -380,6 +380,26 @@ function remoteHasWork(p: KioskPayload | null | undefined): boolean {
   return (p.orders ?? []).some((o) => o.sent && namedLines(o) > 0);
 }
 
+/**
+ * Si este aparato puede pisar la fotocopia del local.
+ *
+ * La pregunta no es cuánto tiene, es **si alguna vez bajó el local**. Un
+ * aparato que nunca lo bajó no tiene con qué compararse y pisaría el respaldo
+ * de un local que sí tiene datos: ese es el caso que hay que seguir tapando.
+ *
+ * Tener poco no es lo mismo que no tener nada. Un local sin catálogo igual
+ * tiene turnos y retiros de verdad, y con la regla vieja ("sin productos y sin
+ * ventas no hay nada que respaldar") su caja no subía nunca — y encima el
+ * registro decía "listo".
+ *
+ * `revConocido` es el rev que el aparato guardó al recibir el local de la nube
+ * (`writeBlobRev`, que se escribe en cada camino antes de hidratar). `null` es
+ * "todavía no lo recibí".
+ */
+export function puedeRespaldar(revConocido: number | null | undefined): boolean {
+  return revConocido != null;
+}
+
 /** El estado vivo gana a una fotocopia guardada: stock, lotes y ticket a medio armar. */
 export function preferLiveCopy(live: KioskPayload, snap: KioskPayload | null | undefined): KioskPayload {
   if (hasCatalog(live) || (live.ticket?.length ?? 0) > 0) return live;

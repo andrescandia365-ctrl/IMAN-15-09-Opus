@@ -25,7 +25,7 @@ import { alreadyInCopy, fromCopyStart, pullMode, pullStartAfter } from "@/lib/pu
 import { pullEvents, pushEvents, saveKiosk, selectStore } from "@/lib/kiosk";
 import { encodeCopyPayload } from "@/lib/copy-gzip";
 import { snapshotKiosk, useImanStore } from "@/lib/store";
-import { backupRecords, incomingCopy, mergeBackup, preferLiveCopy, prunePayload } from "@/lib/cap";
+import { backupRecords, incomingCopy, mergeBackup, preferLiveCopy, prunePayload, puedeRespaldar } from "@/lib/cap";
 import { chunk } from "@/lib/event-queue";
 import { nombresBorrados, quitadosPor } from "@/lib/deleted";
 import type { ImanEvent } from "@/lib/events";
@@ -153,8 +153,18 @@ function adoptRecords(server: KioskPayload): void {
  * al servidor: una venta cobrada en el medio desaparecía de la pantalla. Ahora
  * el estado vivo solo se toca con lo que llega (la cinta y esos registros).
  */
-async function saveBlob(storeId: string, opts: { juntar?: boolean } = {}): Promise<number> {
-  // Devuelve cuántos cambios de otros aparatos bajó al juntar (0 si no chocó).
+/**
+ * Qué pasó con la fotocopia. `sin-bajar` no es un éxito: no se subió nada
+ * porque este aparato todavía no bajó el local. Antes esto devolvía 0 y viajaba
+ * como "listo": el kiosquero veía verde y el respaldo no existía.
+ */
+export type CopyEstado = "subida" | "sin-bajar";
+
+async function saveBlob(
+  storeId: string,
+  opts: { juntar?: boolean } = {},
+): Promise<{ estado: CopyEstado; pulled: number }> {
+  // `pulled`: cuántos cambios de otros aparatos bajó al juntar (0 si no chocó).
   return withKeyLock(`blob:${storeId}`, async () => {
     // La foto dice hasta dónde de la cinta llega, si este aparato ya la sigue.
     const sigue = (await readPullStart(storeId))?.mode === "live";
@@ -166,15 +176,16 @@ async function saveBlob(storeId: string, opts: { juntar?: boolean } = {}): Promi
       return { ...body, mark };
     };
     const body = foto();
-    // Un aparato vacío (todavía sin cargar) no tiene nada que respaldar y no pisa.
-    if (!body.products.length && !body.sales.length) return 0;
-    // Sin rev conocido se manda 0: el servidor contesta con lo suyo y se junta.
-    const rev = (await readBlobRev(storeId)) ?? 0;
+    // Un aparato que todavía no bajó este local no pisa la fotocopia: no tiene
+    // con qué compararse. Tener poco sí se respalda (ver `puedeRespaldar`).
+    const conocido = await readBlobRev(storeId);
+    if (!puedeRespaldar(conocido)) return { estado: "sin-bajar" as const, pulled: 0 };
+    const rev = conocido ?? 0;
     const packed = await encodeCopyPayload(body);
     const res = await saveKiosk({ data: { storeId, rev, ...packed } });
     if (res.ok) {
       await writeBlobRev(storeId, res.rev);
-      return 0;
+      return { estado: "subida" as const, pulled: 0 };
     }
     if (opts.juntar === false) throw new Error("Otro aparato subió en el medio. Queda para el próximo Sincronizar.");
     const { pulled } = await pullApply(storeId);
@@ -188,9 +199,13 @@ async function saveBlob(storeId: string, opts: { juntar?: boolean } = {}): Promi
     const again = await saveKiosk({ data: { storeId, rev: res.rev, ...packedAgain } });
     if (!again.ok) throw new Error("Otro aparato estaba subiendo al mismo tiempo. Tocá Sincronizar de nuevo.");
     await writeBlobRev(storeId, again.rev);
-    return pulled;
+    return { estado: "subida" as const, pulled };
   });
 }
+
+/** Lo que se le dice al kiosquero cuando el respaldo no subió por no haber bajado. */
+const SIN_BAJAR = "No se respaldó: este aparato todavía no bajó el local.";
+const SIN_BAJAR_HINT = "Abrí la app con internet y tocá Sincronizar.";
 
 /**
  * Un aparato que arranca de la fotocopia (no tenía copia propia) sigue la
@@ -228,6 +243,8 @@ export type SyncResult = {
   more?: boolean;
   /** Esta vez el aparato tomó su estado como punto de partida (ver pull-start.ts). */
   started?: boolean;
+  /** Qué pasó con la fotocopia: `sin-bajar` es que no se respaldó nada. */
+  copia?: CopyEstado;
 };
 
 async function onceOrRetry<T>(fn: () => Promise<T>): Promise<T> {
@@ -249,8 +266,8 @@ export async function syncNow(storeId: string): Promise<SyncResult> {
       const pushed = await pushPending(storeId);
       const { pulled, more, started } = await pullApply(storeId);
       await saveLocalSnapshot(storeId, liveCopy());
-      const alJuntar = await saveBlob(storeId);
-      return { ok: true, pushed, pulled: pulled + alJuntar, more, started };
+      const copia = await saveBlob(storeId);
+      return { ok: true, pushed, pulled: pulled + copia.pulled, more, started, copia: copia.estado };
     });
   } catch (err) {
     return {
@@ -273,22 +290,26 @@ export async function pushQuiet(storeId: string): Promise<number> {
  * de turno y el cierre de la app (invariante 6). Sin red queda pendiente y sube
  * cuando vuelve.
  */
-export async function pushCopy(
-  storeId: string,
-  opts: { juntar?: boolean } = {},
-): Promise<{ ok: boolean; error?: string; pulled?: number }> {
+export type CopyResult = { ok: boolean; estado?: CopyEstado; error?: string; pulled?: number };
+
+export async function pushCopy(storeId: string, opts: { juntar?: boolean } = {}): Promise<CopyResult> {
   await queueCopy(storeId, liveCopy());
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     return { ok: false, error: "Sin red. La fotocopia queda pendiente." };
   }
   try {
-    const pulled = await saveBlob(storeId, opts);
+    const { estado, pulled } = await saveBlob(storeId, opts);
+    // No subió: la fotocopia queda en cola y el pendiente no se da por resuelto.
+    if (estado === "sin-bajar") {
+      await resolvePendingLogs(storeId, { status: "fail", detail: SIN_BAJAR });
+      return { ok: false, estado, error: SIN_BAJAR };
+    }
     await clearCopy(storeId);
     await resolvePendingLogs(storeId, {
       status: "done",
       hint: "El celu ya lo puede tener",
     });
-    return { ok: true, pulled };
+    return { ok: true, estado, pulled };
   } catch (err) {
     const error = errorText(err, "No pude subir el local");
     await resolvePendingLogs(storeId, { status: "fail", detail: error });
@@ -297,13 +318,13 @@ export async function pushCopy(
 }
 
 /** Al volver la red o al abrir: sube solo si quedó una fotocopia pendiente. */
-export async function flushCopy(storeId: string): Promise<{ ok: boolean; error?: string }> {
+export async function flushCopy(storeId: string): Promise<CopyResult> {
   if (!(await loadCopy(storeId))) return { ok: true };
   return pushCopy(storeId);
 }
 
 /** Al cerrar el turno: sube la cinta y la fotocopia. Cuenta como sincronizar. */
-export async function backupOnClose(storeId: string): Promise<{ ok: boolean; error?: string }> {
+export async function backupOnClose(storeId: string): Promise<CopyResult> {
   await pushQuiet(storeId).catch(() => 0);
   const r = await pushCopy(storeId);
   if (r.ok) await touchSync(storeId);
@@ -312,6 +333,7 @@ export async function backupOnClose(storeId: string): Promise<{ ok: boolean; err
     title: "Respaldo al cerrar el turno",
     detail: r.ok ? "listo" : (r.error ?? "no subió"),
     status: r.ok ? "done" : "fail",
+    ...(r.estado === "sin-bajar" ? { hint: SIN_BAJAR_HINT } : {}),
   });
   return r;
 }
@@ -333,6 +355,7 @@ export async function backupOnHide(storeId: string): Promise<void> {
       title: "Respaldo al salir",
       detail: r.error ?? "No pude guardar el respaldo",
       status: "fail",
+      ...(r.estado === "sin-bajar" ? { hint: SIN_BAJAR_HINT } : {}),
     });
   } catch (err) {
     await appendSyncLog(storeId, {
@@ -472,10 +495,22 @@ export async function reviewCloud(
   await appendSyncLog(storeId, {
     kind: "catalog",
     title: "Subido a la nube",
-    detail: sync.pushed > 0 ? cambios(sync.pushed) : "listo",
+    // "listo" cuando no subió nada era la mitad de la mentira: esta línea habla
+    // de la cinta, y el respaldo se dice aparte, abajo.
+    detail: sync.pushed > 0 ? cambios(sync.pushed) : "sin cambios nuevos",
     status: "done",
     hint: "El celu ya lo puede tener",
   });
+  // El respaldo es otra cosa que la cinta. Si no subió, se dice y se ve en rojo.
+  if (copia.estado === "sin-bajar") {
+    await appendSyncLog(storeId, {
+      kind: "catalog",
+      title: "El respaldo no subió",
+      detail: SIN_BAJAR,
+      status: "fail",
+      hint: SIN_BAJAR_HINT,
+    });
+  }
   if (!sync.started) {
     await appendSyncLog(storeId, {
       kind: bajo > 0 ? "pull" : "empty",
@@ -484,10 +519,11 @@ export async function reviewCloud(
       status: "done",
     });
   }
+  const aviso = copia.estado === "sin-bajar" ? ` ${SIN_BAJAR}` : "";
   return {
     ok: true,
     newOrders: 0,
     emptyRemote: false,
-    message: `${sube}. ${baja}.${sync.more ? ` ${QUEDAN_MAS}` : ""}`,
+    message: `${sube}. ${baja}.${aviso}${sync.more ? ` ${QUEDAN_MAS}` : ""}`,
   };
 }
