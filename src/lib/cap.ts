@@ -25,7 +25,14 @@ export const ORDERS_KEEP = 40;
 export const REFUNDS_KEEP = 200;
 export const PAYOUTS_KEEP = 200;
 export const BOOKS_KEEP = 400;
-export const MAX_JSON_BYTES = 1_800_000;
+/**
+ * Tope del JSON **crudo** (después de inflar gzip). No es el tamaño al cable:
+ * Vercel admite ~4,5 MB de request; Postgres jsonb aguanta mucho más.
+ * Protege RAM al parsear y un zip bomb. 4 MB deja ~5–6 mil productos al
+ * tamaño de hoy; un aparato viejo que manda sin comprimir sigue debajo del
+ * tope de Vercel.
+ */
+export const MAX_JSON_BYTES = 4_000_000;
 
 function ymOf(iso: string): string {
   return iso.slice(0, 7);

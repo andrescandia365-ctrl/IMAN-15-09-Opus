@@ -18,4 +18,10 @@ describe("errores de la nube en lenguaje de piso", () => {
     assert.equal(errorText(new Error("Failed to fetch"), "x"), "Sin red. Quedó en este aparato.");
     assert.equal(isCloudWaking(new Error("Failed to fetch")), false);
   });
+
+  it("un local que no entra en el respaldo no dice que bajen el catálogo", () => {
+    const msg = errorText(new Error("El local pesa demasiado. IMAN recorta el historial; si sigue así, bajá el catálogo."), "x");
+    assert.match(msg, /llamá a soporte/);
+    assert.doesNotMatch(msg, /bajá el catálogo/);
+  });
 });

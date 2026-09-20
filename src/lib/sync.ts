@@ -325,7 +325,23 @@ export async function backupOnClose(storeId: string): Promise<{ ok: boolean; err
 export async function backupOnHide(storeId: string): Promise<void> {
   if (typeof navigator !== "undefined" && !navigator.onLine) return;
   await pushQuiet(storeId).catch(() => 0);
-  await pushCopy(storeId, { juntar: false }).catch(() => undefined);
+  try {
+    const r = await pushCopy(storeId, { juntar: false });
+    if (r.ok) return;
+    await appendSyncLog(storeId, {
+      kind: "catalog",
+      title: "Respaldo al salir",
+      detail: r.error ?? "No pude guardar el respaldo",
+      status: "fail",
+    });
+  } catch (err) {
+    await appendSyncLog(storeId, {
+      kind: "catalog",
+      title: "Respaldo al salir",
+      detail: errorText(err, "No pude guardar el respaldo"),
+      status: "fail",
+    });
+  }
 }
 
 export type CloudReview = {

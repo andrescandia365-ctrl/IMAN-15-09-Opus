@@ -71,7 +71,8 @@ export function SyncButton({ storeId }: { storeId: string }) {
   }
 
   const ageH = last ? (now - new Date(last).getTime()) / 3_600_000 : 99;
-  const toneName = !last ? "danger" : syncAgeTone(ageH);
+  const respaldoFallo = items.some((it) => it.status === "fail");
+  const toneName = !last || respaldoFallo ? "danger" : syncAgeTone(ageH);
   const tone =
     toneName === "danger" ? "text-danger" : toneName === "warn" ? "text-warn" : "text-sage";
   const Icon = !last || ageH >= SYNC_AMARILLO_H ? RefreshCw : Check;

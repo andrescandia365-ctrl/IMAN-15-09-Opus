@@ -1,6 +1,7 @@
 import { gunzipSync } from "node:zlib";
 import { MAX_JSON_BYTES } from "./cap.ts";
 import { GZIP_B64_MAX } from "./copy-gzip.ts";
+import { LOCAL_TOO_HEAVY } from "./errors.ts";
 
 /**
  * Infla el gzip de la fotocopia. Solo servidor: node:zlib no viaja al celu.
@@ -17,7 +18,7 @@ export function gunzipB64ToJson(b64: string): unknown {
     throw new Error("Invalid kiosk payload");
   }
   if (raw.length > MAX_JSON_BYTES) {
-    throw new Error("El local pesa demasiado. IMAN recorta el historial; si sigue así, bajá el catálogo.");
+    throw new Error(LOCAL_TOO_HEAVY);
   }
   try {
     return JSON.parse(raw.toString("utf8")) as unknown;

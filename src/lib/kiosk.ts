@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql } from "@/lib/db";
 import { MAX_JSON_BYTES, prunePayload } from "@/lib/cap";
+import { LOCAL_TOO_HEAVY } from "@/lib/errors";
 import { startOfDay } from "@/lib/format";
 import { blankKiosk, MAX_STORES } from "@/lib/kiosk-blank";
 import { localeCapFor } from "@/lib/license";
@@ -113,7 +114,7 @@ function pack(payload: KioskPayload): { json: string; name: string } {
   const pruned = prunePayload(payload);
   const json = JSON.stringify(pruned);
   if (json.length > MAX_JSON_BYTES) {
-    throw new Error("El local pesa demasiado. IMAN recorta el historial; si sigue así, bajá el catálogo.");
+    throw new Error(LOCAL_TOO_HEAVY);
   }
   return { json, name: pruned.settings.name.trim() || "Local" };
 }
