@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { backupRecords, incomingCopy, mergeBackup, mergeOrders, mergePayload, preferLiveCopy, richerOrder, richerShift } from "./cap.ts";
+import { backupRecords, incomingCopy, mergeBackup, mergeOrders, mergePayload, preferLiveCopy, puedeRespaldar, richerOrder, richerShift } from "./cap.ts";
 import { haceCuanto, pruneSyncLog, syncAgeTone, trimSyncLog, type SyncLogItem } from "./sync-log.ts";
 import type { CashShift, KioskPayload, MonthAgg, OrderDraft, Sale, Settings } from "./types.ts";
 
@@ -324,5 +324,73 @@ describe("la última vez que se sincronizó", () => {
     assert.equal(syncAgeTone(12), "warn");
     assert.equal(syncAgeTone(23), "warn");
     assert.equal(syncAgeTone(24), "danger");
+  });
+});
+
+describe("quién puede pisar la fotocopia del local", () => {
+  it("un aparato que todavía no bajó el local no la pisa", () => {
+    // El caso que la guarda vieja quería tapar, y que hay que seguir tapando:
+    // se abre la app, IndexedDB vacío, y algo dispara el respaldo antes de que
+    // la nube conteste. Sin rev no hay con qué compararse.
+    assert.equal(puedeRespaldar(null), false);
+    assert.equal(puedeRespaldar(undefined), false);
+  });
+
+  it("un aparato que ya bajó el local respalda aunque tenga poco", () => {
+    // El caso que la guarda vieja rompía: local sin catálogo, pero con turnos y
+    // retiros de verdad. Antes no subía nunca y el registro decía "listo".
+    assert.equal(puedeRespaldar(0), true);
+    assert.equal(puedeRespaldar(1), true);
+    assert.equal(puedeRespaldar(47), true);
+  });
+
+  it("el rev 0 cuenta: es un local recién creado que ya se recibió de la nube", () => {
+    // Con `?? 0` los dos casos daban igual y por eso no se podían distinguir.
+    assert.notEqual(puedeRespaldar(0), puedeRespaldar(null));
+  });
+});
+
+describe("un local sin catálogo igual tiene plata que respaldar", () => {
+  const caja: KioskPayload = {
+    products: [],
+    categories: [],
+    sales: [],
+    settings,
+    suppliers: [],
+    shifts: [
+      {
+        id: "sh_1",
+        status: "closed",
+        openingCash: 9000,
+        closingCash: 27272,
+        expectedCash: 20000,
+        salesTotal: null,
+        salesCount: null,
+        note: null,
+        openedAt: "2026-09-19T12:00:00.000Z",
+        closedAt: "2026-09-19T23:00:00.000Z",
+        safeCount: 15151,
+      },
+    ],
+    drops: [{ id: "dr_1", shiftId: "sh_1", amount: 6161, note: "Retiro a caja fuerte", createdAt: "2026-09-19T20:00:00.000Z" }],
+    orders: [],
+    movements: [],
+    ticket: [],
+    payMethod: "efectivo",
+  };
+
+  it("la regla vieja lo daba por vacío; la nueva lo respalda", () => {
+    const comoAntes = caja.products.length === 0 && caja.sales.length === 0;
+    assert.equal(comoAntes, true, "con la regla vieja este local no subía");
+    assert.equal(puedeRespaldar(3), true, "con la nueva sí, porque ya bajó el local");
+  });
+
+  it("el turno y el retiro sobreviven a juntar dos fotocopias", () => {
+    const vacia: KioskPayload = { ...caja, shifts: [], drops: [] };
+    const junto = mergeBackup(vacia, caja);
+    assert.equal(junto.shifts.length, 1);
+    assert.equal(junto.drops.length, 1);
+    assert.equal(junto.drops[0]?.amount, 6161);
+    assert.equal(junto.shifts[0]?.safeCount, 15151);
   });
 });
