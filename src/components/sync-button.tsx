@@ -141,6 +141,11 @@ export function SyncButton({ storeId }: { storeId: string }) {
               ? "Se borran solos a los 2 días, menos el punto de partida."
               : "Se borran solos a los 2 días."}
           </p>
+          {/* Qué versión está corriendo. Para preguntárselo al kiosquero por
+              teléfono y para saber qué está sirviendo la nube sin adivinar. */}
+          {__IMAN_VERSION__ ? (
+            <p className="mt-1 text-[11px] text-subtle">Versión {__IMAN_VERSION__}</p>
+          ) : null}
         </div>
       ) : null}
     </div>

@@ -1,6 +1,7 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Plugin } from "vite";
+import { execFileSync } from "node:child_process";
 import { defineConfig } from "vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
@@ -145,7 +146,29 @@ function authPopupPlugin(): Plugin {
 // `0.0.0.0:8080` is the live-preview contract — don't change host/port.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
+/**
+ * Qué versión está sirviendo. Se muestra en el panel de Nube: esta semana se
+ * perdió tiempo dos veces por no saberlo (un diagnóstico falso de que Vercel
+ * no deployaba, y un sondeo a ciegas). También sirve con un kiosquero al
+ * teléfono: "¿qué versión te dice Nube?".
+ *
+ * En Vercel el commit viene en el entorno del build. En esta máquina se
+ * pregunta a git. Si no hay ninguno de los dos, no se inventa nada.
+ */
+function versionQueCorre(): string {
+  const deVercel = process.env.VERCEL_GIT_COMMIT_SHA;
+  if (deVercel) return deVercel.slice(0, 7);
+  try {
+    return execFileSync("git", ["rev-parse", "--short=7", "HEAD"], { encoding: "utf8" }).trim();
+  } catch {
+    return "";
+  }
+}
+
 export default defineConfig(({ command, isPreview }) => ({
+  define: {
+    __IMAN_VERSION__: JSON.stringify(versionQueCorre()),
+  },
   server: {
     host: "0.0.0.0",
     port: 8080,
