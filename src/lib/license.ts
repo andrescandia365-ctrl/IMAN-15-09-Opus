@@ -751,29 +751,12 @@ export const fulfillWooLicense = createServerOnlyFn(async (opts: {
   };
 });
 
-export const purgeForgottenAccounts = createServerFn({ method: "POST" })
-  .middleware([authMiddleware])
-  .validator((data: { phrase: string; confirm: string }) => ({
-    phrase: String(data?.phrase ?? "").trim(),
-    confirm: String(data?.confirm ?? "").trim(),
-  }))
-  .handler(async ({ context, data }): Promise<{ removed: number }> => {
-    if (data.confirm !== "LIMPIAR IMAN") throw new Error("Escribí LIMPIAR IMAN para confirmar");
-    const { ensureFounder } = await import("@/lib/founder");
-    await ensureFounder();
-    const vendor = await vendorRow();
-    const email = await emailOf(context.userId);
-    if (!isFounderEmail(email) && vendor?.user_id !== context.userId) {
-      throw new Error("Solo el Estudio");
-    }
-    const sql = await getSql();
-    const others = await sql<{ id: string }>`
-      select id from "user" where id <> ${context.userId}
-    `;
-    for (const u of others) {
-      await sql`delete from "user" where id = ${u.id}`;
-    }
-    await sql`update iman_vendor set user_id = ${context.userId} where id = 'vendor'`;
-    return { removed: others.length };
-  });
+/**
+ * Acá vivía `purgeForgottenAccounts`: borraba TODAS las cuentas menos la que
+ * la llamaba (`select id from "user" where id <> …` y un delete por cada una).
+ * Se había pedido para limpiar cuentas de prueba con la contraseña olvidada,
+ * pero con un kiosquero de verdad en la base se lo llevaba puesto. No se
+ * repone: si hace falta dar de baja una cuenta, va una baja **por cuenta**,
+ * con su id, en el CRM del Estudio.
+ */
 

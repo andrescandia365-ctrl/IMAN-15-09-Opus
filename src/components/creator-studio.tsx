@@ -1,15 +1,10 @@
-import { useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { VendorDashboardView } from "@/components/vendor-dashboard";
 import { VendorPanel } from "@/components/vendor-panel";
 import { CreatorNotes } from "@/components/creator-notes";
 import { signOut } from "@/lib/auth/client";
 import { useCurrentUser } from "@/lib/auth/use-current-user";
-import { purgeForgottenAccounts, type MyAccess } from "@/lib/license";
-import { errorText } from "@/lib/errors";
+import type { MyAccess } from "@/lib/license";
 
 export function CreatorStudio({
   access,
@@ -21,9 +16,6 @@ export function CreatorStudio({
   onOpenFloor: () => void;
 }) {
   const user = useCurrentUser();
-  const [phrase, setPhrase] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [busy, setBusy] = useState(false);
 
   return (
     <div className="min-h-dvh bg-bg text-fg">
@@ -60,52 +52,6 @@ export function CreatorStudio({
             Abrir IMAN
           </Button>
         </section>
-        <section className="rounded-xl border border-warn/40 bg-warn/10 p-5">
-          <h2 className="font-display text-xl tracking-tight">Cuentas que no recordás</h2>
-          <p className="mt-2 text-sm text-muted">
-            Borra todas las cuentas menos esta. Esta deja de ser un kiosco. Los códigos no usados
-            quedan. Escribí la frase y LIMPIAR IMAN.
-          </p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            <div>
-              <Label>Frase</Label>
-              <Input value={phrase} onChange={(e) => setPhrase(e.target.value)} autoComplete="off" />
-            </div>
-            <div>
-              <Label>Confirmar</Label>
-              <Input
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                placeholder="LIMPIAR IMAN"
-                autoComplete="off"
-              />
-            </div>
-          </div>
-          <Button
-            className="mt-3"
-            variant="danger"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              void purgeForgottenAccounts({ data: { phrase, confirm } })
-                .then((r) => {
-                  toast.success(
-                    r.removed === 0
-                      ? "No había otras cuentas. Este estudio quedó limpio."
-                      : `Listo. Se fueron ${r.removed} cuentas.`,
-                  );
-                  setPhrase("");
-                  setConfirm("");
-                  onAccess({ ...access, isVendor: true });
-                })
-                .catch((err) => toast.error(errorText(err, "No se pudo")))
-                .finally(() => setBusy(false));
-            }}
-          >
-            {busy ? "Borrando…" : "Borrar las otras cuentas"}
-          </Button>
-        </section>
-
         <div id="iman-tienda">
           <VendorPanel access={access} onAccess={onAccess} />
         </div>
