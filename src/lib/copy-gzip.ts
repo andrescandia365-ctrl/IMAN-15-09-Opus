@@ -20,21 +20,55 @@ function bytesToB64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
+/**
+ * Cuánto se le da al gzip antes de mandar JSON crudo. No es por lentitud: es
+ * para que una corriente que no avanza no pueda dejar el respaldo colgado sin
+ * que nadie se entere, que es justo lo que pasó (ver el comentario de abajo).
+ */
+export const GZIP_TIMEOUT_MS = 8_000;
+
+/**
+ * Comprime la fotocopia.
+ *
+ * **La corriente se consume mientras se escribe, no después.** `write()` de un
+ * `CompressionStream` no resuelve hasta que alguien lee del otro lado: la
+ * versión anterior hacía `await write` → `await close` → recién ahí leía, y se
+ * trababa **siempre**, con 3 KB y con 300 KB, en cualquier navegador. Como
+ * `saveBlob` la espera, el botón Sincronizar quedaba girando para siempre y
+ * ninguna fotocopia subió durante dos días. `pipeThrough` + `Response` lee y
+ * escribe a la vez, que es como esta API pide que se use.
+ */
 export async function gzipJsonToB64(json: string): Promise<string> {
-  const cs = new CompressionStream("gzip");
-  const writer = cs.writable.getWriter();
-  await writer.write(new TextEncoder().encode(json));
-  await writer.close();
-  const buf = await new Response(cs.readable).arrayBuffer();
+  const comprimido = new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"));
+  const buf = await new Response(comprimido).arrayBuffer();
   return bytesToB64(new Uint8Array(buf));
 }
 
-/** Lo que saveKiosk entiende: JSON crudo (aparato viejo) o gzip en base64 (nuevo). */
+/** Corre `fn`, y si tarda de más se rinde en lugar de esperar para siempre. */
+async function conTope<T>(fn: () => Promise<T>, ms: number): Promise<T | null> {
+  let reloj: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      fn(),
+      new Promise<null>((resolve) => {
+        reloj = setTimeout(() => resolve(null), ms);
+      }),
+    ]);
+  } finally {
+    if (reloj) clearTimeout(reloj);
+  }
+}
+
+/**
+ * Lo que saveKiosk entiende: JSON crudo (aparato viejo) o gzip en base64
+ * (nuevo). Ante cualquier duda manda crudo: pesa más pero llega. Nunca se
+ * queda esperando.
+ */
 export async function encodeCopyPayload<T>(payload: T): Promise<{ payload: T } | { gzip: string }> {
   if (!canGzipCopy()) return { payload };
   try {
-    const gzip = await gzipJsonToB64(JSON.stringify(payload));
-    if (gzip.length > GZIP_B64_MAX) return { payload };
+    const gzip = await conTope(() => gzipJsonToB64(JSON.stringify(payload)), GZIP_TIMEOUT_MS);
+    if (gzip == null || gzip.length > GZIP_B64_MAX) return { payload };
     return { gzip };
   } catch {
     return { payload };

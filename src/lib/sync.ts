@@ -268,6 +268,26 @@ export async function pushQuiet(storeId: string): Promise<number> {
 }
 
 /**
+ * Tope del respaldo entero. El gzip ya tiene el suyo, pero cualquier otra cosa
+ * que no vuelva (una corriente trabada, una promesa que nadie resuelve) dejaba
+ * el botón Sincronizar girando para siempre y sin una línea en el registro.
+ * Pasó dos días sin que nadie lo viera: preferimos avisar mal a no avisar.
+ */
+const COPIA_TIMEOUT_MS = 45_000;
+const RESPALDO_TARDO = "El respaldo tardó demasiado y lo cortamos. Tocá Sincronizar de nuevo.";
+
+/** Corre `fn` con un tope: si no vuelve a tiempo, falla en vez de colgarse. */
+function conTope<T>(fn: () => Promise<T>, ms: number, mensaje: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const reloj = setTimeout(() => reject(new Error(mensaje)), ms);
+    fn().then(
+      (v) => { clearTimeout(reloj); resolve(v); },
+      (e: unknown) => { clearTimeout(reloj); reject(e as Error); },
+    );
+  });
+}
+
+/**
  * Sube la fotocopia de lo que el aparato tiene ahora. Solo corre en los
  * momentos en que el kiosquero pone su trabajo a salvo: Sincronizar, el cierre
  * de turno y el cierre de la app (invariante 6). Sin red queda pendiente y sube
@@ -282,7 +302,7 @@ export async function pushCopy(
     return { ok: false, error: "Sin red. La fotocopia queda pendiente." };
   }
   try {
-    const pulled = await saveBlob(storeId, opts);
+    const pulled = await conTope(() => saveBlob(storeId, opts), COPIA_TIMEOUT_MS, RESPALDO_TARDO);
     await clearCopy(storeId);
     await resolvePendingLogs(storeId, {
       status: "done",

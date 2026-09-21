@@ -42,6 +42,24 @@ npm run typecheck && npm run check:auth && npm test && npm run lint
 No declares una tarea lista sin correr los cuatro. `check:auth` existe porque
 las invariantes de auth ya se rompieron antes.
 
+**Los cuatro checks no prueban que la app funcione.** Una función que envuelve
+una API del navegador con contrato de corrientes (streams) no queda probada por
+un test unitario: los tests corren en Node, y Node y el navegador no se portan
+igual.
+
+El caso que lo enseñó: `gzipJsonToB64` hacía `await writer.write()` sobre un
+`CompressionStream` antes de que nadie leyera del otro lado. En Node eso
+resuelve; **en el navegador no resuelve nunca**. Había un test que llamaba a
+`encodeCopyPayload` con una corriente de verdad y pasaba en verde, mientras en
+producción el botón Sincronizar quedaba girando y ninguna fotocopia subió
+durante dos días. Lo tapaba de casualidad una guarda que cortaba antes en los
+aparatos vacíos.
+
+Si el cambio toca corrientes, `postMessage`, IndexedDB, service worker, cámara,
+Web Serial o cualquier cosa del navegador: **probalo en un navegador**, con la
+app levantada y el gesto completo, antes de decir que está listo. Y cuando
+algo se cuelga sin error, no lo deduzcas: poné huellas y mirá dónde se detiene.
+
 ### Datos de prueba
 
 `npm run seed:prueba` → usuario `prueba@iman.local` / `prueba1234`, PIN de dueño
