@@ -1,11 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 110 110" width="110" height="110">
-  <!-- IMAN — imán de herradura boca arriba con tres líneas de campo.
-       De 64 px para arriba. Para medidas chicas va simbolo-simple.svg. -->
+  <!-- IMAN — símbolo COMPLETO, sobre tinta. De 64 px para arriba. -->
   <rect width="110" height="110" fill="#14130f"/>
-  <path d="M 28,42 V 68 A 27 27 0 0 0 82 68 V 42 H 64 V 68 A 9 9 0 0 1 46 68 V 42 Z" fill="#ebe4d4"/>
-  <rect x="28" y="42" width="18" height="13" fill="#8eae8a"/>
-  <rect x="64" y="42" width="18" height="13" fill="#8eae8a"/>
-  <path d="M 36,36 Q 55,22 74,36" stroke="#8eae8a" stroke-width="5" fill="none" stroke-linecap="round"/>
-  <path d="M 31,33 Q 55,14 79,33" stroke="#8eae8a" stroke-width="4.5" fill="none" stroke-linecap="round" opacity="0.75"/>
-  <path d="M 26,30 Q 55,7 84,30" stroke="#8eae8a" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.5"/>
+  <path d="M 34,44 C 26,20 84,20 76,44" stroke="#8eae8a" stroke-width="5" fill="none" stroke-linecap="round"/>
+  <path d="M 34,68 C 26,92 84,92 76,68" stroke="#8eae8a" stroke-width="5" fill="none" stroke-linecap="round"/>
+  <path d="M 32,42 C 18,4 92,4 78,42" stroke="#8eae8a" stroke-width="3.5" fill="none" stroke-linecap="round" opacity="0.6"/>
+  <path d="M 32,70 C 18,106 92,106 78,70" stroke="#8eae8a" stroke-width="3.5" fill="none" stroke-linecap="round" opacity="0.6"/>
+  <rect x="34" y="44" width="4" height="24" rx="1" fill="#8eae8a"/>
+  <rect x="40" y="44" width="2" height="24" rx="1" fill="#8eae8a"/>
+  <rect x="44" y="44" width="5" height="24" rx="1" fill="#8eae8a"/>
+  <rect x="51" y="44" width="2" height="24" rx="1" fill="#8eae8a"/>
+  <rect x="57" y="44" width="2" height="24" rx="1" fill="#ebe4d4"/>
+  <rect x="61" y="44" width="5" height="24" rx="1" fill="#ebe4d4"/>
+  <rect x="68" y="44" width="2" height="24" rx="1" fill="#ebe4d4"/>
+  <rect x="72" y="44" width="4" height="24" rx="1" fill="#ebe4d4"/>
 </svg>

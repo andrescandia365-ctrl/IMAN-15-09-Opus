@@ -1,46 +1,107 @@
 # Marca IMAN
 
-El símbolo es un **imán de herradura boca arriba con líneas de campo**. Cuerpo
-crema, polos verdes, fondo oscuro.
+**IMAN**, siempre en mayúsculas y sin tilde. Es un acrónimo: *Inventario y
+Manejo de Artículos para Negocios*.
 
-| color | dónde |
+El símbolo es un **código de barras que es a la vez un imán**: las barras de
+la izquierda en verde y las de la derecha en crema, como los dos polos, y las
+líneas de campo que salen de un extremo y vuelven al otro, por arriba y por
+abajo.
+
+## Colores
+
+| color | nombre | dónde |
+|---|---|---|
+| `#14130f` | tinta | fondo oscuro |
+| `#ebe4d4` | crema | polo derecho, la palabra sobre tinta |
+| `#8eae8a` | verde | polo izquierdo y líneas de campo, sobre tinta |
+| `#3f6b48` | verde oscuro | lo mismo, sobre fondo claro |
+| `#fffaf0` | papel | fondo claro |
+
+## Qué versión va dónde
+
+| archivo | para qué |
 |---|---|
-| `#14130f` | fondo del ícono |
-| `#ebe4d4` | cuerpo del imán |
-| `#8eae8a` | polos y líneas de campo |
+| `simbolo-completo.svg` | la de siempre, sobre tinta. De **64 px para arriba** |
+| `simbolo-simplificado.svg` | de **48 px para abajo**: favicon y miniaturas. Menos barras y líneas más gruesas, porque las finas se empastan |
+| `simbolo-negativo.svg` | sobre fondos claros (papel, blanco) |
+| `simbolo-un-color-tinta-sobre-papel.svg` | impresión a una tinta: sello, fotocopia, ticket |
+| `simbolo-un-color-papel-sobre-tinta.svg` | lo mismo, calado sobre fondo oscuro |
+| `conjunto-oscuro.svg` | símbolo + palabra, crema sobre tinta |
+| `conjunto-claro.svg` | símbolo + palabra, tinta sobre papel |
+| `perfil-1080.png` | foto de perfil en redes. Pensada para recorte circular |
+| `og-1200x630.png` | la imagen que aparece al pasar el link por WhatsApp |
 
-## Los tres archivos fuente
+Las versiones de un color no tienen opacidades: la impresión a una tinta no
+tiene medios tonos. Los dos polos se distinguen igual por el hueco del medio.
 
-- **`simbolo-completo.svg`** — tres líneas de campo. De 64 px para arriba.
-- **`simbolo-simple.svg`** — una sola línea. De 48 px para abajo: las tres
-  finas se empastan y se ve un borrón.
-- **`maskable.svg`** — el completo al 88%, para Android. Android recorta cada
-  ícono con la forma del lanzador (círculo, squircle, gota) y solo garantiza
-  el **80% central**. Medido: el símbolo ocupa 64,5% del diámetro, así que
-  entra con 39,7 px de margen sobre 512. El fondo llega hasta el borde y es lo
-  único que se puede perder.
+## Espacio libre
 
-## Qué sale de cada uno
+Alrededor del símbolo va siempre un margen libre de **X**, donde **X es la
+mitad de la altura del bloque de barras** (12 de las 110 unidades de la
+caja). Como se mide con el propio símbolo, vale a cualquier tamaño.
 
-```
-simbolo-completo.svg  ->  public/icon-192.png
-                          public/icon-512.png
-                          public/apple-touch-icon.png   (180, iOS redondea solo)
-simbolo-simple.svg    ->  public/favicon.svg
-                          public/favicon.ico            (16 + 32 + 48)
-maskable.svg          ->  public/icon-maskable-192.png
-                          public/icon-maskable-512.png
-```
+Adentro de ese margen no va nada: ni texto, ni otro logo, ni el borde de la
+hoja. Los archivos del conjunto ya vienen con ese margen incluido.
 
-El mismo dibujo simple vive además en `src/components/brand-mark.tsx`
-(`ImanMark`), que es el logo de arriba a la izquierda en la app. Si cambia el
-símbolo, hay que cambiar los dos.
+## El conjunto horizontal
 
-## Cómo se regeneran
+- La caja del símbolo mide **1,4 veces** el tamaño de la letra.
+- Entre el símbolo y la palabra hay **0,35 veces** el tamaño de la letra,
+  medido de lo que se ve a lo que se ve (del borde del dibujo al remate de
+  la I).
+- Las mayúsculas van centradas con el bloque de barras.
+- La palabra es **Fraunces 500** (tamaño óptico 36) y va **convertida a
+  trazos**: se ve igual en cualquier máquina, tenga o no la letra instalada.
 
-No hay ImageMagick en el proyecto: los PNG se rasterizan con Chromium, que ya
-viene con Playwright. El script vive en `scripts/brand-icons.mjs`:
+## Lo que no se hace
+
+- **Estirar** ni aplastar: se agranda o se achica parejo.
+- **Cambiar los colores**, ni siquiera "parecidos". Para fondo claro está el
+  negativo; para una tinta, las de un color.
+- **Rotar** ni inclinar.
+- Ponerlo **sobre fotos o fondos sin contraste**. Si el fondo es cargado, va
+  sobre su cuadrado de tinta o de papel.
+- Escribir la palabra IMAN con otra letra al lado del símbolo: para eso están
+  los conjuntos.
+
+---
+
+## Para la app
+
+Todo sale de un solo script, que tiene la geometría del símbolo:
 
 ```bash
 node scripts/brand-icons.mjs
 ```
+
+Además de los archivos de esta carpeta, escribe los de la app:
+
+```
+public/favicon.svg              simplificada
+public/favicon.ico              simplificada, 16 + 32 + 48 adentro
+public/icon-192.png             completa, cuadrado de esquinas redondeadas
+public/icon-512.png             completa, cuadrado de esquinas redondeadas
+public/icon-maskable-512.png    completa, fondo hasta el borde (Android)
+public/icon-maskable-192.png    la misma, más chica
+public/apple-touch-icon.png     completa, 180, fondo sólido (iOS no admite transparencia)
+public/og.jpg                   la misma imagen para compartir, en JPG
+```
+
+**El maskable se mide, no se supone.** Android recorta cada ícono con la
+forma del lanzador y solo garantiza el círculo central del 80%. El script
+rasteriza el 512 y busca el píxel del dibujo más lejano al centro: la línea de
+campo de abajo llega a 203,9 px y la zona segura es de 204,8 px. Entra a
+tamaño completo, justo. Si algún día no entra, el script achica el símbolo
+(nunca lo recorta).
+
+**En la PC, el dock y la barra de tareas muestran la completa achicada.**
+Probado instalando: Chrome genera los íconos del sistema (32, 48, 128…)
+achicando el ícono grande del manifest, aunque el manifest traiga uno chico.
+Un ícono de 48 con la simplificada no cambia nada ahí; por eso no está.
+
+La palabra en trazos vive en `scripts/brand-palabra.mjs`.
+
+El mismo dibujo simplificado está también en `src/components/brand-mark.tsx`
+(`ImanMark`), que es el logo de arriba a la izquierda en la app. Si cambia el
+símbolo, hay que cambiar los dos.

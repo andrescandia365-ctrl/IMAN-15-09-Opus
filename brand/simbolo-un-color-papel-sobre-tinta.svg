@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 110 110" width="110" height="110">
+  <!-- IMAN — símbolo a UN COLOR, papel sobre tinta. Sin opacidades. -->
+  <rect width="110" height="110" fill="#14130f"/>
+  <path d="M 34,44 C 26,20 84,20 76,44" stroke="#fffaf0" stroke-width="5" fill="none" stroke-linecap="round"/>
+  <path d="M 34,68 C 26,92 84,92 76,68" stroke="#fffaf0" stroke-width="5" fill="none" stroke-linecap="round"/>
+  <path d="M 32,42 C 18,4 92,4 78,42" stroke="#fffaf0" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <path d="M 32,70 C 18,106 92,106 78,70" stroke="#fffaf0" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <rect x="34" y="44" width="4" height="24" rx="1" fill="#fffaf0"/>
+  <rect x="40" y="44" width="2" height="24" rx="1" fill="#fffaf0"/>
+  <rect x="44" y="44" width="5" height="24" rx="1" fill="#fffaf0"/>
+  <rect x="51" y="44" width="2" height="24" rx="1" fill="#fffaf0"/>
+  <rect x="57" y="44" width="2" height="24" rx="1" fill="#fffaf0"/>
+  <rect x="61" y="44" width="5" height="24" rx="1" fill="#fffaf0"/>
+  <rect x="68" y="44" width="2" height="24" rx="1" fill="#fffaf0"/>
+  <rect x="72" y="44" width="4" height="24" rx="1" fill="#fffaf0"/>
+</svg>
