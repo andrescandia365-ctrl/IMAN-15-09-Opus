@@ -259,6 +259,51 @@ NC real en PDF · login separado para el encargado · PowerSync/CRDT · React
 Native · backup automático de blob completo · impresora WebUSB clase 7 (hoy solo
 serial)
 
+### ⚠ NO TOCAR: qué hace hoy el vencimiento de licencia
+
+**Hoy el vencimiento NO bloquea la PC del mostrador, y eso no lo eligió nadie.**
+
+La condición está en `app.tsx:541`:
+
+```js
+const onFloor = gate === "desk" || Boolean(lock) || floor;
+const licensed = license?.active || trial?.active || isVendor || onFloor;
+```
+
+Ese `lock` es el candado `iman-floor-lock` de `localStorage`, que se guarda al
+entrar al Mostrador y solo se borra al Salir. Un aparato que ya estuvo en el
+mostrador arranca derecho ahí, prende `onFloor`, y con eso `licensed`: **sigue
+vendiendo después del vencimiento, indefinidamente**. Se bloquea solo el
+aparato que cerró sesión, uno nuevo, o el que sale al hub.
+
+Sin licencia la app entera se reemplaza por la pantalla de activación: **no hay
+modo de solo lectura, es todo o nada.**
+
+El candado existe para que la PC arranque rápido en el mostrador. Que además
+sea lo que evita cortarle la caja a un kiosco es **un accidente**, no una
+decisión, y no está escrito en ninguna invariante.
+
+**No toques `iman-floor-lock` ni esa condición hasta que Andres defina qué hace
+el vencimiento.** Un cambio ahí puede pasar, sin que nadie lo note, de "la caja
+nunca se bloquea" a "la caja se bloquea en medio de una venta". Eso es lo peor
+que le puede pasar a un local.
+
+### Control de planes en el Estudio — en pausa
+
+Pendiente hasta que se defina el plan. Lo que hay que resolver cuando se
+retome:
+
+- **Un plan por cuenta.** Hoy el plan vigente no está guardado: se deduce
+  buscando la licencia canjeada con el `expires_at` más lejano. Por eso no se
+  puede operar una cuenta a mano sin generar un código y dictárselo al
+  kiosquero para que lo canjee.
+- **`extra_seats` vive en dos tablas**, `iman_owners` y `kiosk_account`.
+  `grantExtraLocal` escribe en las dos y `extraSeatsOf` lee una y cae a la
+  otra. Dos fuentes para el mismo número.
+- **Falta una baja por cuenta en el CRM del Estudio.** Hoy hay reset de
+  contraseña y de PIN, y nada más. Era lo que tapaba `purgeForgottenAccounts`,
+  que se sacó porque borraba todas las cuentas menos una.
+
 Ya no es deuda (no reabrir): cinta de `settings` y `supplier`, evento `price`,
 ficha completa en `product`, filas de Asientos por tags, meses archivados con
 sus filas, condición fiscal y `margenDelMes`, `importCatalog` por eventos,
