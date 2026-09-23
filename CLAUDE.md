@@ -1,7 +1,9 @@
 # IMAN — contexto para Claude Code
 
 POS + caja + stock + vencimientos para kioscos y almacenes argentinos.
-Se vende como lector láser + licencia de 12 / 24 / 36 meses (1 / 2 / 3 seats).
+Es solo software: se vende la licencia de 12 / 24 / 36 meses (1 / 2 / 3 seats).
+No se vende lector ni impresora, no hay proveedor. Un lector que el local ya
+tenga anda en modo teclado. El kiosco sin PC no imprime ticket.
 
 **Slogan:** Números claros. Local que crece.
 
@@ -174,7 +176,7 @@ igual. Si no queda escrito, vuelve a pasar.
 | Archivo | Qué es |
 |---|---|
 | `src/lib/store.ts` | Zustand. `checkout`, `refundCliente`, `refundProveedor`, `saveProduct`, `adjustStock`, `setLedgerCell`, `receiveOrder`, `saveSettings`, `saveSupplier`, `importCatalog`, `applyCategoryPrices` — **todos llaman `recordEvent`** |
-| `src/lib/events.ts` | `applyEvent`. Tipos: sale, stock, ledger, product, product.delete, refund, receive, order, staff, category, lot, supplier, settings, price |
+| `src/lib/events.ts` | `applyEvent`. Tipos: sale, stock, ledger, product, product.delete, refund, receive, order, staff, category, lot, supplier, settings, price, shift, drop |
 | `src/lib/local-db.ts` | IndexedDB, `recordEvent`, `pendingEvents`, `markAcked`, `editQueue` |
 | `src/lib/event-queue.ts` | cola local pura (append/ack/trim/chunk) + tests |
 | `src/lib/sync.ts` | `syncNow` (botón), `pushQuiet` (la cinta sube sola), `pullCopy` |
@@ -198,6 +200,9 @@ igual. Si no queda escrito, vuelve a pasar.
 - **`lot`:** un lote de vencimiento. Stock y lots no viajan en `product`.
 - **`settings`:** márgenes, redondeo, comisión MP, condición fiscal, filas de Asientos. PIN y logo solo si ese toque los cambió.
 - **`supplier`:** alta/edición/baja de proveedor (`op: save` o `delete`).
+- **`shift`:** apertura y cierre de turno (`op: open` / `close`). El cierre manda el turno entero y la fila de la planilla de ese día.
+- **`drop`:** retiro de caja a fuerte, con el `shiftId` del turno.
+- **`sale`** lleva el `shiftId` del turno en que se cobró. Las ventas sin `shiftId` (de antes, o de un aparato sin actualizar) entran al arqueo por hora (`ventasDelTurno`, `src/lib/turno.ts`).
 - Stock: solo `sale`, `stock`, `refund`, `receive`, `lot`.
 
 `importCatalog` ya no es un `setState` masivo: emite `category`/`product` (o `price` si solo cambió la plata) uno por uno. Producto que ya existe: nombre, código, precio, costo, rubro. **El stock de la planilla se ignora.**
@@ -258,6 +263,19 @@ Tauri .exe · carga probada de 10k · recuperación de PIN cuando quedás afuera
 NC real en PDF · login separado para el encargado · PowerSync/CRDT · React
 Native · backup automático de blob completo · impresora WebUSB clase 7 (hoy solo
 serial)
+
+### Pendiente para el commit del escáner partido
+
+Las dos van juntas en ese commit, no sueltas:
+
+- **Código corto que coincide con el principio de uno largo.** El buscador
+  del celu (`phone-sell.tsx`, `onQueryChange`) busca coincidencia exacta a
+  cada tecla desde el cuarto dígito. Un lector en modo teclado escribe el
+  código de a un carácter: si existe un código corto igual al principio del
+  código de barras, suma ese producto a mitad del escaneo.
+- **El Vender del celu no enfoca solo el buscador.** Un lector en modo teclado
+  escribe donde esté el foco: si el encargado tocó otra cosa, el escaneo se
+  pierde.
 
 ### ⚠ NO TOCAR: qué hace hoy el vencimiento de licencia
 
