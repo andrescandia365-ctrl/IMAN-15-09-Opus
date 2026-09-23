@@ -276,6 +276,10 @@ Las dos van juntas en ese commit, no sueltas:
 - **El Vender del celu no enfoca solo el buscador.** Un lector en modo teclado
   escribe donde esté el foco: si el encargado tocó otra cosa, el escaneo se
   pierde.
+- **La cámara es lenta para una fila.** `camera-scan.tsx` mira un cuadro
+  cada 280 ms y no vuelve a leer el mismo código hasta pasado 1,1 s: dos
+  unidades iguales seguidas llevan más de un segundo cada una. Limita a
+  Android también, no solo al iPhone.
 
 ### ⚠ NO TOCAR: qué hace hoy el vencimiento de licencia
 
