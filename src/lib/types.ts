@@ -257,6 +257,8 @@ export interface Refund {
   supplierId?: string;
   supplierName?: string;
   note: string;
+  /** El turno en que se devolvió la plata (solo a clientes). Ausente = por hora. */
+  shiftId?: string;
 }
 
 export interface DayBook {

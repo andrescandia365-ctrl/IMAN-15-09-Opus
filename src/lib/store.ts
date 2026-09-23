@@ -29,7 +29,7 @@ import { nextCadenceDates } from "./supplier-cadence";
 import { addLot, consumeFifo } from "./lots";
 import { marginPrice, repriceProducts, unitCost } from "./pricing";
 import { costoAGondola, planReceive } from "./receive-cost";
-import { ventasDelTurno } from "./turno";
+import { devolucionesDelTurno, ventasDelTurno } from "./turno";
 import { uid } from "./utils";
 import {
   CATEGORY_SUPPLIER,
@@ -575,7 +575,8 @@ export const useImanStore = create<ImanState>()((set, get) => ({
 
       refundCliente: ({ productId, units, paymentMethod, saleId }) => {
         const st = get();
-        if (!st.shifts.some((s) => s.status === "open")) {
+        const open = st.shifts.find((s) => s.status === "open");
+        if (!open) {
           return { ok: false, error: "Abrí la caja para devolver plata" };
         }
         if (units <= 0) return { ok: false, error: "Cantidad inválida" };
@@ -609,6 +610,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           paymentMethod,
           saleId,
           note: packs ? `Pack x${pack}` : "Unidad",
+          shiftId: open.id,
         };
         set({
           products: st.products.map((x) => (x.id === p.id ? { ...x, stock: x.stock + units } : x)),
@@ -840,7 +842,12 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         const drops = st.drops
           .filter((d) => d.shiftId === open.id)
           .reduce((a, d) => a + d.amount, 0);
-        const expected = open.openingCash + efectivo - drops;
+        // Lo mismo que la caja chica (computeCash): la plata devuelta en
+        // efectivo salió del cajón.
+        const devueltoEfectivo = devolucionesDelTurno(st.refunds, open)
+          .filter((r) => r.paymentMethod === "efectivo")
+          .reduce((a, r) => a + r.amount, 0);
+        const expected = open.openingCash + efectivo - drops - devueltoEfectivo;
         // El día LOCAL en que se abrió el turno (invariante 11). Con la fecha
         // del ISO, un turno abierto después de las 21:00 caía en la fila del
         // día siguiente y le dejaba la plata al día equivocado.
@@ -1492,7 +1499,7 @@ export function computeCash(st: {
     };
   }
   const sales = ventasDelTurno(st.sales, open);
-  const clientRf = st.refunds.filter((r) => r.kind === "cliente" && r.createdAt >= open.openedAt);
+  const clientRf = devolucionesDelTurno(st.refunds, open);
   const efectivo = sales.filter((s) => s.paymentMethod === "efectivo").reduce((a, s) => a + s.total, 0);
   const mp = sales.filter((s) => s.paymentMethod === "mercadopago").reduce((a, s) => a + s.total, 0);
   const debito = sales.filter((s) => s.paymentMethod === "debito").reduce((a, s) => a + s.total, 0);

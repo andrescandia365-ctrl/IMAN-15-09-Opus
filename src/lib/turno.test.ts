@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ventasDelTurno } from "./turno.ts";
-import type { Sale } from "./types.ts";
+import { devolucionesDelTurno, ventasDelTurno } from "./turno.ts";
+import type { Refund, Sale } from "./types.ts";
 
 function venta(id: string, createdAt: string, shiftId?: string): Sale {
   return { id, createdAt, paymentMethod: "efectivo", note: "", total: 100, paid: 100, items: [], ...(shiftId ? { shiftId } : {}) };
@@ -36,5 +36,26 @@ describe("ventasDelTurno", () => {
     const ventas = [venta("nueva", "2026-09-23T09:10:00.000Z", "sh_a"), venta("vieja", "2026-09-23T09:20:00.000Z")];
     assert.deepEqual(ventasDelTurno(ventas, turnoA).map((s) => s.id), ["nueva", "vieja"]);
     assert.deepEqual(ventasDelTurno(ventas, turnoB).map((s) => s.id), ["vieja"]);
+  });
+});
+
+function devolucion(id: string, createdAt: string, extra: Partial<Refund> = {}): Refund {
+  return { id, kind: "cliente", createdAt, productId: "p1", productName: "X", units: 1, packs: 0, amount: 100, paymentMethod: "efectivo", note: "", ...extra };
+}
+
+describe("devolucionesDelTurno", () => {
+  it("las viejas, sin turno, cuentan por hora como siempre", () => {
+    const rf = [devolucion("antes", "2026-09-23T07:59:00.000Z"), devolucion("despues", "2026-09-23T08:30:00.000Z")];
+    assert.deepEqual(devolucionesDelTurno(rf, turnoA).map((r) => r.id), ["despues"]);
+  });
+
+  it("una devolución de otro turno no entra aunque sea de después", () => {
+    const rf = [devolucion("mia", "2026-09-23T09:30:00.000Z", { shiftId: "sh_a" }), devolucion("otra", "2026-09-23T09:31:00.000Z", { shiftId: "sh_b" })];
+    assert.deepEqual(devolucionesDelTurno(rf, turnoA).map((r) => r.id), ["mia"]);
+  });
+
+  it("lo devuelto al proveedor no es plata del cajón", () => {
+    const rf = [devolucion("prov", "2026-09-23T09:30:00.000Z", { kind: "proveedor" })];
+    assert.deepEqual(devolucionesDelTurno(rf, turnoA), []);
   });
 });

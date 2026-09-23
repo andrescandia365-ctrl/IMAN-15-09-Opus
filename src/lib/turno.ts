@@ -1,4 +1,4 @@
-import type { CashShift, Sale } from "@/lib/types";
+import type { CashShift, Refund, Sale } from "@/lib/types";
 
 /**
  * Las ventas que entran en el arqueo de un turno.
@@ -10,4 +10,14 @@ import type { CashShift, Sale } from "@/lib/types";
  */
 export function ventasDelTurno(sales: Sale[], shift: Pick<CashShift, "id" | "openedAt">): Sale[] {
   return sales.filter((s) => (s.shiftId ? s.shiftId === shift.id : s.createdAt >= shift.openedAt));
+}
+
+/**
+ * Las devoluciones a clientes que entran en el arqueo de un turno. La misma
+ * regla que las ventas: con `shiftId`, las de ese turno; sin, por hora.
+ */
+export function devolucionesDelTurno(refunds: Refund[], shift: Pick<CashShift, "id" | "openedAt">): Refund[] {
+  return refunds.filter(
+    (r) => r.kind === "cliente" && (r.shiftId ? r.shiftId === shift.id : r.createdAt >= shift.openedAt),
+  );
 }
