@@ -14,6 +14,17 @@ import type {
 } from "@/lib/types";
 import { unitCost } from "./pricing.ts";
 import { mergeDeleted } from "./deleted.ts";
+import { cubierto, ladoDelResumen, marcaDespues, quienPliega } from "./plegado.ts";
+
+/**
+ * Este aparato, para saber si le toca plegar el mes (ver plegado.ts). Lo pone
+ * el store al arrancar en el navegador; en el servidor queda null y nunca
+ * pliega.
+ */
+let aparatoLocal: string | null = null;
+export function setEsteAparato(id: string | null): void {
+  aparatoLocal = id;
+}
 
 /** Live tickets we keep in the blob. Older ones fold into monthAggs. */
 export const SALES_KEEP = 1500;
@@ -166,15 +177,26 @@ function keepNewest<T extends { createdAt: string }>(rows: T[], n: number): T[] 
   return [...rows].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, n);
 }
 
-/** Trim the JSON blob so a busy till does not explode the save. */
-export function prunePayload(p: KioskPayload): KioskPayload {
+/**
+ * Trim the JSON blob so a busy till does not explode the save.
+ *
+ * Lo que la marca del mes ya cubre sale de la lista en cualquier aparato. Lo
+ * demás se pliega solo si este aparato abrió el último turno; si no, queda en
+ * la lista aunque sea viejo o pase el tope: descartarlo sin plegar lo perdería
+ * del mes (ver plegado.ts).
+ */
+export function prunePayload(p: KioskPayload, aparato: string | null = aparatoLocal): KioskPayload {
   const cutoff = Date.now() - SALES_DAYS * 86_400_000;
+  const mark = p.monthMark;
+  const pliega = Boolean(aparato) && quienPliega(p.shifts ?? []) === aparato;
   const keep: Sale[] = [];
   const folded: Sale[] = [];
-  const sales = [...p.sales].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  const sales = p.sales
+    .filter((s) => !cubierto(mark, s))
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   for (const s of sales) {
     const old = new Date(s.createdAt).getTime() < cutoff;
-    if (!old && keep.length < SALES_KEEP) keep.push(s);
+    if (!pliega || (!old && keep.length < SALES_KEEP)) keep.push(s);
     else folded.push(s);
   }
   const extra: MonthAgg[] = [];
@@ -187,12 +209,23 @@ export function prunePayload(p: KioskPayload): KioskPayload {
   // mes: la venta no se duplica porque al plegarse se va, y acá igual.
   const salesById = new Map(p.sales.map((x) => [x.id, x]));
   const refundsKeep: Refund[] = [];
+  const clientesSinPlegar: Refund[] = [];
+  const refundsFolded: Refund[] = [];
   for (const r of p.refunds ?? []) {
+    if (r.kind !== "cliente") {
+      refundsKeep.push(r);
+      continue;
+    }
+    if (cubierto(mark, r)) continue;
     const viejo = new Date(r.createdAt).getTime() < cutoff;
-    if (r.kind === "cliente" && viejo) foldRefund(map, r, byId, salesById);
-    else refundsKeep.push(r);
+    if (pliega && viejo) {
+      foldRefund(map, r, byId, salesById);
+      refundsFolded.push(r);
+    } else if (pliega) refundsKeep.push(r);
+    else clientesSinPlegar.push(r);
   }
   extra.push(...map.values());
+  const monthMark = marcaDespues(mark, [...folded, ...refundsFolded]);
 
   const bookCut = Date.now() - BOOKS_KEEP * 86_400_000;
   const books = (p.books ?? []).filter((b: DayBook) => new Date(b.date).getTime() >= bookCut);
@@ -207,7 +240,10 @@ export function prunePayload(p: KioskPayload): KioskPayload {
     shifts: [...p.shifts].sort((a, b) => (a.openedAt < b.openedAt ? 1 : -1)).slice(0, SHIFTS_KEEP),
     drops: keepNewest(p.drops, DROPS_KEEP),
     orders: keepNewest(p.orders, ORDERS_KEEP),
-    refunds: keepNewest(refundsKeep, REFUNDS_KEEP),
+    // Sin plegar no hay tope para lo del cliente: pasarlo lo perdería del mes.
+    refunds: [...clientesSinPlegar, ...keepNewest(refundsKeep, REFUNDS_KEEP)].sort((a, b) =>
+      a.createdAt < b.createdAt ? 1 : -1,
+    ),
     payouts: keepNewest(p.payouts ?? [], PAYOUTS_KEEP),
     roster: (p.roster ?? []).filter((r) => {
       const t = new Date(`${r.date}T12:00:00`).getTime();
@@ -215,6 +251,7 @@ export function prunePayload(p: KioskPayload): KioskPayload {
     }),
     books,
     monthAggs: mergeAggs(p.monthAggs ?? [], extra),
+    ...(monthMark ? { monthMark } : {}),
     monthSheets,
     ticket: p.ticket.slice(0, 80),
   };
@@ -259,18 +296,29 @@ export function mergeOrders(server: OrderDraft[] | undefined, local: OrderDraft[
 }
 
 /** Two tills: keep every ticket. An empty new device must not wipe the photocopy. */
-export function mergePayload(server: KioskPayload, local: KioskPayload): KioskPayload {
+export function mergePayload(
+  server: KioskPayload,
+  local: KioskPayload,
+  aparato: string | null = aparatoLocal,
+): KioskPayload {
   if (!hasCatalog(local) && hasCatalog(server)) {
-    return prunePayload({
-      ...server,
-      orders: mergeOrders(server.orders, local.orders),
-    });
+    return prunePayload(
+      {
+        ...server,
+        orders: mergeOrders(server.orders, local.orders),
+      },
+      aparato,
+    );
   }
-  // Una venta vieja que solo tiene la fotocopia ya está plegada en el resumen de
-  // este aparato (hay una sola caja). Si entrara, al recortar se volvería a
-  // plegar y el mes quedaría contado de más. Lo mismo con las devoluciones.
+  // El resumen del mes se queda entero de un lado, con su marca (plegado.ts).
+  // Las ventas se juntan todas: las que esa marca cubre salen al podar.
+  const lado = ladoDelResumen(server.monthMark, local.monthMark);
+  const resumen = lado === "server" ? server : lado === "local" ? local : null;
+  // Sin marca de ningún lado (resumen de antes) se junta como antes: una venta
+  // vieja que solo tiene la fotocopia se daba por plegada en este aparato. Lo
+  // mismo con las devoluciones.
   const cutoff = Date.now() - SALES_DAYS * 86_400_000;
-  const viejo = (iso: string) => new Date(iso).getTime() < cutoff;
+  const viejo = (iso: string) => !resumen && new Date(iso).getTime() < cutoff;
   const salesById = new Map<string, Sale>();
   for (const s of server.sales) if (!viejo(s.createdAt)) salesById.set(s.id, s);
   for (const s of local.sales) salesById.set(s.id, s);
@@ -306,11 +354,12 @@ export function mergePayload(server: KioskPayload, local: KioskPayload): KioskPa
     sales,
     refunds,
     orders: mergeOrders(server.orders, local.orders),
-    monthAggs: sameAggs(server.monthAggs ?? [], local.monthAggs ?? []),
+    monthAggs: resumen ? (resumen.monthAggs ?? []) : sameAggs(server.monthAggs ?? [], local.monthAggs ?? []),
+    monthMark: resumen?.monthMark,
     monthSheets: mergeSheets(server.monthSheets ?? [], local.monthSheets ?? []),
     deletedProducts,
     ticket: local.ticket?.length ? local.ticket : server.ticket,
-  });
+  }, aparato);
 }
 
 /**

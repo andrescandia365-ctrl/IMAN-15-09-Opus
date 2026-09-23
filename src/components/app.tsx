@@ -355,6 +355,7 @@ export function App() {
       "refunds",
       "books",
       "monthAggs",
+      "monthMark",
       "monthSheets",
       "staff",
       "roster",

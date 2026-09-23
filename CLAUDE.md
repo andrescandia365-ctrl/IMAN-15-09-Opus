@@ -202,7 +202,7 @@ igual. Si no queda escrito, vuelve a pasar.
 - **`supplier`:** alta/edición/baja de proveedor (`op: save` o `delete`).
 - **`shift`:** apertura y cierre de turno (`op: open` / `close`). El cierre manda el turno entero y la fila de la planilla de ese día.
 - **`drop`:** retiro de caja a fuerte, con el `shiftId` del turno.
-- **`sale`** lleva el `shiftId` del turno en que se cobró. Las ventas sin `shiftId` (de antes, o de un aparato sin actualizar) entran al arqueo por hora (`ventasDelTurno`, `src/lib/turno.ts`).
+- **`sale`** lleva el `shiftId` del turno en que se cobró y el `deviceId` del aparato que cobró (lo usa el plegado del mes). Las ventas sin `shiftId` (de antes, o de un aparato sin actualizar) entran al arqueo por hora (`ventasDelTurno`, `src/lib/turno.ts`).
 - Stock: solo `sale`, `stock`, `refund`, `receive`, `lot`.
 
 `importCatalog` ya no es un `setState` masivo: emite `category`/`product` (o `price` si solo cambió la plata) uno por uno. Producto que ya existe: nombre, código, precio, costo, rubro. **El stock de la planilla se ignora.**
@@ -210,6 +210,14 @@ igual. Si no queda escrito, vuelve a pasar.
 ### Planilla y el mes
 
 El dueño arma las filas (`ledgerRows` + `ledgerTags`). TOTAL PROVEEDORES suma lo tagueado `proveedor`, no ids fijos. Un mes archivado guarda **las filas de entonces** (`MonthSheet.rows`): septiembre viejo no se viste con las de ahora.
+
+**Quién pliega el mes** (`src/lib/plegado.ts`): el aparato que abrió el último
+turno (`CashShift.deviceId`). El resumen lleva una marca (`monthMark`) de hasta
+dónde llega, por aparato que cobró. Todos sacan de la lista lo que la marca
+cubre y no vuelven a sumar una venta cubierta que llega tarde. El que no pliega
+**nunca descarta** una venta sin cubrir, ni pasando `SALES_KEEP`. El servidor
+no es un aparato: nunca pliega. Al juntar dos copias, el resumen se queda
+entero del lado con la marca más adelantada.
 
 La planilla sigue cuadrando **efectivo** (invariante 10). Las ganancias viven en Dueño → Mes (`margenDelMes`):
 - Monotributo y en negro: la plata que entró. Etiquetas distintas.

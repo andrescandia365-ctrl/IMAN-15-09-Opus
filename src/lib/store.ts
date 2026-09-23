@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { catalogImportTouched } from "./catalog-io";
-import { prunePayload } from "./cap";
+import { prunePayload, setEsteAparato } from "./cap";
 import { todayKey } from "./format";
 import {
   catalogSaveEvent,
@@ -11,7 +11,7 @@ import {
 } from "./events";
 import { forgetDeleted, isDeleted, mergeDeleted, nombresBorrados } from "./deleted";
 import { bloqueoPorRubros } from "./rubros";
-import { appendSyncLog, lastKnownStore, queueCopy, recordEvent, saveLocalSnapshot } from "./local-db";
+import { appendSyncLog, getDeviceId, lastKnownStore, queueCopy, recordEvent, saveLocalSnapshot } from "./local-db";
 import {
   adoptLedgerSettings,
   archiveClosedMonths,
@@ -45,6 +45,7 @@ import type {
   DayBook,
   DeletedProduct,
   MonthAgg,
+  MonthMark,
   MonthSheet,
   OrderDraft,
   PayMethod,
@@ -84,6 +85,7 @@ export interface ImanState {
   refunds: Refund[];
   books: DayBook[];
   monthAggs: MonthAgg[];
+  monthMark?: MonthMark;
   monthSheets: MonthSheet[];
   staff: StaffMember[];
   roster: RosterSlot[];
@@ -305,6 +307,7 @@ function emptyBooks(opening: number) {
     refunds: [] as Refund[],
     books: [] as DayBook[],
     monthAggs: [] as MonthAgg[],
+    monthMark: undefined as MonthMark | undefined,
     monthSheets: [] as MonthSheet[],
     ticket: [] as TicketLine[],
     lastSaleId: null as string | null,
@@ -344,6 +347,7 @@ function seedState() {
     refunds: [] as Refund[],
     books: [] as DayBook[],
     monthAggs: [] as MonthAgg[],
+    monthMark: undefined as MonthMark | undefined,
     monthSheets: [] as MonthSheet[],
     staff: [] as StaffMember[],
     roster: [] as RosterSlot[],
@@ -373,6 +377,10 @@ function emptyState() {
     settings: { ...s.settings, name: "", city: "" },
   };
 }
+
+// Para saber si a este aparato le toca plegar el mes. En el servidor no hay
+// aparato: nunca pliega.
+if (typeof window !== "undefined") setEsteAparato(getDeviceId());
 
 export const useImanStore = create<ImanState>()((set, get) => ({
       ...emptyState(),
@@ -497,6 +505,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           total,
           paid: st.payMethod === "efectivo" ? paid || total : null,
           shiftId: open.id,
+          deviceId: getDeviceId(),
           items: st.ticket.map((l) => ({
             productId: l.productId,
             name: l.name,
@@ -539,6 +548,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           payMethod: st.payMethod,
           books: st.books,
           monthAggs: st.monthAggs,
+          monthMark: st.monthMark,
           monthSheets: st.monthSheets,
         };
         const pruned = prunePayload(next);
@@ -551,6 +561,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           orders: pruned.orders,
           books: pruned.books ?? [],
           monthAggs: pruned.monthAggs ?? [],
+          monthMark: pruned.monthMark,
           monthSheets: pruned.monthSheets ?? st.monthSheets,
           ticket: [],
           paidInput: "",
@@ -611,6 +622,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           saleId,
           note: packs ? `Pack x${pack}` : "Unidad",
           shiftId: open.id,
+          deviceId: getDeviceId(),
         };
         set({
           products: st.products.map((x) => (x.id === p.id ? { ...x, stock: x.stock + units } : x)),
@@ -817,6 +829,8 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         const shift: CashShift = {
           id: uid("sh"),
           status: "open",
+          // El que abre el turno es la caja: pliega el mes (plegado.ts).
+          deviceId: getDeviceId(),
           openingCash: Math.max(0, opening),
           closingCash: null,
           expectedCash: null,
@@ -1413,6 +1427,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           movements: pruned.movements,
           books: pruned.books ?? [],
           monthAggs: pruned.monthAggs ?? [],
+          monthMark: pruned.monthMark,
           monthSheets: pruned.monthSheets ?? [],
           refunds: pruned.refunds ?? [],
           staff: pruned.staff ?? [],
@@ -1461,6 +1476,7 @@ export function snapshotKiosk(st: ImanState): KioskPayload {
     refunds: st.refunds,
     books: st.books,
     monthAggs: st.monthAggs,
+    monthMark: st.monthMark,
     monthSheets: st.monthSheets,
     staff: st.staff,
     roster: st.roster,

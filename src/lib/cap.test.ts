@@ -48,7 +48,8 @@ function payload(partial: Partial<KioskPayload>): KioskPayload {
     sales: [],
     settings,
     suppliers: [],
-    shifts: [],
+    // Pliega el aparato que abrió el último turno (plegado.ts): acá, "caja".
+    shifts: [{ id: "sh_caja", status: "open", deviceId: "caja", openingCash: 0, closingCash: null, expectedCash: null, salesTotal: null, salesCount: null, note: null, openedAt: haceDias(0), closedAt: null }],
     drops: [],
     orders: [],
     movements: [],
@@ -58,7 +59,8 @@ function payload(partial: Partial<KioskPayload>): KioskPayload {
   };
 }
 
-const agg = (p: KioskPayload): MonthAgg | undefined => prunePayload(p).monthAggs?.[0];
+const podar = (p: KioskPayload) => prunePayload(p, "caja");
+const agg = (p: KioskPayload): MonthAgg | undefined => podar(p).monthAggs?.[0];
 
 test("el costo que guardó la venta es el que manda", () => {
   const p = payload({
@@ -106,7 +108,7 @@ test("una venta reciente no se pliega", () => {
     products: [producto({ id: "p1" })],
     sales: [venta([{ productId: "p1", name: "Coca", price: 1000, qty: 1, cost: 400 }], { createdAt: haceDias(1) })],
   });
-  const pruned = prunePayload(p);
+  const pruned = podar(p);
   assert.equal(pruned.monthAggs?.length, 0);
   assert.equal(pruned.sales.length, 1);
 });
@@ -196,8 +198,8 @@ test("guardar dos veces no duplica la devolución del mes", () => {
     sales: [],
     refunds: [devolucion({ amount: 1500 })],
   });
-  const unaVez = prunePayload(p);
-  const dosVeces = prunePayload(unaVez);
+  const unaVez = podar(p);
+  const dosVeces = podar(unaVez);
   assert.equal(unaVez.monthAggs?.[0]?.devoluciones, 1500);
   assert.equal(dosVeces.monthAggs?.[0]?.devoluciones, 1500);
   // Se plegó y salió de la lista: por eso no se vuelve a sumar.
@@ -210,7 +212,7 @@ test("la devolución de esta semana todavía no se pliega", () => {
     sales: [],
     refunds: [devolucion({ createdAt: haceDias(1) })],
   });
-  const pruned = prunePayload(p);
+  const pruned = podar(p);
   assert.equal(pruned.monthAggs?.length, 0);
   assert.equal(pruned.refunds?.length, 1);
 });
@@ -221,7 +223,7 @@ test("las devoluciones a proveedor no entran en este cálculo ni se caen", () =>
     sales: [],
     refunds: [devolucion({ kind: "proveedor", amount: 5000, paymentMethod: "credito" })],
   });
-  const pruned = prunePayload(p);
+  const pruned = podar(p);
   assert.equal(pruned.monthAggs?.length, 0);
   assert.equal(pruned.refunds?.length, 1);
 });

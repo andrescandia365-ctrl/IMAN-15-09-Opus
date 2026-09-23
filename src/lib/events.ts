@@ -19,6 +19,7 @@ import type {
   Supplier,
 } from "./types";
 import { richerOrder } from "./cap.ts";
+import { cubierto } from "./plegado.ts";
 
 export type Json =
   | string
@@ -208,9 +209,12 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
       const sale = ev.body as unknown as Sale;
       if (!sale?.id || payload.sales.some((s) => s.id === sale.id)) return payload;
       const qty = new Map(sale.items.map((it) => [it.productId, it.qty]));
+      // Si el resumen del mes ya la tiene (llegó tarde, después de plegarse),
+      // a la lista no entra: contaría dos veces. El stock se mueve igual.
+      const yaPlegada = cubierto(payload.monthMark, sale);
       return {
         ...payload,
-        sales: [sale, ...payload.sales],
+        sales: yaPlegada ? payload.sales : [sale, ...payload.sales],
         // La misma cuenta que hizo checkout en la caja: descuenta stock y lotes
         // que ya existían en ev.at. El evento no manda el array de lotes.
         products: payload.products.map((p) => {
@@ -316,9 +320,10 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
     case "refund": {
       const r = ev.body as unknown as Refund;
       if (!r?.id || (payload.refunds ?? []).some((x) => x.id === r.id)) return payload;
+      const yaPlegada = r.kind === "cliente" && cubierto(payload.monthMark, r);
       return {
         ...payload,
-        refunds: [r, ...(payload.refunds ?? [])],
+        refunds: yaPlegada ? (payload.refunds ?? []) : [r, ...(payload.refunds ?? [])],
         // Igual que en el origen: lo del cliente vuelve sin fecha; lo que va al
         // proveedor sale de los lotes, como una venta.
         products: payload.products.map((p) =>
@@ -549,6 +554,7 @@ export function pulledPatch(next: KioskPayload) {
     orders: next.orders,
     movements: next.movements,
     monthAggs: next.monthAggs ?? [],
+    monthMark: next.monthMark,
     monthSheets: next.monthSheets ?? [],
     staff: next.staff ?? [],
     roster: next.roster ?? [],

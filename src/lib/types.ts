@@ -60,6 +60,8 @@ export interface Sale {
   total: number;
   paid: number | null;
   items: SaleItem[];
+  /** El aparato que la cobró. Ausente en las de antes (ver plegado.ts). */
+  deviceId?: string;
   /**
    * El turno en que se cobró. Ausente en las ventas de antes y en las de un
    * aparato sin actualizar: esas cuentan por hora (ver `ventasDelTurno`).
@@ -70,6 +72,11 @@ export interface Sale {
 export interface CashShift {
   id: string;
   status: "open" | "closed";
+  /**
+   * El aparato que abrió el turno. El que abrió el último es el que pliega el
+   * mes (ver plegado.ts). Ausente en los turnos de antes.
+   */
+  deviceId?: string;
   openingCash: number;
   closingCash: number | null;
   expectedCash: number | null;
@@ -259,6 +266,8 @@ export interface Refund {
   note: string;
   /** El turno en que se devolvió la plata (solo a clientes). Ausente = por hora. */
   shiftId?: string;
+  /** El aparato que la hizo. Ausente en las de antes (ver plegado.ts). */
+  deviceId?: string;
 }
 
 export interface DayBook {
@@ -272,6 +281,17 @@ export interface DayBook {
   expenses: { id: string; name: string; amount: number }[];
   notes: string;
   cells?: Record<string, number>;
+}
+
+/**
+ * Qué ventas y devoluciones ya están adentro de `monthAggs`. `hasta` va por
+ * aparato que cobró ("-" = las que no lo dicen): todo lo de ese aparato
+ * anterior a su `hasta` menos 24 h, más lo que figura en `borde` (lo plegado
+ * en esas 24 h, por si el reloj de ese aparato se movió). Ver plegado.ts.
+ */
+export interface MonthMark {
+  hasta: Record<string, string>;
+  borde: { id: string; at: string; d: string }[];
 }
 
 export interface MonthAgg {
@@ -346,6 +366,8 @@ export interface KioskPayload {
   payMethod: PayMethod;
   books?: DayBook[];
   monthAggs?: MonthAgg[];
+  /** Hasta dónde llega `monthAggs` (ver plegado.ts). Ausente = plegado de antes. */
+  monthMark?: MonthMark;
   monthSheets?: MonthSheet[];
   staff?: StaffMember[];
   roster?: RosterSlot[];
