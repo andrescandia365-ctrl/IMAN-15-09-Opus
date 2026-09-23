@@ -24,10 +24,25 @@
  *
  * Sale con 1 si algo se filtró.
  */
+import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { chromium, devices } from "playwright";
+import { motivoParaNoCorrer } from "./qa-base-local.mjs";
 
 const BASE = process.env.IMAN_QA_URL || "http://127.0.0.1:8080";
+
+// Sube de verdad: solo contra la base local de desarrollo (ver qa-base-local.mjs).
+let envLocal = "";
+try {
+  envLocal = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
+} catch {
+  /* sin .env.local */
+}
+const motivo = motivoParaNoCorrer({ databaseUrl: process.env.DATABASE_URL, envLocal, baseUrl: BASE });
+if (motivo) {
+  console.error(`No corro: ${motivo}`);
+  process.exit(1);
+}
 const CUENTA = { email: "prueba@iman.local", clave: "prueba1234", local: "Kiosco de Prueba" };
 const DEMORA_MS = 2500;
 
