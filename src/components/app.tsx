@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Toaster, toast } from "sonner";
 import { ActivateScreen } from "@/components/activate-screen";
-import { BootScreen } from "@/components/boot-screen";
 import { HubScreen } from "@/components/hub-screen";
 import { LandingScreen } from "@/components/landing-screen";
 import { LocalsWizard } from "@/components/locals-wizard";
+import { OpeningScreen } from "@/components/opening-screen";
 import { Shell } from "@/components/shell";
 import { useCurrentUserState, type AppUser } from "@/lib/auth/use-current-user";
 import { loadAccount, saveOwnerProfile, selectStore, type AccountBundle, type StoreMeta } from "@/lib/kiosk";
@@ -31,6 +31,7 @@ import {
   writeBlobRev,
 } from "@/lib/local-db";
 import { flushDeskOutbox } from "@/lib/desk-outbox";
+import { recallLocalName, rememberLocalName } from "@/lib/local-name";
 import { decideFloorBoot, isBrowserOnline, lockFloor, readFloorLockSync, type FloorLock } from "@/lib/floor-lock";
 import { backupOnHide, flushCopy, pushQuiet, startFromCopy } from "@/lib/sync";
 import { applyPwaUpdate, registerPwa, subscribePwaUpdate } from "@/lib/pwa";
@@ -106,6 +107,10 @@ export function App() {
   const [floor, setFloor] = useState(false);
   const [pullError, setPullError] = useState<string | null>(null);
   const [pwaUpdate, setPwaUpdate] = useState(false);
+  // El local ya tiene sus datos. Hasta entonces se ve la pantalla de apertura,
+  // no el catálogo de ejemplo que trae el store al arrancar.
+  const [localReady, setLocalReady] = useState(false);
+  const [opening, setOpening] = useState<string | null>(null);
 
   const floorUser = user ?? (lock ? userFromLock(lock) : null);
   const userId = floorUser?.id ?? null;
@@ -151,6 +156,7 @@ export function App() {
         setAccess(LOCAL_ACCESS);
         setStores([{ id: last, name, alias: "", updatedAt: new Date().toISOString() }]);
         setActiveStoreId(last);
+        setLocalReady(true);
         setGate("desk");
       });
       return () => {
@@ -202,9 +208,11 @@ export function App() {
             if (!cancelled && other) hydrateKiosk(other);
           }
         }
+        if (!cancelled) setLocalReady(true);
       } catch (err) {
         console.error("[kiosk] local boot", err);
         if (!cancelled && currentLock) setHydrated(true);
+        if (!cancelled) setLocalReady(true);
       }
     })();
 
@@ -419,6 +427,25 @@ export function App() {
     return () => window.removeEventListener("online", flush);
   }, [gate, activeStoreId]);
 
+  useEffect(() => {
+    if (gate !== "desk" || !localReady || !activeStoreId) return;
+    const save = (name: string) => {
+      if (name) rememberLocalName(activeStoreId, name);
+    };
+    save(useImanStore.getState().settings.name);
+    return useImanStore.subscribe((s, prev) => {
+      if (s.settings.name !== prev.settings.name) save(s.settings.name);
+    });
+  }, [gate, localReady, activeStoreId]);
+
+  // Si la copia del aparato no aparece nunca, se abre igual: la caja no se
+  // queda trabada en la pantalla de apertura.
+  useEffect(() => {
+    if (localReady || gate !== "desk") return;
+    const t = window.setTimeout(() => setLocalReady(true), 6000);
+    return () => window.clearTimeout(t);
+  }, [localReady, gate]);
+
   function applyBundle(bundle: AccountBundle, nextGate: Gate) {
     setStores(bundle.stores);
     setActiveStoreId(bundle.activeStoreId);
@@ -429,12 +456,15 @@ export function App() {
 
   async function enterLocal(id: string) {
     setActiveLocalStore(id);
+    setLocalReady(false);
+    setOpening(stores.find((s) => s.id === id)?.name || "el local");
     try {
       const local = await loadLocalSnapshot(id);
       if (local) hydrateKiosk(local);
       if (!isBrowserOnline()) {
         if (local) {
           setActiveStoreId(id);
+          setLocalReady(true);
           setGate("desk");
           toast("Sin red. Abrimos la copia de este aparato.");
           return;
@@ -451,6 +481,7 @@ export function App() {
       void writeBlobRev(bundle.activeStoreId, bundle.rev);
       if (!localHasCopy(local)) await startFromCopy(bundle.activeStoreId, bundle.payload);
       hydrateKiosk(payload, { restore: !localHasCopy(local) });
+      setLocalReady(true);
       setGate("desk");
       void saveLocalSnapshot(id, payload);
     } catch (err) {
@@ -458,12 +489,15 @@ export function App() {
       if (local) {
         setActiveStoreId(id);
         hydrateKiosk(local);
+        setLocalReady(true);
         setGate("desk");
         toast("Sin red. Abrimos la copia de este aparato.");
         return;
       }
       console.error("[stores] enter", err);
       toast.error(errorText(err, "No se pudo abrir el local"));
+    } finally {
+      setOpening(null);
     }
   }
 
@@ -488,7 +522,7 @@ export function App() {
     return (
       <>
         {updateBar}
-        <BootScreen />
+        <OpeningScreen beforeJs />
       </>
     );
   if (boot === "landing" || (authFail && !lock))
@@ -527,14 +561,14 @@ export function App() {
     return (
       <>
         {updateBar}
-        <BootScreen label="Trayendo el local…" />
+        <OpeningScreen />
       </>
     );
   if (!access)
     return (
       <>
         {updateBar}
-        <BootScreen />
+        <OpeningScreen />
       </>
     );
 
@@ -570,6 +604,8 @@ export function App() {
             setGate("hub");
           }}
         />
+      ) : gate === "desk" && !localReady ? (
+        <OpeningScreen name={recallLocalName(activeStoreId)} />
       ) : gate === "desk" ? (
         <Shell
           access={access}
@@ -588,21 +624,25 @@ export function App() {
           }
         />
       ) : (
-        <HubScreen
-          access={access}
-          stores={stores}
-          remaining={remaining}
-          onEnter={(id) => void enterLocal(id)}
-          onActivate={() => setGate("activate")}
-          onRegisterMore={() => setGate("wizard")}
-          onStudio={
-            access.isVendor
-              ? () => {
-                  void navigate({ to: "/estudio" });
-                }
-              : undefined
-          }
-        />
+        <>
+          <HubScreen
+            access={access}
+            stores={stores}
+            remaining={remaining}
+            onEnter={(id) => void enterLocal(id)}
+            onActivate={() => setGate("activate")}
+            onRegisterMore={() => setGate("wizard")}
+            onStudio={
+              access.isVendor
+                ? () => {
+                    void navigate({ to: "/estudio" });
+                  }
+                : undefined
+            }
+          />
+          {/* Encima del hub: los primeros 300 ms es transparente y el hub queda a la vista. */}
+          {opening ? <OpeningScreen name={opening} /> : null}
+        </>
       )}
       <Toaster position="top-center" richColors closeButton />
     </>

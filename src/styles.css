@@ -230,3 +230,107 @@ html.light {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/*
+ * Pantalla de apertura (opening-screen.tsx). Lo de base es el símbolo quieto;
+ * las animaciones lo arman encima. Todo espera 300 ms: si el local abre antes,
+ * no se ve nada y no hay parpadeo.
+ */
+/* El fondo queda desde el primer cuadro: se esperan el símbolo y el texto. */
+.iman-open > svg,
+.iman-open-label {
+  animation: iman-open-wait 0s 300ms backwards;
+}
+
+.iman-open-bars {
+  transform-box: fill-box;
+  transform-origin: top;
+  animation: iman-open-bars 420ms linear 300ms backwards;
+}
+
+.iman-open-scan {
+  opacity: 0;
+  animation: iman-open-scan 420ms linear 300ms backwards;
+}
+
+.iman-open-field path {
+  animation: iman-open-draw 520ms ease-out 720ms backwards;
+}
+
+.iman-open-field .iman-open-outer {
+  animation-delay: 800ms;
+}
+
+.iman-open-field {
+  animation: iman-open-pulse 1.6s ease-in-out 1320ms infinite;
+}
+
+.iman-open-label::after {
+  content: attr(data-label);
+}
+
+@keyframes iman-open-wait {
+  from,
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes iman-open-bars {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+/* La línea baja del borde de arriba de las barras (y 44) al de abajo (y 68). */
+@keyframes iman-open-scan {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+
+/* Con punta redonda, un trazo de largo cero igual pinta un punto: se esconde hasta arrancar. */
+@keyframes iman-open-draw {
+  from {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    stroke-opacity: 0;
+  }
+  2% {
+    stroke-opacity: 1;
+  }
+  to {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes iman-open-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iman-open-bars,
+  .iman-open-scan,
+  .iman-open-field,
+  .iman-open-field path {
+    animation: none !important;
+  }
+}
