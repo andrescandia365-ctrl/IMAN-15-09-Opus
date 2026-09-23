@@ -60,6 +60,11 @@ export interface Sale {
   total: number;
   paid: number | null;
   items: SaleItem[];
+  /**
+   * El turno en que se cobró. Ausente en las ventas de antes y en las de un
+   * aparato sin actualizar: esas cuentan por hora (ver `ventasDelTurno`).
+   */
+  shiftId?: string;
 }
 
 export interface CashShift {

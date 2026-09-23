@@ -29,6 +29,7 @@ import { nextCadenceDates } from "./supplier-cadence";
 import { addLot, consumeFifo } from "./lots";
 import { marginPrice, repriceProducts, unitCost } from "./pricing";
 import { costoAGondola, planReceive } from "./receive-cost";
+import { ventasDelTurno } from "./turno";
 import { uid } from "./utils";
 import {
   CATEGORY_SUPPLIER,
@@ -495,6 +496,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
                 : "Débito",
           total,
           paid: st.payMethod === "efectivo" ? paid || total : null,
+          shiftId: open.id,
           items: st.ticket.map((l) => ({
             productId: l.productId,
             name: l.name,
@@ -831,7 +833,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         const st = get();
         const open = st.shifts.find((s) => s.status === "open");
         if (!open) return { ok: false, error: "No hay caja abierta" };
-        const salesIn = st.sales.filter((s) => s.createdAt >= open.openedAt);
+        const salesIn = ventasDelTurno(st.sales, open);
         const efectivo = salesIn
           .filter((s) => s.paymentMethod === "efectivo")
           .reduce((a, s) => a + s.total, 0);
@@ -1489,7 +1491,7 @@ export function computeCash(st: {
       threshold: st.cashThreshold,
     };
   }
-  const sales = st.sales.filter((s) => s.createdAt >= open.openedAt);
+  const sales = ventasDelTurno(st.sales, open);
   const clientRf = st.refunds.filter((r) => r.kind === "cliente" && r.createdAt >= open.openedAt);
   const efectivo = sales.filter((s) => s.paymentMethod === "efectivo").reduce((a, s) => a + s.total, 0);
   const mp = sales.filter((s) => s.paymentMethod === "mercadopago").reduce((a, s) => a + s.total, 0);
