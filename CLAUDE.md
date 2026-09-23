@@ -272,6 +272,36 @@ NC real en PDF · login separado para el encargado · PowerSync/CRDT · React
 Native · backup automático de blob completo · impresora WebUSB clase 7 (hoy solo
 serial)
 
+### Plan del celu como caja
+
+Decisión de producto: IMAN tiene que servir en un local que solo tiene un
+celular. Cada local tiene **una sola caja**, que puede ser la PC o un celu: es
+un rol del aparato, no su tamaño de pantalla. Los demás aparatos son de piso.
+Hasta que esto esté construido, las invariantes 3 y 4 siguen valiendo como
+están escritas.
+
+- **a. Cada venta lleva su turno** y el arqueo cuenta por turno. Hecho.
+- **b. El rol de caja lo decide el servidor**, en lugar del ancho de
+  pantalla. Lo primero: la dirección del Sincronizar (`reviewCloud`).
+
+  **Antes del c: definir el mínimo de un kiosco solo celu.** Necesita más que
+  cobrar. Hoy Pedidos, Actualizar precios y la importación del catálogo son
+  solo de PC; en el celu los precios del dueño son de solo lectura; y la
+  planilla necesita una vista de un día para pantalla chica. Antes de construir
+  el cobro hay que definir el mínimo con el que un kiosco solo celu funciona de
+  verdad.
+- **c. Cobro en el celu.**
+- **d. Pase de caja** de un aparato a otro. La primera versión pide el turno
+  cerrado.
+
+El iPhone queda en pausa hasta poder probarlo en uno real.
+
+**El b va antes que el c, sin excepción.** El mes lo pliega el aparato
+que abrió el último turno (`plegado.ts`). Hoy solo la PC abre turnos, así que
+solo ella pliega y el caso de dos aparatos plegando a la vez no existe. El día
+que el celu pueda abrir turnos sin que el servidor decida quién es la caja, ese
+caso aparece, y el resumen del mes puede quedar corto sin que nadie se entere.
+
 ### Pendiente para el commit del escáner partido
 
 Las dos van juntas en ese commit, no sueltas:
