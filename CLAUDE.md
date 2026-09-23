@@ -354,3 +354,7 @@ El founder (Andres) manda correcciones desde el uso real del local. El ciclo:
 4. **Si una corrección choca con una invariante de arriba, pará y decilo.** No
    la implementes callado.
 5. Cerrá con los cuatro checks y contá qué probaste a mano.
+6. **Nunca levantar el servidor local contra la base de producción.** Cualquier
+   prueba, script o arreglo que escriba datos corre contra la base de
+   desarrollo. Si hace falta verificar algo contra Neon, se hace contra el
+   deploy en Vercel, en incógnito, con una cuenta de prueba.
