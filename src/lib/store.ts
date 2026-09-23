@@ -354,8 +354,27 @@ function seedState() {
   };
 }
 
+/**
+ * Con qué arranca el store antes de tener un local. Vacío: el catálogo de
+ * ejemplo es solo del modo demo sin login, que lo pide con `resetDemo`. Un
+ * aparato con sesión que mostrara, guardara o subiera esto mientras llega la
+ * copia estaría usando un local que no es el suyo.
+ */
+function emptyState() {
+  const s = seedState();
+  return {
+    ...s,
+    products: [] as Product[],
+    categories: [] as Category[],
+    sales: [] as Sale[],
+    suppliers: [] as Supplier[],
+    shifts: [] as CashShift[],
+    settings: { ...s.settings, name: "", city: "" },
+  };
+}
+
 export const useImanStore = create<ImanState>()((set, get) => ({
-      ...seedState(),
+      ...emptyState(),
       hydrated: false,
 
       setHydrated: (v) => set({ hydrated: v }),

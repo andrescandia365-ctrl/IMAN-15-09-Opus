@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Toaster, toast } from "sonner";
 import { ActivateScreen } from "@/components/activate-screen";
@@ -107,10 +107,14 @@ export function App() {
   const [floor, setFloor] = useState(false);
   const [pullError, setPullError] = useState<string | null>(null);
   const [pwaUpdate, setPwaUpdate] = useState(false);
-  // El local ya tiene sus datos. Hasta entonces se ve la pantalla de apertura,
-  // no el catálogo de ejemplo que trae el store al arrancar.
+  // El local ya tiene sus datos. Hasta entonces se ve la pantalla de apertura
+  // y nada guarda ni sube: el store todavía no es el local.
   const [localReady, setLocalReady] = useState(false);
   const [opening, setOpening] = useState<string | null>(null);
+  // No abrió: ni copia en el aparato ni fotocopia del servidor.
+  const [openFailed, setOpenFailed] = useState(false);
+  const noCopyHere = useRef(false);
+  const noCopyRemote = useRef(false);
 
   const floorUser = user ?? (lock ? userFromLock(lock) : null);
   const userId = floorUser?.id ?? null;
@@ -197,6 +201,7 @@ export function App() {
         } else if (currentLock) {
           setAccess(LOCAL_ACCESS);
         }
+        let loaded = Boolean(snap);
         if (snap) hydrateKiosk(snap);
         else if (currentLock) setHydrated(true);
         if (currentLock) {
@@ -205,14 +210,19 @@ export function App() {
           setActiveLocalStore(currentLock.storeId);
           if (!snap) {
             const other = await loadLocalSnapshot(currentLock.storeId);
-            if (!cancelled && other) hydrateKiosk(other);
+            if (!cancelled && other) {
+              hydrateKiosk(other);
+              loaded = true;
+            }
           }
         }
-        if (!cancelled) setLocalReady(true);
+        if (cancelled) return;
+        if (loaded) setLocalReady(true);
+        else if (currentLock) noCopyOnDevice();
       } catch (err) {
         console.error("[kiosk] local boot", err);
         if (!cancelled && currentLock) setHydrated(true);
-        if (!cancelled) setLocalReady(true);
+        if (!cancelled && currentLock) noCopyOnDevice();
       }
     })();
 
@@ -270,6 +280,7 @@ export function App() {
           // Sin copia propia el aparato arranca de la fotocopia: sigue la cinta desde donde llega la foto.
           if (!localHasCopy(local)) await startFromCopy(storeId, account.payload);
           hydrateKiosk(payload, { restore: !localHasCopy(local) });
+          setLocalReady(true);
           void saveLocalSnapshot(storeId, payload);
           void saveSession({
             access: nextAccess,
@@ -281,6 +292,8 @@ export function App() {
         if (!readFloorLockSync()) {
           setStores([]);
           setHydrated(true);
+        } else {
+          noCopyOnServer();
         }
       })
       .catch((err: unknown) => {
@@ -290,7 +303,10 @@ export function App() {
           setAuthFail(true);
           return;
         }
-        if (readFloorLockSync()) return;
+        if (readFloorLockSync()) {
+          noCopyOnServer();
+          return;
+        }
         console.error("[kiosk] load failed", err);
         const last = lastKnownStore();
         void loadLocalSnapshot(last).then((local) => {
@@ -322,7 +338,7 @@ export function App() {
   }, [userId, gate, activeStoreId, floorUser?.displayName, floorUser?.primaryEmail]);
 
   useEffect(() => {
-    if (!userId || !hydrated || gate !== "desk") return;
+    if (!userId || !hydrated || gate !== "desk" || !localReady) return;
     let t: number | undefined;
     let last = "";
     let subido = "";
@@ -411,13 +427,15 @@ export function App() {
       window.removeEventListener("pagehide", onHide);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [userId, hydrated, gate, activeStoreId]);
+  }, [userId, hydrated, gate, activeStoreId, localReady]);
 
   useEffect(() => {
     const flush = () => {
       if (!isBrowserOnline()) return;
       void flushDeskOutbox().catch(() => {});
-      if (gate === "desk" && activeStoreId) {
+      // La fotocopia pendiente se vuelve a armar con el store: antes de tener
+      // el local, subiría otra cosa.
+      if (gate === "desk" && activeStoreId && localReady) {
         void flushCopy(activeStoreId).catch(() => {});
         void pushQuiet(activeStoreId).catch(() => {});
       }
@@ -425,7 +443,7 @@ export function App() {
     window.addEventListener("online", flush);
     if (isBrowserOnline()) flush();
     return () => window.removeEventListener("online", flush);
-  }, [gate, activeStoreId]);
+  }, [gate, activeStoreId, localReady]);
 
   useEffect(() => {
     if (gate !== "desk" || !localReady || !activeStoreId) return;
@@ -438,13 +456,24 @@ export function App() {
     });
   }, [gate, localReady, activeStoreId]);
 
-  // Si la copia del aparato no aparece nunca, se abre igual: la caja no se
-  // queda trabada en la pantalla de apertura.
+  // Nunca se abre un local con datos que no son suyos. Sin copia en el aparato
+  // se espera la fotocopia del servidor; si tampoco llega, se avisa.
+  function noCopyOnDevice() {
+    noCopyHere.current = true;
+    if (!isBrowserOnline() || noCopyRemote.current) setOpenFailed(true);
+  }
+  function noCopyOnServer() {
+    noCopyRemote.current = true;
+    if (noCopyHere.current) setOpenFailed(true);
+  }
+
+  // Si nada contesta (IndexedDB trabado, la red colgada), tampoco se queda
+  // girando para siempre.
   useEffect(() => {
-    if (localReady || gate !== "desk") return;
-    const t = window.setTimeout(() => setLocalReady(true), 6000);
+    if (localReady || openFailed || gate !== "desk") return;
+    const t = window.setTimeout(() => setOpenFailed(true), 12_000);
     return () => window.clearTimeout(t);
-  }, [localReady, gate]);
+  }, [localReady, openFailed, gate]);
 
   function applyBundle(bundle: AccountBundle, nextGate: Gate) {
     setStores(bundle.stores);
@@ -604,6 +633,19 @@ export function App() {
             setGate("hub");
           }}
         />
+      ) : gate === "desk" && !localReady && openFailed ? (
+        <main className="fixed inset-0 grid place-items-center bg-[#14130f] px-4 text-[#ebe4d4]">
+          <div className="w-full max-w-sm text-center">
+            <p className="text-base">No pude abrir el local. Probá de nuevo.</p>
+            <button
+              type="button"
+              className="mt-5 w-full rounded-md bg-accent px-4 py-3 text-sm font-medium text-accent-fg"
+              onClick={() => window.location.reload()}
+            >
+              Reintentar
+            </button>
+          </div>
+        </main>
       ) : gate === "desk" && !localReady ? (
         <OpeningScreen name={recallLocalName(activeStoreId)} />
       ) : gate === "desk" ? (
