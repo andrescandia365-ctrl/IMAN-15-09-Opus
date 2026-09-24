@@ -20,6 +20,7 @@ import {
   writeBlobRev,
   writePullStart,
 } from "@/lib/local-db";
+import { anotarCaja } from "@/lib/caja-local";
 import { withKeyLock } from "@/lib/key-lock";
 import { alreadyInCopy, fromCopyStart, pullMode, pullStartAfter } from "@/lib/pull-start";
 import { pullEvents, pushEvents, saveKiosk, selectStore } from "@/lib/kiosk";
@@ -46,6 +47,7 @@ async function pushPending(storeId: string): Promise<number> {
   let sent = 0;
   for (const batch of chunk(pending)) {
     const res = await pushEvents({ data: { storeId, events: batch } });
+    anotarCaja(storeId, res.caja);
     const accepted = res.accepted?.length ? res.accepted : batch.map((e) => e.id);
     await markAcked(storeId, accepted);
     sent += accepted.length;
@@ -96,6 +98,7 @@ async function pullApply(storeId: string): Promise<{ pulled: number; more: boole
       data: { storeId, after: meta.lastPullAt, afterSeq: cursor || undefined },
     });
     pulled.push(...remote.events);
+    anotarCaja(storeId, remote.caja);
     cursor = remote.cursor;
     more = remote.hasMore;
     if (!more) break;

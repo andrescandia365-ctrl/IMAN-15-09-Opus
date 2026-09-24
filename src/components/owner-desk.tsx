@@ -35,6 +35,7 @@ import {
   monthsOfQuarter,
   monthsOfYear,
 } from "@/lib/ledger";
+import { CajaDelLocal } from "@/components/caja-del-local";
 import { SettingsView } from "@/components/settings-view";
 import { TeamView } from "@/components/team-view";
 import { OwnerPrices } from "@/components/owner-prices";
@@ -488,6 +489,8 @@ export function OwnerDesk({
 
         {tab === "local" ? (
           <div className="grid h-full min-h-0 gap-3 overflow-y-auto lg:grid-cols-[minmax(16rem,0.7fr)_minmax(0,1.3fr)]">
+            <div className="flex flex-col gap-3">
+            <CajaDelLocal storeId={activeStoreId} />
             <div className="rounded-xl bg-surface p-5 shadow-[var(--shadow-border)]">
               <p className="text-xs font-medium uppercase tracking-[0.14em] text-subtle">Locales</p>
               <ul className="mt-3 space-y-1">
@@ -533,6 +536,7 @@ export function OwnerDesk({
                   </Button>
                 </form>
               ) : null}
+            </div>
             </div>
             <SettingsView access={access} />
           </div>

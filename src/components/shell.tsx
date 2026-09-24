@@ -37,7 +37,7 @@ import {
 import { UserButton } from "@/lib/auth/gates";
 import { currentShiftKey, formatARS, shiftLabel } from "@/lib/format";
 import { toast } from "sonner";
-import { addStore, groupRollup, selectStore, type StoreMeta, type StoreRollup } from "@/lib/kiosk";
+import { addStore, groupRollup, selectStore, verCaja, type StoreMeta, type StoreRollup } from "@/lib/kiosk";
 
 import type { MyAccess } from "@/lib/license";
 import { clearFlashSecret } from "@/lib/shop-secret-flash";
@@ -47,9 +47,13 @@ import { isBrowserOnline } from "@/lib/floor-lock";
 import { syncNow } from "@/lib/sync";
 import type { ViewId } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useVigilarCaja } from "@/lib/caja-local";
 import { usePhoneUi } from "@/lib/device";
 import { lockOwner } from "@/lib/owner-pin";
 import { errorText } from "@/lib/errors";
+
+/** Pregunta al servidor quién es la caja del local (ver useVigilarCaja). */
+const consultarCaja = (storeId: string) => verCaja({ data: { storeId } });
 
 const DESK_NAV: { id: ViewId; label: string; icon: typeof LayoutGrid }[] = [
   { id: "counter", label: "Mostrador", icon: LayoutGrid },
@@ -93,6 +97,7 @@ export function Shell({
   const hydrateKiosk = useImanStore((s) => s.hydrateKiosk);
   const cash = useCashSnapshot();
   const phone = usePhoneUi();
+  useVigilarCaja(activeStoreId, consultarCaja);
   const [clock, setClock] = useState(() => new Date());
   const [tasksOpen, setTasksOpen] = useState(false);
   const [ownerOpen, setOwnerOpen] = useState(false);

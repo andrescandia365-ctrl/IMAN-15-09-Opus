@@ -187,6 +187,9 @@ igual. Si no queda escrito, vuelve a pasar.
 | `src/lib/sync.ts` | `syncNow` (botón), `pushQuiet` (la cinta sube sola), `pullCopy` |
 | `src/lib/kiosk.ts` | servidor: `pushEvents`, `pullEvents` |
 | `src/lib/pack.ts` | `findByScan`: packBarcode → packQty unidades; barcode → 1 |
+| `src/lib/rol.ts` | el rol del aparato (caja / piso / sin asignar) y `puedeCobrar`: el ancho decide la disposición, el rol los permisos |
+| `src/lib/caja-local.ts` | lo que el aparato sabe de la caja (`iman-caja:{local}`), `useRol`, `useVigilarCaja` |
+| `src/components/caja-del-local.tsx` | Dueño → Local: quién es la caja y "Tomar la caja en este aparato" |
 | `src/lib/escaneo.ts` | lecturas por presencia, ritmo de la cámara, recorte visible, lector en modo teclado |
 | `src/lib/camara-lectora.ts` | el bucle de la cámara (BarcodeDetector) que usan las dos pantallas de escaneo |
 | `src/lib/ledger.ts` | filas de Asientos por tags, archivo del mes con las filas de entonces |

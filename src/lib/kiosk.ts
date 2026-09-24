@@ -9,6 +9,7 @@ import { blankKiosk, MAX_STORES } from "@/lib/kiosk-blank";
 import { localeCapFor } from "@/lib/license";
 import type { KioskPayload, Sale } from "@/lib/types";
 import type { ImanEvent } from "@/lib/events";
+import type { CajaServidor } from "@/lib/rol";
 
 export type StoreMeta = {
   id: string;
@@ -22,6 +23,8 @@ export type AccountBundle = {
   activeStoreId: string;
   payload: KioskPayload;
   rev: number;
+  /** Qué aparato es la caja del local activo (ver rol.ts). */
+  caja?: CajaServidor;
 };
 
 export type StoreRollup = {
@@ -123,17 +126,32 @@ function pack(payload: KioskPayload): { json: string; name: string } {
 async function readStore(
   userId: string,
   storeId: string,
-): Promise<{ payload: KioskPayload; rev: number } | null> {
+): Promise<{ payload: KioskPayload; rev: number; caja: CajaServidor } | null> {
   const sql = await getSql();
-  const rows = await sql<{ payload: unknown; rev: number | null }>`
-    select payload, coalesce(rev, 0) as rev from kiosk_store
+  const rows = await sql<{ payload: unknown; rev: number | null; caja_device: string | null; caja_ver: number | null }>`
+    select payload, coalesce(rev, 0) as rev, caja_device, coalesce(caja_ver, 0) as caja_ver from kiosk_store
     where user_id = ${userId} and store_id = ${storeId}
     limit 1
   `;
   if (!rows[0]) return null;
   const payload = parsePayload(rows[0].payload);
   if (!payload) return null;
-  return { payload, rev: Number(rows[0].rev ?? 0) };
+  return {
+    payload,
+    rev: Number(rows[0].rev ?? 0),
+    caja: { device: rows[0].caja_device ?? null, ver: Number(rows[0].caja_ver ?? 0) },
+  };
+}
+
+/** Qué aparato es la caja del local. Viaja en cada respuesta de la cinta. */
+async function leerCaja(userId: string, storeId: string): Promise<CajaServidor> {
+  const sql = await getSql();
+  const rows = await sql<{ caja_device: string | null; caja_ver: number | null }>`
+    select caja_device, coalesce(caja_ver, 0) as caja_ver from kiosk_store
+    where user_id = ${userId} and store_id = ${storeId}
+    limit 1
+  `;
+  return { device: rows[0]?.caja_device ?? null, ver: Number(rows[0]?.caja_ver ?? 0) };
 }
 
 async function readPayload(userId: string, storeId: string): Promise<KioskPayload | null> {
@@ -305,7 +323,7 @@ export const selectStore = createServerFn({ method: "POST" })
       on conflict (user_id) do update set active_store_id = excluded.active_store_id, updated_at = now()
     `;
     const stores = await listMeta(context.userId);
-    return { stores, activeStoreId: data.storeId, payload: row.payload, rev: row.rev };
+    return { stores, activeStoreId: data.storeId, payload: row.payload, rev: row.rev, caja: row.caja };
   });
 
 export const groupRollup = createServerFn({ method: "GET" })
@@ -448,7 +466,7 @@ async function migrateAndLoad(userId: string): Promise<AccountBundle | null> {
   if (!stores.some((s) => s.id === activeStoreId)) activeStoreId = stores[0]!.id;
   const row = await readStore(userId, activeStoreId);
   if (!row) return null;
-  return { stores, activeStoreId, payload: row.payload, rev: row.rev };
+  return { stores, activeStoreId, payload: row.payload, rev: row.rev, caja: row.caja };
 }
 
 type SaveKioskIn =
@@ -522,7 +540,8 @@ export const pushEvents = createServerFn({ method: "POST" })
     // ventas del local (ver event-rows.ts).
     const { text, params, accepted } = eventRows(context.userId, data.storeId, data.events);
     if (text) await sql.query(text, params);
-    return { ok: true as const, n: accepted.length, accepted };
+    // Quién es la caja: así un aparato se entera en la próxima subida si otro la tomó.
+    return { ok: true as const, n: accepted.length, accepted, caja: await leerCaja(context.userId, data.storeId) };
   });
 
 const PULL_PAGE = 500;
@@ -542,7 +561,7 @@ export const pullEvents = createServerFn({ method: "POST" })
     async ({
       context,
       data,
-    }): Promise<{ events: ImanEvent[]; cursor: number; hasMore: boolean }> => {
+    }): Promise<{ events: ImanEvent[]; cursor: number; hasMore: boolean; caja: CajaServidor }> => {
       const sql = await getSql();
       // Un aparato que viene de la versión vieja solo tiene la hora del último
       // pull. Se traduce a número de orden una vez, para no volver a aplicar
@@ -575,7 +594,65 @@ export const pullEvents = createServerFn({ method: "POST" })
         limit ${PULL_PAGE}
       `;
       const cursor = rows.reduce((m, r) => Math.max(m, Number(r.seq)), base);
-      return { events: rows.map(asEvent), cursor, hasMore: rows.length === PULL_PAGE };
+      return {
+        events: rows.map(asEvent),
+        cursor,
+        hasMore: rows.length === PULL_PAGE,
+        caja: await leerCaja(context.userId, data.storeId),
+      };
     },
   );
 
+
+export type TomarCajaResult =
+  | { ok: true; caja: CajaServidor }
+  | { ok: false; caja: CajaServidor; error: string };
+
+/**
+ * Este aparato pasa a ser la caja del local. Pide el PIN del dueño (el hash,
+ * contra el del local) y la versión de la caja que el aparato conoce: si otro
+ * la cambió en el medio, no pisa (como el `rev` de la fotocopia).
+ */
+export const tomarCaja = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((data: { storeId: string; device: string; esperado: number; pinHash: string }) => {
+    const storeId = String(data?.storeId ?? "").trim();
+    const device = String(data?.device ?? "").trim().slice(0, 64);
+    const pinHash = String(data?.pinHash ?? "").trim();
+    const esperado = Number(data?.esperado);
+    if (!storeId || !device) throw new Error("Falta el local o el aparato");
+    if (!Number.isInteger(esperado) || esperado < 0) throw new Error("Versión de la caja inválida");
+    return { storeId, device, esperado, pinHash };
+  })
+  .handler(async ({ context, data }): Promise<TomarCajaResult> => {
+    const row = await readStore(context.userId, data.storeId);
+    if (!row) throw new Error("Ese local no existe");
+    const guardado = row.payload.settings?.ownerPinHash ?? "";
+    if (!guardado) {
+      return { ok: false, caja: row.caja, error: "Primero creá el PIN del dueño y tocá Sincronizar." };
+    }
+    if (guardado !== data.pinHash) {
+      return { ok: false, caja: row.caja, error: "El PIN no coincide con el del local." };
+    }
+    const sql = await getSql();
+    const updated = await sql<{ caja_ver: number }>`
+      update kiosk_store
+      set caja_device = ${data.device}, caja_ver = caja_ver + 1, caja_desde = now()
+      where user_id = ${context.userId} and store_id = ${data.storeId} and caja_ver = ${data.esperado}
+      returning caja_ver
+    `;
+    const caja = await leerCaja(context.userId, data.storeId);
+    if (!updated[0]) {
+      return { ok: false, caja, error: "Otro aparato cambió la caja recién. Probá de nuevo." };
+    }
+    return { ok: true, caja };
+  });
+
+/** Quién es la caja del local, sin nada más: lo consulta el aparato de vez en cuando. */
+export const verCaja = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((data: { storeId: string }) => {
+    if (!data?.storeId) throw new Error("Falta el local");
+    return { storeId: data.storeId };
+  })
+  .handler(async ({ context, data }): Promise<CajaServidor> => leerCaja(context.userId, data.storeId));

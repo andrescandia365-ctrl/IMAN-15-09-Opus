@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatARS, formatTime } from "@/lib/format";
+import { useRol } from "@/lib/caja-local";
 import { useCashSnapshot, useImanStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { EncargadoBook } from "@/components/ledger-grid";
@@ -26,6 +27,8 @@ export function CashView() {
   const openShift = useImanStore((s) => s.openShift);
   const closeShift = useImanStore((s) => s.closeShift);
   const addDrop = useImanStore((s) => s.addDrop);
+  // Abrir, retirar y cerrar son de la caja del local (ver rol.ts).
+  const { puedeCobrar } = useRol(useImanStore((s) => s.deskStoreId));
   const shifts = useImanStore((s) => s.shifts);
   const drops = useImanStore((s) => s.drops);
   const refunds = useImanStore((s) => s.refunds);
@@ -87,7 +90,11 @@ export function CashView() {
 
         <section className="flex flex-col rounded-xl bg-surface p-6 shadow-[var(--shadow-border)]">
           <h2 className="font-display text-xl tracking-tight">Turno de caja</h2>
-          {cash.open ? (
+          {!puedeCobrar ? (
+            <p className="mt-2 text-sm text-muted">
+              Esta PC no es la caja del local. El turno se abre, se retira y se cierra en la caja.
+            </p>
+          ) : cash.open ? (
             <>
               <p className="mt-2 text-sm text-muted">
                 Abierta a las {formatTime(cash.open.openedAt)} · fondo {formatARS(cash.open.openingCash)}
