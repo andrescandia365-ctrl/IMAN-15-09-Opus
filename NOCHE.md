@@ -291,3 +291,45 @@ No probado: el asistente de locales ("Registrar más") con "Solo tengo celular"
 desde un celu: hace falta una cuenta con más de un local en el plan, y no la
 armé. El código es el mismo camino del servidor (asigna la caja al crear el
 local); en un celu real, nada.
+
+---
+
+## Tarea 6 — El gráfico de líneas en El mes
+
+**Hecho.** Commit `e7e890f`.
+
+- En Dueño → El mes, una tarjeta **"Ventas por día"**: el total de cada día del
+  mes elegido (línea de acento) contra otro mes (gris punteado; por defecto el
+  anterior, elegible entre los seis anteriores y el mismo mes del año pasado).
+  Días del 1 al 31. El pico y el valle del mes van escritos; el resto, al pasar
+  el dedo (tooltip con los dos meses).
+- Recharts, colores de los tokens, modo claro y oscuro. **Sin datos, un texto**
+  ("De estos meses no quedan ventas por día"), nunca un gráfico vacío.
+
+**El límite de los datos (importante):** las ventas sueltas se guardan solo
+7 días; las más viejas se pliegan en un total por mes, **sin el día**. Para los
+días viejos usé los **turnos cerrados** (cada uno trae lo que vendió), en el día
+local en que se abrieron. Se guardan 90 turnos: alcanza para uno o dos meses
+según cuántos turnos haga el local. Un día sin ventas ni turnos queda como
+**hueco** en la línea, no como cero (puede haber vendido y ya no quedar el
+detalle). Guardar el total por día en el resumen plegado lo resolvería para
+siempre, pero es tocar el plegado ("qué no se toca"): lo dejé anotado en
+Pendientes, necesita GO.
+
+Probado en la app: cargué en la copia del aparato 40 días de turnos cerrados
+(con domingos cerrados) y 6 días de ventas; PC en oscuro y en claro, tooltip,
+celu, y una cuenta nueva sin ventas (muestra el texto). Tests de la cuenta por
+día (`ventas-dia.test.ts`).
+
+Decisiones que tomé solo:
+- **Tooltip.** El gráfico de barras de al lado tiene la regla "nada de
+  tooltips, los montos van escritos". Con 31 puntos no entran escritos: escribí
+  solo el pico y el valle, y el resto va al pasar el dedo.
+- **Los colores de marca no pasan el "piso de saturación"** del validador de
+  paletas (el verde es apagado a propósito). Pasan lo que importa para
+  distinguir las dos líneas (daltonismo, contraste). Para no depender solo del
+  color, la línea de comparación va punteada.
+
+Preguntas para Andres:
+- ¿Guardamos el total por día en el resumen plegado (toca el plegado) para
+  poder comparar meses viejos por día?
