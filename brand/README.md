@@ -82,18 +82,30 @@ public/favicon.svg              simplificada
 public/favicon.ico              simplificada, 16 + 32 + 48 adentro
 public/icon-192.png             completa, cuadrado de esquinas redondeadas
 public/icon-512.png             completa, cuadrado de esquinas redondeadas
-public/icon-maskable-512.png    completa, fondo hasta el borde (Android)
+public/icon-1024.png            la misma, 1024
+public/icon-maskable-1024.png   completa, fondo hasta el borde (Android)
+public/icon-maskable-512.png    la misma, más chica
 public/icon-maskable-192.png    la misma, más chica
 public/apple-touch-icon.png     completa, 180, fondo sólido (iOS no admite transparencia)
 public/og.jpg                   la misma imagen para compartir, en JPG
 ```
 
-**El maskable se mide, no se supone.** Android recorta cada ícono con la
-forma del lanzador y solo garantiza el círculo central del 80%. El script
-rasteriza el 512 y busca el píxel del dibujo más lejano al centro: la línea de
-campo de abajo llega a 203,9 px y la zona segura es de 204,8 px. Entra a
-tamaño completo, justo. Si algún día no entra, el script achica el símbolo
+**El maskable se mide, no se supone.** Con él Android arma el ícono
+adaptable, que recorta con la forma del lanzador y, en la pantalla de
+arranque, con un círculo. Lo que ninguna máscara recorta son los 66 dp del
+centro de un lienzo de 108 dp: la especificación oficial de Android, más
+estricta que el 80% de la especificación web de maskable. El script rasteriza
+el 1024 y busca el píxel del dibujo más lejano al centro: con el símbolo al
+76% llega a 310,1 px y la zona segura es de 312,9 px. Si no entra, lo achica
 (nunca lo recorta).
+
+**Por qué hay 1024.** Desde Android 12 la pantalla de arranque dibuja el
+ícono adaptable a unos 160 dp. Con solo 512, en un celu de densidad alta hay
+que agrandarlo y se ve pixelado.
+
+**El SVG no va en el manifest.** `favicon.svg` es la versión simplificada,
+para 48 px o menos: sigue como favicon, pero en el manifest figuraba como
+ícono de cualquier tamaño.
 
 **En la PC, el dock y la barra de tareas muestran la completa achicada.**
 Probado instalando: Chrome genera los íconos del sistema (32, 48, 128…)

@@ -267,8 +267,10 @@ for (const size of [16, 32, 48]) chicos.push({ size, buf: await png(simboloSimpl
 escribir("public/favicon.ico", ico(chicos), "16 + 32 + 48 (simplificada)");
 
 // PWA: la completa en un cuadrado de esquinas redondeadas. Afuera, transparente.
+// El de 1024 es para que Android nunca tenga que agrandar: con 512 la pantalla
+// de arranque se veía pixelada en celus de densidad alta.
 const redondeado = doc({ ...V, fondo: TINTA, rx: 24, cuerpo: completa(COMPLETA) });
-for (const size of [192, 512]) escribir(`public/icon-${size}.png`, await png(redondeado, size), `${size} (completa, redondeada)`);
+for (const size of [192, 512, 1024]) escribir(`public/icon-${size}.png`, await png(redondeado, size), `${size} (completa, redondeada)`);
 
 // iOS no admite transparencia en el apple-touch-icon: fondo sólido, iOS redondea solo.
 const apple = await png(simboloCompleto, 180);
@@ -279,18 +281,24 @@ escribir("public/apple-touch-icon.png", apple, "180 (completa, fondo sólido)");
 // que gane, el kiosquero ve el mismo ícono.
 escribir("public/__grok/icon-180.png", apple, "180 (el mismo)");
 
-// Maskable: Android recorta cada ícono con la forma del lanzador y solo
-// garantiza el círculo central del 80% (radio 0,4 del lado). Se mide sobre el
-// PNG: si el símbolo no entra, se achica (nunca se recorta).
+// Maskable: Android arma con esto el ícono adaptable, que recorta con la forma
+// del lanzador y, en la pantalla de arranque, con un círculo. La zona que
+// ninguna máscara recorta es la de la especificación de Android: los 66 dp del
+// centro de un lienzo de 108 dp (radio 33/108 del lado). Es más estricta que
+// el 80% de la especificación web de maskable, que es la que se usaba y
+// dejaba el símbolo en el borde. Se mide sobre el PNG: si el símbolo no entra,
+// se achica (nunca se recorta).
+const ZONA_ANDROID = 33 / 108;
 let k = 1;
 for (;;) {
   const maskable = doc({ ...V, fondo: TINTA, cuerpo: escalado(completa(COMPLETA), k) });
-  const buf512 = await png(maskable, 512);
-  const { max, lado } = await radioDelDibujo(buf512, TINTA);
-  const zona = 0.4 * lado;
+  const buf1024 = await png(maskable, 1024);
+  const { max, lado } = await radioDelDibujo(buf1024, TINTA);
+  const zona = ZONA_ANDROID * lado;
   if (max <= zona) {
-    escribir("public/icon-maskable-512.png", buf512,
+    escribir("public/icon-maskable-1024.png", buf1024,
       `símbolo al ${Math.round(k * 100)}%: llega a ${max.toFixed(1)} px del centro, la zona segura es ${zona.toFixed(1)} px (sobran ${(zona - max).toFixed(1)})`);
+    escribir("public/icon-maskable-512.png", await png(maskable, 512), "512 (la misma)");
     escribir("public/icon-maskable-192.png", await png(maskable, 192), "192 (la misma)");
     break;
   }
