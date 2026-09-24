@@ -9,7 +9,7 @@ import { sendOrQueueDeskTicket } from "@/lib/desk-outbox";
 import { useDragScroll } from "@/lib/drag-scroll";
 import { formatARS } from "@/lib/format";
 import { vibrar } from "@/lib/camara-lectora";
-import { useRol } from "@/lib/caja-local";
+import { useRol, useTurnoAjeno } from "@/lib/caja-local";
 import { useDeskInbox } from "@/lib/desk-listen";
 import { mergeTicketLines } from "@/lib/ticket-merge";
 import { crearLectorTeclado, FIN_SIN_ENTER_MS } from "@/lib/escaneo";
@@ -78,6 +78,7 @@ export function PhoneSellView() {
     if (!ticket.length) setGracia(false);
   }, [ticket.length]);
   const cobra = puedeCobrar || gracia;
+  const turnoAjeno = useTurnoAjeno(deskStoreId) && rol === "caja";
   const inbox = useDeskInbox(deskStoreId, puedeCobrar && Boolean(deskStoreId));
 
   const [cam, setCam] = useState(false);
@@ -365,7 +366,7 @@ export function PhoneSellView() {
 
   /** La venta de verdad: checkout, con el turno abierto (ver store.ts). */
   function confirmar() {
-    if (!cobra) return;
+    if (!cobra || turnoAjeno) return;
     const r = checkout();
     if (!r.ok) {
       toast.error(r.error);
@@ -651,6 +652,11 @@ export function PhoneSellView() {
             </div>
           </div>
         ) : null}
+        {cobra && turnoAjeno ? (
+          <p className="rounded-md bg-warn/10 px-3 py-2.5 text-sm text-warn">
+            Hay un turno abierto de otro aparato. Cerralo en Caja contando la plata antes de cobrar.
+          </p>
+        ) : null}
         {cobra && !cash.open ? (
           <div className="rounded-md bg-warn/10 px-3 py-2.5">
             <p className="text-sm text-warn">La caja está cerrada. Abrila para cobrar.</p>
@@ -660,7 +666,7 @@ export function PhoneSellView() {
           </div>
         ) : null}
         {cobra ? (
-          <Button className="w-full" size="lg" disabled={!ticket.length || !cash.open} onClick={confirmar}>
+          <Button className="w-full" size="lg" disabled={!ticket.length || !cash.open || turnoAjeno} onClick={confirmar}>
             Confirmar venta
           </Button>
         ) : (

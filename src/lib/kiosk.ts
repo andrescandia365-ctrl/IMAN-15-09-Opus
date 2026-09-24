@@ -10,6 +10,7 @@ import { localeCapFor } from "@/lib/license";
 import type { KioskPayload, Sale } from "@/lib/types";
 import type { ImanEvent } from "@/lib/events";
 import type { CajaServidor } from "@/lib/rol";
+import { turnosAbiertos } from "@/lib/turno";
 
 export type StoreMeta = {
   id: string;
@@ -605,24 +606,30 @@ export const pullEvents = createServerFn({ method: "POST" })
 
 
 export type TomarCajaResult =
-  | { ok: true; caja: CajaServidor }
-  | { ok: false; caja: CajaServidor; error: string };
+  /** `heredados`: turnos abiertos por otro aparato que quedan en esta caja (toma forzada). */
+  | { ok: true; caja: CajaServidor; heredados: string[] }
+  | { ok: false; caja: CajaServidor; error: string; turnoAbierto?: boolean };
 
 /**
  * Este aparato pasa a ser la caja del local. Pide el PIN del dueño (el hash,
  * contra el del local) y la versión de la caja que el aparato conoce: si otro
  * la cambió en el medio, no pisa (como el `rev` de la fotocopia).
+ *
+ * Pasar la caja exige el turno cerrado: con un turno abierto de otro aparato
+ * (o uno de antes, que no dice de qué aparato es) no pasa. `forzar` es la toma
+ * cuando ese aparato se rompió o se perdió: pasa igual y devuelve los turnos
+ * que quedaron abiertos, que la caja nueva tiene que cerrar contando la plata.
  */
 export const tomarCaja = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((data: { storeId: string; device: string; esperado: number; pinHash: string }) => {
+  .validator((data: { storeId: string; device: string; esperado: number; pinHash: string; forzar?: boolean }) => {
     const storeId = String(data?.storeId ?? "").trim();
     const device = String(data?.device ?? "").trim().slice(0, 64);
     const pinHash = String(data?.pinHash ?? "").trim();
     const esperado = Number(data?.esperado);
     if (!storeId || !device) throw new Error("Falta el local o el aparato");
     if (!Number.isInteger(esperado) || esperado < 0) throw new Error("Versión de la caja inválida");
-    return { storeId, device, esperado, pinHash };
+    return { storeId, device, esperado, pinHash, forzar: data?.forzar === true };
   })
   .handler(async ({ context, data }): Promise<TomarCajaResult> => {
     const row = await readStore(context.userId, data.storeId);
@@ -635,6 +642,24 @@ export const tomarCaja = createServerFn({ method: "POST" })
       return { ok: false, caja: row.caja, error: "El PIN no coincide con el del local." };
     }
     const sql = await getSql();
+    const eventos = await sql<{ body: unknown }>`
+      select body from kiosk_event
+      where user_id = ${context.userId} and store_id = ${data.storeId} and type = 'shift'
+      order by seq asc
+    `;
+    const abiertos = turnosAbiertos(
+      row.payload.shifts ?? [],
+      eventos.map((e) => (typeof e.body === "string" ? JSON.parse(e.body) : e.body) as { op?: string }),
+    );
+    const ajenos = abiertos.filter((t) => t.deviceId !== data.device);
+    if (ajenos.length && !data.forzar) {
+      return {
+        ok: false,
+        caja: row.caja,
+        turnoAbierto: true,
+        error: "Hay un turno abierto en otro aparato. Cerralo ahí antes de pasar la caja.",
+      };
+    }
     const updated = await sql<{ caja_ver: number }>`
       update kiosk_store
       set caja_device = ${data.device}, caja_ver = caja_ver + 1, caja_desde = now()
@@ -645,7 +670,7 @@ export const tomarCaja = createServerFn({ method: "POST" })
     if (!updated[0]) {
       return { ok: false, caja, error: "Otro aparato cambió la caja recién. Probá de nuevo." };
     }
-    return { ok: true, caja };
+    return { ok: true, caja, heredados: ajenos.map((t) => t.id) };
   });
 
 /** Quién es la caja del local, sin nada más: lo consulta el aparato de vez en cuando. */

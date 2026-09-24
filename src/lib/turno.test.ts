@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { devolucionesDelTurno, ventasDelTurno } from "./turno.ts";
+import { devolucionesDelTurno, turnosAbiertos, ventasDelTurno } from "./turno.ts";
 import type { Refund, Sale } from "./types.ts";
 
 function venta(id: string, createdAt: string, shiftId?: string): Sale {
@@ -57,5 +57,26 @@ describe("devolucionesDelTurno", () => {
   it("lo devuelto al proveedor no es plata del cajón", () => {
     const rf = [devolucion("prov", "2026-09-23T09:30:00.000Z", { kind: "proveedor" })];
     assert.deepEqual(devolucionesDelTurno(rf, turnoA), []);
+  });
+});
+
+describe("turnosAbiertos", () => {
+  it("abierto en la fotocopia y sin cierre en la cinta: sigue abierto", () => {
+    assert.deepEqual(turnosAbiertos([{ id: "t1", status: "open", deviceId: "pc" }], []), [{ id: "t1", deviceId: "pc" }]);
+  });
+
+  it("cerrado en la cinta aunque la fotocopia lo tenga abierto: cerrado", () => {
+    const r = turnosAbiertos([{ id: "t1", status: "open" }], [{ op: "close", shift: { id: "t1", status: "closed" } }]);
+    assert.deepEqual(r, []);
+  });
+
+  it("cerrado en la fotocopia y con la apertura en la cinta: cerrado, no se reabre", () => {
+    const r = turnosAbiertos([{ id: "t1", status: "closed" }], [{ op: "open", shift: { id: "t1", status: "open" } }]);
+    assert.deepEqual(r, []);
+  });
+
+  it("abierto solo en la cinta, con el aparato que lo abrió", () => {
+    const r = turnosAbiertos([], [{ op: "open", shift: { id: "t2", status: "open", deviceId: "celu" } }]);
+    assert.deepEqual(r, [{ id: "t2", deviceId: "celu" }]);
   });
 });

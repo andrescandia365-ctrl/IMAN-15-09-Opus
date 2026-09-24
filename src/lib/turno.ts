@@ -21,3 +21,31 @@ export function devolucionesDelTurno(refunds: Refund[], shift: Pick<CashShift, "
     (r) => r.kind === "cliente" && (r.shiftId ? r.shiftId === shift.id : r.createdAt >= shift.openedAt),
   );
 }
+
+type TurnoVisto = { id?: string; status?: string; deviceId?: string };
+
+/**
+ * Los turnos que siguen abiertos según la fotocopia del local y los eventos
+ * `shift` de la cinta. Un turno cerrado en cualquiera de los dos lados queda
+ * cerrado: un turno nunca se reabre. Lo usa el servidor para saber si se puede
+ * pasar la caja.
+ */
+export function turnosAbiertos(
+  guardados: TurnoVisto[],
+  eventos: { op?: string; shift?: TurnoVisto }[],
+): { id: string; deviceId?: string }[] {
+  const cerrados = new Set<string>();
+  const abiertos = new Map<string, string | undefined>();
+  for (const s of guardados) {
+    if (!s?.id) continue;
+    if (s.status === "closed") cerrados.add(s.id);
+    else if (s.status === "open") abiertos.set(s.id, s.deviceId);
+  }
+  for (const e of eventos) {
+    const s = e?.shift;
+    if (!s?.id) continue;
+    if (e.op === "close" || s.status === "closed") cerrados.add(s.id);
+    else if (e.op === "open") abiertos.set(s.id, s.deviceId ?? abiertos.get(s.id));
+  }
+  return [...abiertos].filter(([id]) => !cerrados.has(id)).map(([id, deviceId]) => ({ id, deviceId }));
+}

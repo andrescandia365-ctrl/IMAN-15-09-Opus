@@ -13,7 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatARS, formatTime } from "@/lib/format";
-import { useRol } from "@/lib/caja-local";
+import { useRol, useTurnoAjeno } from "@/lib/caja-local";
 import { useCashSnapshot, useImanStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { EncargadoBook, LedgerDia } from "@/components/ledger-grid";
@@ -33,7 +33,9 @@ export function CashView({ celu = false }: { celu?: boolean } = {}) {
   const closeShift = useImanStore((s) => s.closeShift);
   const addDrop = useImanStore((s) => s.addDrop);
   // Abrir, retirar y cerrar son de la caja del local (ver rol.ts).
-  const { puedeCobrar } = useRol(useImanStore((s) => s.deskStoreId));
+  const deskStoreId = useImanStore((s) => s.deskStoreId);
+  const { rol, puedeCobrar } = useRol(deskStoreId);
+  const turnoAjeno = useTurnoAjeno(deskStoreId) && rol === "caja";
   const shifts = useImanStore((s) => s.shifts);
   const drops = useImanStore((s) => s.drops);
   const refunds = useImanStore((s) => s.refunds);
@@ -104,6 +106,12 @@ export function CashView({ celu = false }: { celu?: boolean } = {}) {
               <p className="mt-2 text-sm text-muted">
                 Abierta a las {formatTime(cash.open.openedAt)} · fondo {formatARS(cash.open.openingCash)}
               </p>
+              {turnoAjeno ? (
+                <p className="mt-2 rounded-md bg-warn/10 px-3 py-2 text-sm text-warn">
+                  Este turno es del aparato que era la caja. Cerralo contando la plata que hay en el cajón;
+                  después abrí uno propio.
+                </p>
+              ) : null}
               <div className="mt-auto flex flex-wrap gap-2 pt-8">
                 <Button variant="secondary" onClick={() => setDropOpen(true)}>
                   <Landmark className="size-4" />

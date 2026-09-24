@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { usePhoneUi } from "@/lib/device";
 import { getDeviceId } from "@/lib/local-db";
+import { useOpenShift } from "@/lib/store";
 import { cajaMasNueva, puedeCobrar, rolDe, type CajaServidor, type Rol } from "@/lib/rol";
 
 /**
@@ -98,4 +99,50 @@ export function useVigilarCaja(storeId: string, consultar: (storeId: string) => 
       window.removeEventListener("online", mirar);
     };
   }, [storeId, consultar]);
+}
+
+const claveHeredados = (storeId: string) => `iman-caja-heredado:${storeId}`;
+
+/**
+ * Turnos abiertos de otro aparato que quedaron en esta caja por una toma
+ * forzada. Se cierran contando la plata antes de abrir uno propio.
+ */
+export function anotarHeredados(storeId: string, ids: string[]): void {
+  try {
+    if (ids.length) window.localStorage.setItem(claveHeredados(storeId), JSON.stringify(ids));
+    else window.localStorage.removeItem(claveHeredados(storeId));
+  } catch {
+    return;
+  }
+  window.dispatchEvent(new Event(EVENTO));
+}
+
+function leerHeredados(storeId: string): string | null {
+  if (typeof window === "undefined" || !storeId) return null;
+  try {
+    return window.localStorage.getItem(claveHeredados(storeId));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * El turno abierto es de otro aparato (lo abrió otro, o se heredó en una toma
+ * forzada). En la caja no se cobra ni se abre otro hasta cerrarlo contando la
+ * plata: si no, las ventas de las dos cajas se mezclarían en un arqueo.
+ */
+export function useTurnoAjeno(storeId: string): boolean {
+  const abierto = useOpenShift();
+  const raw = useSyncExternalStore(suscribir, () => leerHeredados(storeId), () => null);
+  return useMemo(() => {
+    if (!abierto) return false;
+    let heredados: string[] = [];
+    try {
+      heredados = raw ? (JSON.parse(raw) as string[]) : [];
+    } catch {
+      heredados = [];
+    }
+    if (heredados.includes(abierto.id)) return true;
+    return Boolean(abierto.deviceId && abierto.deviceId !== getDeviceId());
+  }, [abierto, raw]);
 }
