@@ -2,7 +2,11 @@
 
 ## Resumen
 
-_(se completa al terminar)_
+1. **Hecho:** las 8 tareas. El celu ya puede ser la caja (rol decidido por el servidor, cobro, caja, planilla del día, pase de caja con toma forzada, "¿Dónde vas a cobrar?"), el gráfico por día en El mes, los pendientes chicos y los análisis. Todo en `noche-celu-caja`, nada pusheado.
+2. **A medias / sin probar:** nada en un celu real; el asistente "Registrar más" con "Solo tengo celular"; los 9 tests de `test:platform` están explicados pero no arreglados (esperan tu OK).
+3. **URGENTE, en `main`:** en un local recién creado no se puede dar de alta ningún producto (la regla del rubro sin rubros cargados). El arreglo es `ad81419`: conviene llevarlo a `main` solo, antes que el resto.
+4. **Antes de pushear la rama:** sacá las variables de base de Preview en Vercel (la rama trae dos migraciones, `0016_caja` y `0017_cobra_en`). Ver Tarea 8.5.
+5. **Preguntas, en orden:** ¿la pregunta "¿Dónde vas a cobrar?" al entrar al local está bien? · ¿la primera asignación de caja en un local existente puede pedir cerrar el turno? · actualizar la landing (el celu ya cobra) · ¿rubros desde el celu? · ¿"Devolver" suelto en el celu que es la caja? · ¿marcar el cierre de un turno heredado como forzado? · ¿total por día en el resumen plegado? · ¿arreglo los tests de `test:platform`?
 
 ## Reglas que seguí
 
