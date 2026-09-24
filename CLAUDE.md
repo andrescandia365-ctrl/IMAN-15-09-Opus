@@ -279,6 +279,48 @@ NC real en PDF · login separado para el encargado · PowerSync/CRDT · React
 Native · backup automático de blob completo · impresora WebUSB clase 7 (hoy solo
 serial)
 
+### Pendientes
+
+La lista oficial: lo que no está acá se pierde. Una línea por ítem; al
+resolver uno, se saca de acá en el mismo commit.
+
+**Decisiones de Andres (sin código hasta que decida)**
+- Plan de licencias: cómo se cobra, la prueba gratis, y qué pasa cuando vence. Hoy la PC sigue vendiendo vencida por accidente (ver el NO TOCAR de abajo).
+- Control de planes en el Estudio: plan por cuenta, unificar `extra_seats` (vive en dos tablas), baja por cuenta. Con la baja, borrar la cuenta `qa-sync@iman.local`.
+- Supervisión de precios en el panel del dueño: definirla después de uso real.
+- Umbrales de color del botón Sincronizar: ajustarlos con uso real.
+
+**Producto**
+- Sugerencias en Inventario mucho más completas, con creación e impresión de afiches y carteles de promos y ofertas.
+- Revisar la lógica de vencimientos en celu y PC.
+- Gráfico de líneas en Dueño → El mes (total por día, comparado con otro mes).
+
+**Técnico**
+- La cinta de eventos (`kiosk_event`) crece sin techo en el servidor.
+- Los lotes quedan distintos entre aparatos (`consumeFifo` corre en cada uno con su propio estado).
+- El mensaje "bajaron N cambios" dice cero cuando los cambios llegan juntando fotocopias.
+- Caja: la nota del cierre de turno no tiene campo en pantalla (closeShift ya la acepta); los labels no tienen `htmlFor`.
+- 9 tests de `test:platform` fallan siempre (plugin de Grok y esquema de auth).
+- Dos cambios cruzados al mismo ítem terminan al revés entre aparatos.
+- Cambiar de local carga la fotocopia sin juntarla con la copia del aparato.
+- Los editores guardan campos que el usuario no tocó (pisan cambios de otro aparato).
+- La línea de borrados del registro de sincronización dura 2 días; soporte debería poder verla.
+- Aviso de React en modo demo: el Shell escribe en el store mientras dibuja (`setDeskStoreId`).
+- Tope de pull de 10.000 eventos (20 páginas): un aparato muy atrasado no baja todo de una.
+- Los multiplicadores 2,12 / 1,85 tienen el IVA cocinado adentro: no sirven para otros países.
+- **RIESGO:** las variables de Vercel en Preview apuntan a la base de producción: pushear una rama corre migraciones contra Neon.
+
+**A probar en un celu real (no se puede desde la máquina de desarrollo)**
+- El ícono en la pantalla de arranque (ya están los de 1024).
+- El escáner: el alto de la franja, los 3 cuadros de ausencia, la velocidad de la cámara.
+- El umbral de 40 ms entre teclas con un lector Bluetooth real.
+- iPhone: la cámara con la biblioteca `barcode-detector`, en pausa hasta probarlo.
+
+**Fuera del código**
+- Comprar el dominio antes del primer kiosco.
+- Las piezas de redes y el kit de marca para afiliados.
+- El texto de "Qué necesitás" en la landing.
+
 ### Plan del celu como caja
 
 Decisión de producto: IMAN tiene que servir en un local que solo tiene un
