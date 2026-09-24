@@ -29,12 +29,14 @@ import {
 } from "@/lib/catalog-io";
 import { printGondolaLabels, printListaLabels, printShortCodeSheet } from "@/lib/print";
 import { CameraScan } from "@/components/camera-scan";
+import { RubroPicker } from "@/components/rubro-picker";
 import { VenceField } from "@/components/vence-field";
 import { lotsOf } from "@/lib/lots";
 import { stockCorrection } from "@/lib/events";
 import { BORRADO_MIENTRAS_EDITABAS } from "@/lib/deleted";
 import { bloqueoPorRubros } from "@/lib/rubros";
 import { findByScan, packOf, productMatchesQuery, shortCodeOf, stockBreakdown } from "@/lib/pack";
+import { productoNuevo, recordarRubro } from "@/lib/producto-nuevo";
 import { buildSuggestions } from "@/lib/suggest";
 import { useImanStore } from "@/lib/store";
 import type { Category, Product } from "@/lib/types";
@@ -100,22 +102,7 @@ export function InventoryView() {
   }, [products, q, filter, cat]);
 
   function startNew() {
-    setEditing({
-      id: uid("p"),
-      name: "",
-      barcode: "",
-      price: 0,
-      cost: null,
-      stock: 0,
-      stockMin: 0,
-      packQty: 1,
-      packBarcode: "",
-      categoryId: categories[0]?.id ?? "kio",
-      active: true,
-      expiresAt: null,
-      priceUpdatedAt: new Date().toISOString(),
-      onOffer: false,
-    });
+    setEditing(productoNuevo(""));
     setStockAlAbrir(null);
     setOpen(true);
   }
@@ -374,7 +361,6 @@ export function InventoryView() {
         open={codesOpen}
         onOpenChange={setCodesOpen}
         products={products}
-        categories={categories}
         store={settings.name}
         onSave={saveProduct}
       />
@@ -481,11 +467,19 @@ function ProductDialog({
   onChange: (p: Product) => void;
   onSave: () => void;
 }) {
-  const categories = useImanStore((s) => s.categories);
+  const products = useImanStore((s) => s.products);
   const [tab, setTab] = useState<"rapida" | "detalles">("rapida");
   if (!product) return null;
   const set = (patch: Partial<Product>) => onChange({ ...product, ...patch });
-  const isNew = !product.name;
+  // Alta o edición según si el producto ya existe, no según si tiene nombre:
+  // el título cambiaba con la primera letra.
+  const isNew = !products.some((p) => p.id === product.id);
+  const sinRubro = !product.categoryId;
+  const guardar = () => {
+    if (sinRubro) return;
+    if (isNew) recordarRubro(product.categoryId);
+    onSave();
+  };
   return (
     <Dialog
       open={open}
@@ -534,20 +528,6 @@ function ProductDialog({
               <Input value={product.barcode} onChange={(e) => set({ barcode: e.target.value })} />
             </div>
             <div>
-              <Label>Categoría</Label>
-              <select
-                className="flex h-11 w-full rounded-md bg-elevated px-3 text-sm text-fg shadow-[var(--shadow-border)]"
-                value={product.categoryId}
-                onChange={(e) => set({ categoryId: e.target.value })}
-              >
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="col-span-2">
               <Label>Precio</Label>
               <Input
                 inputMode="numeric"
@@ -555,6 +535,12 @@ function ProductDialog({
                 onChange={(e) => set({ price: Number(e.target.value) || 0 })}
               />
             </div>
+            <RubroPicker
+              className="col-span-2"
+              value={product.categoryId}
+              onChange={(categoryId) => set({ categoryId })}
+              nuevo={isNew}
+            />
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
@@ -639,7 +625,9 @@ function ProductDialog({
               Detalles
             </Button>
           ) : null}
-          <Button onClick={onSave}>Guardar</Button>
+          <Button onClick={guardar} disabled={sinRubro}>
+            {sinRubro ? "Falta el rubro" : "Guardar"}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -892,14 +880,12 @@ function ShortCodesDialog({
   open,
   onOpenChange,
   products,
-  categories,
   store,
   onSave,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   products: Product[];
-  categories: { id: string; name: string }[];
   store: string;
   onSave: (p: Product) => void;
 }) {
@@ -908,6 +894,7 @@ function ShortCodesDialog({
   const [alta, setAlta] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPrice, setNewPrice] = useState("");
+  const [newCat, setNewCat] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
   const coded = products
@@ -944,6 +931,11 @@ function ShortCodesDialog({
         setErr("Falta el nombre");
         return;
       }
+      if (!newCat) {
+        setErr("Falta el rubro");
+        return;
+      }
+      recordarRubro(newCat);
       onSave({
         id: uid("p"),
         name,
@@ -955,7 +947,7 @@ function ShortCodesDialog({
         stockMin: 0,
         packQty: 1,
         packBarcode: "",
-        categoryId: categories[0]?.id ?? "kio",
+        categoryId: newCat,
         active: true,
         expiresAt: null,
         priceUpdatedAt: new Date().toISOString(),
@@ -963,6 +955,7 @@ function ShortCodesDialog({
       });
       setNewName("");
       setNewPrice("");
+      setNewCat("");
       setCode("");
       toast.success(`${c} · ${name}`);
       return;
@@ -1042,6 +1035,9 @@ function ShortCodesDialog({
           />
           <Button onClick={assign}>Asignar</Button>
         </div>
+        {alta ? (
+          <RubroPicker className="mt-3" value={newCat} onChange={setNewCat} nuevo />
+        ) : null}
         {err ? <p className="mt-2 text-sm text-danger">{err}</p> : null}
         <div className="mt-3 max-h-64 overflow-y-auto rounded-md bg-bg">
           {coded.length === 0 ? (

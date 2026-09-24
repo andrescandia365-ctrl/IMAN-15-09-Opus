@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CameraScan } from "@/components/camera-scan";
+import { RubroPicker } from "@/components/rubro-picker";
 import { VenceField } from "@/components/vence-field";
 import { daysUntil } from "@/lib/format";
 import { BORRADO_MIENTRAS_EDITABAS } from "@/lib/deleted";
@@ -20,7 +21,7 @@ import { lotsOf, soonestExpiry, unallocated } from "@/lib/lots";
 import { findByScan, packOf, productMatchesQuery, stockBreakdown } from "@/lib/pack";
 import { useImanStore } from "@/lib/store";
 import type { Product } from "@/lib/types";
-import { productoNuevo, recordarRubro, ultimoRubro } from "@/lib/producto-nuevo";
+import { productoNuevo, recordarRubro } from "@/lib/producto-nuevo";
 import { cn } from "@/lib/utils";
 
 export function PhoneStockView() {
@@ -252,7 +253,6 @@ export function ProductPhoneDialog({
   onSave: () => void;
   onClose: () => void;
 }) {
-  const categories = useImanStore((s) => s.categories);
   const products = useImanStore((s) => s.products);
   if (!product) return null;
   const set = (patch: Partial<Product>) => onChange({ ...product, ...patch });
@@ -260,8 +260,6 @@ export function ProductPhoneDialog({
   // el título cambiaba a "Editar" apenas se escribía la primera letra.
   const nuevo = !products.some((p) => p.id === product.id);
   const sinRubro = !product.categoryId;
-  const ultimo = nuevo ? ultimoRubro() : "";
-  const rubros = [...categories].sort((a, b) => (a.id === ultimo ? -1 : b.id === ultimo ? 1 : 0));
   const guardar = () => {
     if (sinRubro) return;
     if (nuevo) recordarRubro(product.categoryId);
@@ -311,30 +309,7 @@ export function ProductPhoneDialog({
               <Label>Precio</Label>
               <Input inputMode="numeric" value={product.price || ""} onChange={(e) => set({ price: Number(e.target.value) || 0 })} />
             </div>
-            <div>
-              {/* El rubro decide el margen y la factura: se elige siempre, no viene puesto. */}
-              <Label className={cn(sinRubro && "text-warn")}>{sinRubro ? "Rubro · elegilo" : "Rubro"}</Label>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {rubros.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    aria-pressed={product.categoryId === c.id}
-                    onClick={() => set({ categoryId: c.id })}
-                    className={cn(
-                      "h-10 rounded-full px-3.5 text-sm font-medium",
-                      product.categoryId === c.id
-                        ? "bg-accent text-accent-fg"
-                        : sinRubro
-                          ? "bg-elevated text-fg ring-1 ring-warn/60"
-                          : "bg-elevated text-muted",
-                    )}
-                  >
-                    {c.name}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <RubroPicker value={product.categoryId} onChange={(categoryId) => set({ categoryId })} nuevo={nuevo} />
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
