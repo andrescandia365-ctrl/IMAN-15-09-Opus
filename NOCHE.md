@@ -379,3 +379,163 @@ Preguntas para Andres:
   auth para que mire solo lo que importa (que el esquema esté en
   `migrations/auth/` y que la copia sea idéntica)? Así `test:platform` quedaría
   en verde y serviría para algo.
+
+---
+
+## Tarea 8 — Análisis (sin código)
+
+### 1. La lógica de vencimientos, en celu y PC
+
+**Cómo funciona hoy.**
+- Un producto tiene **lotes** (`lots`: fecha, unidades, alta) o, si no tiene
+  lotes, una sola fecha (`expiresAt`). Con lotes, `expiresAt` es la del lote que
+  vence primero.
+- **Fechar** (`dateLot`, evento `lot`) agrega un lote. Llegó puede cargar la
+  fecha al recibir.
+- **Vender** descuenta del lote que vence primero (`consumeFifo`), entre los
+  que ya existían a la hora de la venta.
+- **Celu, pestaña Vence:** lista **cada lote** con su fecha y unidades, ordenado
+  por fecha, con "Vencido" en rojo.
+- **PC, Inventario → Vencimientos:** lista **productos** (no lotes) con
+  `expiresAt` a 7 días o menos, contando los ya vencidos.
+- **Sugerencias:** "Oferta: …" para lo que vence en 10 días o menos.
+
+**Problemas.**
+- **Celu y PC muestran cosas distintas:** el celu, cada lote y sin límite de
+  días; la PC, solo el lote más próximo de cada producto y solo a 7 días. El
+  mismo producto con dos lotes aparece dos veces en el celu y una en la PC.
+- **Tres ventanas distintas:** 7 días (PC), 10 días (Sugerencias), sin límite
+  (celu). No hay una regla.
+- **Ajustar stock no toca los lotes:** una merma o un ajuste negativo baja el
+  stock pero no los lotes, y quedan lotes con más unidades que el stock.
+  `unallocated` lo tapa con un `max(0, …)`.
+- **Lo vencido no tiene salida:** no hay "retirar lo vencido" (merma con motivo
+  vencido) ni "devolver al proveedor" desde Vence. El producto vencido se sigue
+  vendiendo sin aviso en el mostrador.
+- **Los lotes divergen entre aparatos** (ver el punto 4).
+
+**Propuesta.**
+1. **Una regla de "por vencer", en el local:** un número de días (por defecto
+   10) en Ajustes, que usen el celu, la PC y Sugerencias.
+2. **La misma lista en los dos**, por lote, agrupada por producto (el celu en
+   lista, la PC en tabla).
+3. **Acciones sobre un lote vencido o por vencer:** "Retirar" (baja stock y
+   lote con motivo `vencido`, que después se ve en El mes como pérdida),
+   "Devolver al proveedor" (la devolución que ya existe) y "Poner en oferta".
+4. **Aviso al vender** un producto con el lote más próximo ya vencido (no
+   bloquear: avisar).
+5. **Que el ajuste negativo descuente también de los lotes** (el que vence
+   primero), igual que una venta.
+
+### 2. Sugerencias en Inventario y los carteles de promos
+
+**Qué hay hoy.** `buildSuggestions` arma hasta 12 tarjetas: "Oferta" (vence en
+10 días o menos), "está en oferta" (recordarle al que atiende), "Se está yendo"
+(8 o más vendidas en la semana y stock bajo) y "Hoy pasa [proveedor]". La única
+acción es "Poner en oferta", que prende una marca (`onOffer`) sin precio de
+oferta. Para imprimir hay etiquetas de góndola (grilla A4 con nombre, precio y
+código), lista de precios y hoja de códigos cortos. **No hay carteles ni
+afiches.** Detalle: la tarjeta muestra el tipo en inglés ("offer", "stock",
+"order", "shift"), cosa que las reglas de copy prohíben.
+
+**Propuesta concreta.**
+1. **Precio de oferta de verdad:** "Poner en oferta" pide precio (o % de
+   descuento) y hasta cuándo. Viaja por la cinta (un tipo nuevo, `oferta`, para
+   no tocar el body de `product`). El Mostrador cobra el precio de oferta y el
+   ticket lo muestra.
+2. **Más sugerencias, cada una con su acción:** lo que no se vende hace 30
+   días ("liquidar"), combos de lo que se vende junto, precio viejo (hace más de
+   N días sin actualizar), faltante de algo que se vende todos los días.
+3. **Herramienta de carteles, en Inventario → Carteles:**
+   - Plantillas: **Oferta** (precio tachado → precio nuevo), **2×1 / 3×2**,
+     **Liquidación**, **Nuevo**, **Precio por kilo**, y un **aviso libre**
+     ("Cerrado el domingo").
+   - Tamaños: **A4 vertical** (afiche de vidriera), **A5** (heladera),
+     **tira de góndola** (4 por A4), **mini para exhibidor**.
+   - Arma el cartel del producto elegido (o de todos los que están en oferta),
+     con la marca del local (nombre, logo si lo cargó) y colores de IMAN; vista
+     previa y "Imprimir" (el mismo `window.print` de las etiquetas, que ya
+     anda en cualquier impresora común).
+   - Desde una sugerencia de oferta: "Poner en oferta e imprimir el cartel", en
+     un solo gesto.
+   - En el celu (sin impresora): "Compartir" el cartel como imagen, para
+     mandarlo a imprimir o por WhatsApp.
+
+### 3. La cinta que crece sin techo en el servidor
+
+**Hoy.** `kiosk_event` guarda cada evento para siempre. Un aparato baja desde
+su cursor (`seq`). Un aparato nuevo no necesita la historia: arranca de la
+fotocopia (sigue desde su marca) o "saltea" (toma el estado de ahora). La
+historia vieja solo le sirve a un aparato **atrasado**, cuyo cursor quedó
+detrás.
+
+**Cómo recortarla sin perder nada.**
+1. **Que el servidor sepa hasta dónde bajó cada aparato:** `pullEvents` ya
+   recibe el cursor; sumarle el `deviceId` y guardar `(local, aparato) →
+   último seq y fecha`.
+2. **El piso seguro de un local** = el menor cursor entre los aparatos
+   **activos** (bajaron en los últimos 60 días), y nunca por encima del `seq`
+   de la marca de la última fotocopia (lo anterior ya está en la foto).
+3. **Borrar** los eventos con `seq` menor al piso **y** más viejos que 90 días
+   (doble condición), en una tarea diaria, por tandas.
+4. **Un aparato que vuelve después del recorte** (cursor menor al piso): el
+   servidor lo avisa en `pullEvents` (`cortada: true`) y el aparato **junta la
+   fotocopia** (el camino de "arranque desde la fotocopia" que ya existe:
+   `mergePayload` + seguir desde la marca) en lugar de bajar la cinta. No se
+   pierde nada: lo que no está en la cinta está en la foto.
+5. **Antes de borrar**, medir: cuántas filas y cuánto pesa por local (el
+   Taller ya muestra el total). Si una tabla de archivo en frío sale gratis, se
+   puede mover en vez de borrar.
+
+### 4. Los lotes distintos entre aparatos
+
+**Por qué pasa.** El evento `sale` no dice de qué lote salió cada unidad: cada
+aparato corre `consumeFifo` con **sus propios lotes**. Si los aparatos no
+tienen los mismos lotes en ese momento, descuentan de lotes distintos:
+- un lote fechado en el celu que la PC todavía no bajó (`existiaAl` usa la
+  hora del lote y de la venta, pero si el lote se cargó con la hora mal o llegó
+  tarde, igual cambia el orden);
+- un ajuste de stock que baja el stock pero no los lotes (punto 1);
+- la edición de un lote (`setLot`) y su orden respecto de las ventas;
+- relojes distintos entre aparatos (`asOf` compara horas de dos relojes).
+
+**Propuesta.**
+1. **La caja decide el lote**: al cobrar, la caja guarda en la venta cómo
+   repartió las unidades (`lotes: [{ lotId, units }]`). Es un campo nuevo del
+   body de `sale` (se agrega, no se achica: el aparato viejo lo ignora y sigue
+   con FIFO). Los aparatos nuevos aplican ese reparto tal cual, en vez de
+   recalcularlo.
+2. **La caja es la dueña de los lotes**: si un aparato de piso tiene lotes
+   distintos, al sincronizar adopta los de la fotocopia de la caja (como ya se
+   adoptan turnos y retiros).
+3. **El ajuste negativo descuenta de los lotes** (punto 1.5), con el reparto
+   en el evento `stock`, igual que la venta.
+
+### 5. El riesgo de Preview contra la base de producción
+
+**Hoy.** Las variables de Vercel (`DATABASE_URL`, `DATABASE_MIGRATE_URL`)
+están en Production y en Preview con la misma base. Pushear cualquier rama
+arma una vista previa que: (a) **corre las migraciones contra Neon de
+producción** en el build (`npm run build` → `db:migrate`), y (b) **escribe en
+la base de producción** desde la vista previa (cualquiera que entre ahí con su
+cuenta toca datos reales). Por eso esta noche nada se pusheó.
+
+**Cómo separarlo, de menor a mayor esfuerzo.**
+1. **Ya: sacar las variables de base de Preview** en Vercel. Sin
+   `DATABASE_URL`, la app usa PGLite (base en memoria, como en desarrollo) y
+   `db:migrate` se saltea solo (ya está programado así). La vista previa sirve
+   para mirar pantallas, no para datos. Riesgo cero para producción.
+2. **Mejor: una rama de Neon por vista previa** (la integración oficial de
+   Neon con Vercel). Cada vista previa tiene su copia de la base (copy-on-write,
+   gratis en el plan chico), corre sus migraciones ahí y se borra con la rama.
+   Permite probar migraciones con datos parecidos a los reales.
+3. **Además, un freno en el código**: que `scripts/migrate.mjs` se niegue a
+   migrar si `VERCEL_ENV` no es `production`, salvo que la variable de la
+   rama de Neon esté puesta. Así, aunque alguien vuelva a cargar mal una
+   variable, las migraciones no tocan producción desde una rama.
+4. **Opcional:** en Vercel, "Ignored Build Step" para no armar vista previa de
+   ramas de trabajo (solo de las que empiezan con `preview/`).
+
+**Recomendación:** hacer el 1 antes de pushear `noche-celu-caja` (tiene dos
+migraciones), y el 3 como red. El 2 cuando haga falta probar migraciones
+contra datos reales.
