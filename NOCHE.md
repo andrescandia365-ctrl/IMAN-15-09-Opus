@@ -217,3 +217,77 @@ Preguntas para Andres:
 
 No probado: en un celu real; con los dos aparatos perdiendo la red al mismo
 tiempo que se pasa la caja.
+
+---
+
+## Tarea 5 — El asistente del primer arranque
+
+**Hecho, con un cambio de lugar.** Commits `a358cca` (la pregunta) y
+`ad81419` (un arreglo urgente que encontré en el camino, ver abajo).
+
+**Por qué no está solo en el asistente:** una cuenta nueva **nunca pasa por
+el asistente de locales**. Al crear la cuenta, el servidor le da un local
+"Local" (`claimOwnerRow`, `owners.ts`), y la cuenta cae directo en la lista de
+locales. Lo verifiqué antes de la noche. Si la pregunta viviera solo ahí, casi
+nadie la vería. Tomé la opción conservadora que había propuesto:
+
+- **La pregunta aparece la primera vez que se entra a un local que no la
+  contestó** (`donde-cobras.tsx`), con "Después" para no trabar a nadie con un
+  cliente enfrente (si pospone, se pregunta de nuevo la próxima vez).
+- **También queda en el asistente**, para los locales que se registran por ahí.
+
+**Qué hace cada respuesta:**
+- **"Solo tengo celular", contestado desde un celu, en un local nuevo** (que
+  nunca tuvo caja y nunca vendió): ese celu queda como caja, sin PIN (un local
+  nuevo todavía no tiene PIN). Aviso: "Este celu va a ser la caja del local…".
+- **"Solo tengo celular" en un local que ya vende, o con caja:** se guarda la
+  respuesta, pero **no se asigna la caja sola**, porque le cortaría la caja a
+  otro aparato en medio del día. Aviso: pasala desde Dueño → Local, con PIN.
+- **"Solo tengo celular" desde una PC:** se guarda y se explica cómo pasarle la
+  caja al celu.
+- **Computadora o Tablet:** se guarda; el local sigue como siempre (sin caja
+  anotada, cobra la pantalla de PC; una tablet de 640 px o más cuenta como PC).
+
+**El Estudio** muestra "¿Dónde cobran?": cuántos locales eligieron cada
+opción, y cuántos no contestaron. Dato en `kiosk_store.cobra_en` (migración
+`0017_cobra_en.sql`).
+
+**CLAUDE.md:** las invariantes 3 y 4 reescritas con el modelo de una sola caja
+por local, sobre la propuesta del análisis anterior.
+
+Probado en la app:
+- cuenta nueva desde un celu: pregunta al abrir "Local"; "Solo tengo celular"
+  la deja como caja, con las pestañas de caja; al recargar no pregunta de nuevo;
+- cuenta nueva desde una PC: "Computadora", se cierra y cobra como siempre;
+- cuenta nueva que vende en la PC (posponiendo la pregunta) y después contesta
+  desde el celu "Solo tengo celular": no asigna la caja, avisa cómo pasarla, el
+  celu queda de piso;
+- el Estudio cuenta 2 computadora / 0 tablet / 1 celu / 0 sin responder;
+- los cuatro checks, `qa:arranque`.
+
+**Dos cosas que encontré y arreglé:**
+- **URGENTE — en `main`: en un local recién creado no se puede dar de alta
+  ningún producto.** La regla del rubro obligatorio (`1d0ad0e`, `9b4827b`, ya
+  pusheadas) traba el alta cuando el local no tiene rubros, y un local nuevo
+  arranca sin rubros: "Guardar" dice "Falta el rubro" para siempre. Arreglado
+  en la rama (`ad81419`): sin rubros, el alta no lo exige y el producto queda
+  sin rubro (como antes de la regla). **Esto conviene llevarlo a `main` antes
+  que el resto.**
+- `seed:prueba` se trababa con el diálogo nuevo; ahora contesta
+  "computadora".
+
+**Para Andres — actualizar la landing:** ahora un kiosco que solo tiene celular
+**puede cobrar**: el celu es la caja (cobra, turno, retiros, cierre, planilla
+del día). La landing no puede seguir diciendo que hace falta una computadora.
+
+Preguntas para Andres:
+- ¿Está bien que la pregunta aparezca al entrar al local (en vez de un
+  asistente de primer arranque, que hoy no existe para cuentas nuevas)?
+- Un kiosco solo celu **no puede crear rubros** desde el celu (Categorías está
+  solo en Inventario de la PC). Sus productos quedan sin rubro. ¿Hace falta
+  una pantalla de rubros en el celu?
+
+No probado: el asistente de locales ("Registrar más") con "Solo tengo celular"
+desde un celu: hace falta una cuenta con más de un local en el plan, y no la
+armé. El código es el mismo camino del servidor (asigna la caja al crear el
+local); en un celu real, nada.
