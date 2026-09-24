@@ -223,7 +223,7 @@ igual. Si no queda escrito, vuelve a pasar.
 - **`lot`:** un lote de vencimiento. Stock y lots no viajan en `product`.
 - **`settings`:** márgenes, redondeo, comisión MP, condición fiscal, filas de Asientos. PIN y logo solo si ese toque los cambió.
 - **`supplier`:** alta/edición/baja de proveedor (`op: save` o `delete`).
-- **`shift`:** apertura y cierre de turno (`op: open` / `close`). El cierre manda el turno entero y la fila de la planilla de ese día.
+- **`shift`:** apertura y cierre de turno (`op: open` / `close`). El cierre manda el turno entero y la fila de la planilla de ese día. El turno cerrado lleva `closedBy` (el aparato que hizo el arqueo) y `heredado` si se cerró después de forzar la toma de la caja: el historial de Caja marca "Lo cerró otro aparato" (`cerradoPorOtro`).
 - **`drop`:** retiro de caja a fuerte, con el `shiftId` del turno.
 - **`sale`** lleva el `shiftId` del turno en que se cobró y el `deviceId` del aparato que cobró (lo usa el plegado del mes). Las ventas sin `shiftId` (de antes, o de un aparato sin actualizar) entran al arqueo por hora (`ventasDelTurno`, `src/lib/turno.ts`).
 - Stock: solo `sale`, `stock`, `refund`, `receive`, `lot`.

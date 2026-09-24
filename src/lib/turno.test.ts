@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { devolucionesDelTurno, turnosAbiertos, ventasDelTurno } from "./turno.ts";
+import { cerradoPorOtro, devolucionesDelTurno, turnosAbiertos, ventasDelTurno } from "./turno.ts";
 import type { Refund, Sale } from "./types.ts";
 
 function venta(id: string, createdAt: string, shiftId?: string): Sale {
@@ -78,5 +78,24 @@ describe("turnosAbiertos", () => {
   it("abierto solo en la cinta, con el aparato que lo abrió", () => {
     const r = turnosAbiertos([], [{ op: "open", shift: { id: "t2", status: "open", deviceId: "celu" } }]);
     assert.deepEqual(r, [{ id: "t2", deviceId: "celu" }]);
+  });
+});
+
+describe("cerradoPorOtro", () => {
+  it("lo cerró el mismo aparato que lo abrió: no se marca", () => {
+    assert.equal(cerradoPorOtro({ deviceId: "pc", closedBy: "pc" }), false);
+  });
+
+  it("lo cerró otro aparato (toma forzada): se marca", () => {
+    assert.equal(cerradoPorOtro({ deviceId: "pc", closedBy: "celu" }), true);
+  });
+
+  it("heredado, aunque no se sepa quién lo abrió: se marca", () => {
+    assert.equal(cerradoPorOtro({ closedBy: "celu", heredado: true }), true);
+  });
+
+  it("un turno de antes, sin alguno de los dos datos: no se marca", () => {
+    assert.equal(cerradoPorOtro({ closedBy: "celu" }), false);
+    assert.equal(cerradoPorOtro({ deviceId: "pc" }), false);
   });
 });

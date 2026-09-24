@@ -20,6 +20,7 @@ import { EncargadoBook, LedgerDia } from "@/components/ledger-grid";
 import { PriceUpdateCard } from "@/components/price-calc";
 import { onShiftNow } from "@/lib/team";
 import { backupOnClose } from "@/lib/sync";
+import { cerradoPorOtro } from "@/lib/turno";
 
 /**
  * La caja: turno, retiros, cierre, historial y la planilla. `celu` es la caja
@@ -168,6 +169,11 @@ export function CashView({ celu = false }: { celu?: boolean } = {}) {
                   {s.closedAt ? ` → ${formatTime(s.closedAt)}` : ""}
                   {s.note ? ` · ${s.note}` : ""}
                 </div>
+                {cerradoPorOtro(s) ? (
+                  <div className="mt-0.5 text-[11px] font-medium text-warn">
+                    Lo cerró otro aparato, no el que abrió el turno
+                  </div>
+                ) : null}
               </div>
               <div className="num text-sm text-sage">
                 {s.status === "closed"
@@ -313,6 +319,7 @@ export function CashView({ celu = false }: { celu?: boolean } = {}) {
                   virtualSube: Number(subeAmt) || 0,
                   safeCount: Number(safeAmt) || Number(closeAmt) || 0,
                   note: closeNote.trim() || undefined,
+                  heredado: turnoAjeno,
                 });
                 if (!r.ok) toast.error(r.error);
                 else {

@@ -49,3 +49,12 @@ export function turnosAbiertos(
   }
   return [...abiertos].filter(([id]) => !cerrados.has(id)).map(([id, deviceId]) => ({ id, deviceId }));
 }
+
+/**
+ * El arqueo lo hizo otro aparato, no el que abrió el turno: pasa cuando se
+ * fuerza la toma de la caja y el turno heredado se cierra en la caja nueva.
+ * Un turno de antes sin los dos aparatos solo se marca si vino heredado.
+ */
+export function cerradoPorOtro(s: { deviceId?: string; closedBy?: string; heredado?: boolean }): boolean {
+  return Boolean(s.heredado || (s.deviceId && s.closedBy && s.deviceId !== s.closedBy));
+}
