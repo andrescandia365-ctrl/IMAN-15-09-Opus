@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
 import { Banknote, CreditCard, Info, Minus, Plus, ScanBarcode, Search, Smartphone, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { ProductPhoneDialog } from "@/components/phone-floor";
+import { ClienteRefundDialog } from "@/components/refunds";
 import { ScanStrip, type AvisoEscaneo } from "@/components/scan-strip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,6 +94,7 @@ export function PhoneSellView() {
   const [asked, setAsked] = useState<Product | null>(null);
   const [payOpen, setPayOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [refundOpen, setRefundOpen] = useState(false);
   const catsRef = useDragScroll<HTMLDivElement>();
   const listRef = useDragScroll<HTMLDivElement>();
   const swipe = useRef<{ y: number; moved: boolean } | null>(null);
@@ -553,7 +555,21 @@ export function PhoneSellView() {
               </button>
             ) : cam ? null : (
               <div className="flex gap-1.5">
-                {cobra ? null : (
+                {cobra ? (
+                  // Solo la caja devuelve plata: sale del cajón del turno abierto.
+                  puedeCobrar && !turnoAjeno ? (
+                    <button
+                      type="button"
+                      className="h-9 rounded-md border border-ink/25 px-3 text-sm font-medium text-ink"
+                      onClick={() => {
+                        if (!cash.open) toast.error("Abrí la caja para devolver plata");
+                        else setRefundOpen(true);
+                      }}
+                    >
+                      Devolver
+                    </button>
+                  ) : null
+                ) : (
                   <button
                     type="button"
                     className="h-9 rounded-md border border-ink/25 px-3 text-sm font-medium text-ink disabled:opacity-40"
@@ -679,6 +695,7 @@ export function PhoneSellView() {
         </div>
       </div>
 
+      <ClienteRefundDialog open={refundOpen} onOpenChange={setRefundOpen} />
       <ProductPhoneDialog
         open={Boolean(alta)}
         tab={altaTab}
