@@ -51,6 +51,7 @@ export function CashView({ celu = false }: { celu?: boolean } = {}) {
   const [subeAmt, setSubeAmt] = useState("");
   const [safeAmt, setSafeAmt] = useState("");
   const [dropAmt, setDropAmt] = useState("");
+  const [closeNote, setCloseNote] = useState("");
   const [closeOpen, setCloseOpen] = useState(false);
   const [dropOpen, setDropOpen] = useState(false);
 
@@ -126,8 +127,9 @@ export function CashView({ celu = false }: { celu?: boolean } = {}) {
           ) : (
             <>
               <div className="mt-5">
-                <Label>Fondo inicial</Label>
+                <Label htmlFor="caja-fondo">Fondo inicial</Label>
                 <Input
+                  id="caja-fondo"
                   inputMode="numeric"
                   value={openAmt}
                   onChange={(e) => setOpenAmt(e.target.value.replace(/[^\d]/g, ""))}
@@ -215,8 +217,9 @@ export function CashView({ celu = false }: { celu?: boolean } = {}) {
             <DialogTitle>Retiro a caja fuerte</DialogTitle>
             <DialogDescription>Sale de la caja chica, no de las ventas digitales.</DialogDescription>
           </DialogHeader>
-          <Label>Monto</Label>
+          <Label htmlFor="caja-retiro">Monto</Label>
           <Input
+            id="caja-retiro"
             inputMode="numeric"
             value={dropAmt}
             onChange={(e) => setDropAmt(e.target.value.replace(/[^\d]/g, ""))}
@@ -251,30 +254,41 @@ export function CashView({ celu = false }: { celu?: boolean } = {}) {
               se hacen en otra app — acá solo anotás cuánto fue.
             </DialogDescription>
           </DialogHeader>
-          <Label>Efectivo contado (caja chica)</Label>
+          <Label htmlFor="caja-contado">Efectivo contado (caja chica)</Label>
           <Input
+            id="caja-contado"
             inputMode="numeric"
             value={closeAmt}
             onChange={(e) => setCloseAmt(e.target.value.replace(/[^\d]/g, ""))}
           />
-          <Label className="mt-2">Caja fuerte (contado)</Label>
+          <Label htmlFor="caja-fuerte" className="mt-2">Caja fuerte (contado)</Label>
           <Input
+            id="caja-fuerte"
             inputMode="numeric"
             value={safeAmt}
             onChange={(e) => setSafeAmt(e.target.value.replace(/[^\d]/g, ""))}
             placeholder="Lo que hay en el ahorro"
           />
-          <Label className="mt-2">Cargas virtuales · celular</Label>
+          <Label htmlFor="caja-cel" className="mt-2">Cargas virtuales · celular</Label>
           <Input
+            id="caja-cel"
             inputMode="numeric"
             value={celAmt}
             onChange={(e) => setCelAmt(e.target.value.replace(/[^\d]/g, ""))}
           />
-          <Label className="mt-2">Cargas SUBE</Label>
+          <Label htmlFor="caja-sube" className="mt-2">Cargas SUBE</Label>
           <Input
+            id="caja-sube"
             inputMode="numeric"
             value={subeAmt}
             onChange={(e) => setSubeAmt(e.target.value.replace(/[^\d]/g, ""))}
+          />
+          <Label htmlFor="caja-nota" className="mt-2">Nota del cierre (opcional)</Label>
+          <Input
+            id="caja-nota"
+            value={closeNote}
+            onChange={(e) => setCloseNote(e.target.value.slice(0, 200))}
+            placeholder="Faltante, billete falso, quién cerró…"
           />
           {closeAmt ? (
             <p
@@ -298,6 +312,7 @@ export function CashView({ celu = false }: { celu?: boolean } = {}) {
                   virtualCel: Number(celAmt) || 0,
                   virtualSube: Number(subeAmt) || 0,
                   safeCount: Number(safeAmt) || Number(closeAmt) || 0,
+                  note: closeNote.trim() || undefined,
                 });
                 if (!r.ok) toast.error(r.error);
                 else {
@@ -314,6 +329,7 @@ export function CashView({ celu = false }: { celu?: boolean } = {}) {
                   setCelAmt("");
                   setSubeAmt("");
                   setSafeAmt("");
+                  setCloseNote("");
                   setCloseOpen(false);
                 }
               }}
