@@ -1,11 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-
-type Detector = {
-  detect: (source: ImageBitmapSource) => Promise<{ rawValue?: string }[]>;
-};
+import { useCamaraLectora } from "@/lib/camara-lectora";
 
 export function CameraScan({
   onCode,
@@ -17,81 +14,27 @@ export function CameraScan({
   stayOpen?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [err, setErr] = useState("");
-  const onCodeRef = useRef(onCode);
-  const onCloseRef = useRef(onClose);
-  const stayOpenRef = useRef(stayOpen);
-  onCodeRef.current = onCode;
-  onCloseRef.current = onClose;
-  stayOpenRef.current = stayOpen;
+  const cerrado = useRef(false);
+  const estado = useCamaraLectora(videoRef, {
+    onLeido: (codigo) => {
+      if (cerrado.current) return;
+      onCode(codigo);
+      if (!stayOpen) {
+        cerrado.current = true;
+        onClose();
+      }
+    },
+  });
+  const err =
+    estado === "sin-lector"
+      ? "Este celular no lee códigos con la cámara. Escribí el número."
+      : estado === "sin-permiso"
+        ? "Sin permiso de cámara. Activala para este sitio."
+        : "";
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    let stream: MediaStream | null = null;
-    let timer = 0;
-    let dead = false;
-    let last = "";
-
-    const DetectorCtor = (window as unknown as { BarcodeDetector?: new (opts: { formats: string[] }) => Detector })
-      .BarcodeDetector;
-
-    void (async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } },
-          audio: false,
-        });
-        if (dead) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        video.srcObject = stream;
-        await video.play();
-        if (!DetectorCtor) {
-          setErr("Este celular no lee códigos con la cámara. Escribí el número.");
-          return;
-        }
-        const det = new DetectorCtor({
-          formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code"],
-        });
-        const tick = async () => {
-          if (dead || video.readyState < 2) {
-            timer = window.setTimeout(() => void tick(), 280);
-            return;
-          }
-          try {
-            const hits = await det.detect(video);
-            const raw = hits[0]?.rawValue?.trim();
-            if (raw && raw !== last) {
-              last = raw;
-              onCodeRef.current(raw);
-              if (!stayOpenRef.current) {
-                onCloseRef.current();
-                return;
-              }
-              window.setTimeout(() => {
-                if (last === raw) last = "";
-              }, 1100);
-            }
-          } catch {
-            /* next frame */
-          }
-          timer = window.setTimeout(() => void tick(), 280);
-        };
-        void tick();
-      } catch {
-        setErr("Sin permiso de cámara. Activala para este sitio.");
-        toast.error("Sin cámara");
-      }
-    })();
-
-    return () => {
-      dead = true;
-      window.clearTimeout(timer);
-      stream?.getTracks().forEach((t) => t.stop());
-    };
-  }, []);
+    if (estado === "sin-permiso") toast.error("Sin cámara");
+  }, [estado]);
 
   return (
     <div className="fixed inset-0 z-[80] flex flex-col bg-ink">

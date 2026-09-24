@@ -20,7 +20,8 @@ import { lotsOf, soonestExpiry, unallocated } from "@/lib/lots";
 import { findByScan, packOf, productMatchesQuery, stockBreakdown } from "@/lib/pack";
 import { useImanStore } from "@/lib/store";
 import type { Product } from "@/lib/types";
-import { cn, uid } from "@/lib/utils";
+import { productoNuevo } from "@/lib/producto-nuevo";
+import { cn } from "@/lib/utils";
 
 export function PhoneStockView() {
   const products = useImanStore((s) => s.products);
@@ -49,22 +50,7 @@ export function PhoneStockView() {
   }, [products, q, low]);
 
   function startNew(barcode = "") {
-    setDraft({
-      id: uid("p"),
-      name: "",
-      barcode,
-      price: 0,
-      cost: null,
-      stock: 0,
-      stockMin: 0,
-      packQty: 1,
-      packBarcode: "",
-      categoryId: categories[0]?.id ?? "kio",
-      active: true,
-      expiresAt: null,
-      priceUpdatedAt: new Date().toISOString(),
-      onOffer: false,
-    });
+    setDraft(productoNuevo(barcode, categories[0]?.id ?? "kio"));
     setTab("rapida");
     setOpen(true);
   }
@@ -247,7 +233,7 @@ export function PhoneStockView() {
   );
 }
 
-function ProductPhoneDialog({
+export function ProductPhoneDialog({
   open,
   tab,
   setTab,
@@ -262,7 +248,8 @@ function ProductPhoneDialog({
   setTab: (t: "rapida" | "detalles") => void;
   product: Product | null;
   onChange: (p: Product) => void;
-  onScanCode: () => void;
+  /** Sin esto no hay botón de escanear: el código ya vino leído. */
+  onScanCode?: () => void;
   onSave: () => void;
   onClose: () => void;
 }) {
@@ -302,9 +289,11 @@ function ProductPhoneDialog({
               <Label>Código</Label>
               <div className="flex gap-2">
                 <Input value={product.barcode} onChange={(e) => set({ barcode: e.target.value })} />
-                <Button type="button" variant="secondary" className="shrink-0" onClick={onScanCode}>
-                  <ScanBarcode className="size-4" />
-                </Button>
+                {onScanCode ? (
+                  <Button type="button" variant="secondary" className="shrink-0" onClick={onScanCode}>
+                    <ScanBarcode className="size-4" />
+                  </Button>
+                ) : null}
               </div>
             </div>
             <div>

@@ -334,3 +334,24 @@ html.light {
     animation: none !important;
   }
 }
+
+/* La línea que barre la franja de la cámara (scan-strip.tsx). */
+.iman-scan-linea {
+  top: 12%;
+  animation: iman-scan-barrer 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes iman-scan-barrer {
+  from {
+    top: 12%;
+  }
+  to {
+    top: 86%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iman-scan-linea {
+    display: none;
+  }
+}

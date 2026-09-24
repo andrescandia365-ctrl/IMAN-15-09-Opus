@@ -1,13 +1,18 @@
-import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Banknote, CreditCard, Info, Minus, Plus, ScanBarcode, Search, Smartphone, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { CameraScan } from "@/components/camera-scan";
+import { ProductPhoneDialog } from "@/components/phone-floor";
+import { ScanStrip, type AvisoEscaneo } from "@/components/scan-strip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { sendOrQueueDeskTicket } from "@/lib/desk-outbox";
 import { useDragScroll } from "@/lib/drag-scroll";
 import { formatARS, PAY_LABEL } from "@/lib/format";
+import { vibrar } from "@/lib/camara-lectora";
+import { crearLectorTeclado, FIN_SIN_ENTER_MS } from "@/lib/escaneo";
 import { findByScan } from "@/lib/pack";
+import { productoNuevo } from "@/lib/producto-nuevo";
+import { beep } from "@/lib/voice";
 import { ticketTotal, useImanStore } from "@/lib/store";
 import type { PayMethod, Product, TicketLine } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -47,8 +52,15 @@ export function PhoneSellView() {
   const paidInput = useImanStore((s) => s.paidInput);
   const setPaidInput = useImanStore((s) => s.setPaidInput);
   const deskStoreId = useImanStore((s) => s.deskStoreId);
+  const saveProduct = useImanStore((s) => s.saveProduct);
 
   const [cam, setCam] = useState(false);
+  const [ultimo, setUltimo] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<AvisoEscaneo | null>(null);
+  const [alta, setAlta] = useState<Product | null>(null);
+  const [altaTab, setAltaTab] = useState<"rapida" | "detalles">("rapida");
+  const avisoTimer = useRef(0);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string | "all">("all");
   const [asked, setAsked] = useState<Product | null>(null);
@@ -92,15 +104,131 @@ export function PhoneSellView() {
     return true;
   }
 
+  // Buscar no suma: un código corto igual al principio de un código de barras
+  // sumaba el producto equivocado a mitad del escaneo. Suma el Enter, o el
+  // lector cuando termina de escribir (ver el efecto del lector en modo teclado).
   function onQueryChange(raw: string) {
     setQ(raw);
     setAsked(null);
-    const t = raw.trim();
-    if (!t) return;
-    const looksCode = /^[0-9]{4,}$/.test(t.replace(/\s/g, ""));
-    if (!looksCode) return;
-    if (applyExact(t)) setQ("");
   }
+
+  function avisar(next: AvisoEscaneo) {
+    setAviso(next);
+    window.clearTimeout(avisoTimer.current);
+    avisoTimer.current = window.setTimeout(() => setAviso(null), next.tipo === "falta" ? 6000 : 2500);
+  }
+
+  /** Un código que llegó de la cámara o del lector en modo teclado. */
+  function leido(codigo: string, origen: "camara" | "teclado") {
+    const hit = findByScan(useImanStore.getState().products, codigo);
+    if (!hit) {
+      beep(false);
+      vibrar(false);
+      if (origen === "camara") avisar({ tipo: "falta", texto: "No está cargado", codigo });
+      else toast.error(`No está cargado: ${codigo}`, { action: { label: "Dar de alta", onClick: () => abrirAlta(codigo) } });
+      return;
+    }
+    if (hit.kind === "pack") {
+      vibrar(false);
+      if (origen === "camara") avisar({ tipo: "falta", texto: PACK_TOAST });
+      else toast.error(PACK_TOAST);
+      return;
+    }
+    const antes = useImanStore.getState().ticket.find((l) => l.productId === hit.product.id)?.qty ?? 0;
+    if (!addProduct(hit.product)) return;
+    vibrar(true);
+    setUltimo(hit.product.id);
+    avisar({ tipo: "ok", texto: antes ? `${hit.product.name} · ahora ×${antes + 1}` : `Leído: ${hit.product.name}` });
+  }
+
+  function abrirAlta(codigo: string) {
+    setAlta(productoNuevo(codigo, categories[0]?.id ?? "kio"));
+    setAltaTab("rapida");
+    setAviso(null);
+  }
+
+  function guardarAlta() {
+    if (!alta || !alta.name.trim() || alta.price < 0) {
+      toast.error("Nombre y precio son obligatorios");
+      return;
+    }
+    const nuevo = { ...alta, name: alta.name.trim(), priceUpdatedAt: new Date().toISOString() };
+    saveProduct(nuevo);
+    setAlta(null);
+    // Se escaneó para venderlo: entra al ticket.
+    if (addProduct(nuevo)) {
+      setUltimo(nuevo.id);
+      avisar({ tipo: "ok", texto: `Leído: ${nuevo.name}` });
+    }
+  }
+
+  const leidoRef = useRef(leido);
+  leidoRef.current = leido;
+
+  // Lector en modo teclado: escribe donde esté el foco, así que se escucha la
+  // ventana entera. Solo se deja pasar lo que va a otro campo (el efectivo, un
+  // diálogo): ahí el encargado está tipeando.
+  useEffect(() => {
+    const lector = crearLectorTeclado();
+    let fin = 0;
+    const ajeno = (t: EventTarget | null) =>
+      t instanceof HTMLElement &&
+      t !== searchRef.current &&
+      (t.isContentEditable || t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT");
+    // Si el lector escribió en el buscador, el código entero es lo que quedó
+    // escrito: cada tecla redibuja la lista, las primeras llegan espaciadas y
+    // el lector solo ve la cola rápida. La velocidad dice que fue un lector;
+    // el buscador dice qué leyó.
+    const entregar = (codigo: string) => {
+      const buscador = searchRef.current;
+      if (buscador && document.activeElement === buscador) {
+        const escrito = buscador.value.trim();
+        setQ("");
+        leidoRef.current(escrito.endsWith(codigo) ? escrito : codigo, "teclado");
+        return;
+      }
+      leidoRef.current(codigo, "teclado");
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (ajeno(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.timeStamp;
+      const codigo = lector.tecla(e.key, t);
+      window.clearTimeout(fin);
+      if (codigo) {
+        e.preventDefault();
+        e.stopPropagation();
+        entregar(codigo);
+        return;
+      }
+      fin = window.setTimeout(() => {
+        const sinEnter = lector.fin(performance.now());
+        if (sinEnter) entregar(sinEnter);
+      }, FIN_SIN_ENTER_MS + 20);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.clearTimeout(fin);
+    };
+  }, []);
+
+  // La cámara se apaga al bloquear el celu o cambiar de app. Al cambiar de
+  // pestaña se desmonta Vender y se apaga sola.
+  useEffect(() => {
+    if (!cam) return;
+    const apagar = () => {
+      if (document.visibilityState === "hidden") setCam(false);
+    };
+    const salir = () => setCam(false);
+    document.addEventListener("visibilitychange", apagar);
+    window.addEventListener("pagehide", salir);
+    return () => {
+      document.removeEventListener("visibilitychange", apagar);
+      window.removeEventListener("pagehide", salir);
+    };
+  }, [cam]);
+
+  useEffect(() => () => window.clearTimeout(avisoTimer.current), []);
 
   function onSearchSubmit() {
     const raw = q.trim();
@@ -197,6 +325,14 @@ export function PhoneSellView() {
     onSwipeDown(e);
   }
 
+  // El botón principal del ticket. Hoy manda el ticket a la PC; cuando el celu
+  // cobre (paso c del plan del celu) cambia acá y nada más.
+  const accion = {
+    etiqueta: sending ? "Enviando…" : "Enviar a la PC",
+    deshabilitada: !ticket.length || sending,
+    hacer: () => void send(),
+  };
+
   const methods: { id: PayMethod; label: string; icon: typeof Banknote }[] = [
     { id: "efectivo", label: "Efectivo", icon: Banknote },
     { id: "mercadopago", label: "MP", icon: Smartphone },
@@ -205,9 +341,18 @@ export function PhoneSellView() {
 
   return (
     <div className="relative flex h-full min-h-0 flex-col gap-1.5 overflow-hidden">
+      {cam ? (
+        <ScanStrip
+          onLeido={(c) => leido(c, "camara")}
+          pausada={Boolean(alta)}
+          aviso={aviso}
+          onAlta={abrirAlta}
+        />
+      ) : (
       <div className="relative shrink-0">
         <Search className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-ink-muted" />
         <Input
+          ref={searchRef}
           value={q}
           onChange={(e) => onQueryChange(e.target.value)}
           onKeyDown={(e) => {
@@ -229,9 +374,10 @@ export function PhoneSellView() {
           <ScanBarcode className="size-6" />
         </button>
       </div>
+      )}
 
       <div className="relative flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden">
-        <div className={cn("flex min-h-32 flex-1 flex-col gap-1.5", payOpen && "invisible")}>
+        <div className={cn("flex min-h-32 flex-1 flex-col gap-1.5", payOpen && "invisible", cam && "hidden")}>
           <div ref={catsRef} className="flex shrink-0 cursor-grab gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
             <Chip active={cat === "all"} onClick={() => setCat("all")}>
               Todo
@@ -322,26 +468,37 @@ export function PhoneSellView() {
             <h2 className="font-display text-lg tracking-tight">Ticket</h2>
             {payOpen ? (
               <span className="text-[11px] uppercase tracking-[0.08em] text-ink-muted">deslizá abajo</span>
-            ) : (
+            ) : cam ? null : (
               <button
                 type="button"
                 className="h-9 rounded-md bg-ink px-3 text-sm font-medium text-paper disabled:opacity-40"
-                disabled={!ticket.length || sending}
-                onClick={() => void send()}
+                disabled={accion.deshabilitada}
+                onClick={accion.hacer}
               >
-                {sending ? "Enviando…" : "Enviar a la PC"}
+                {accion.etiqueta}
               </button>
             )}
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4">
-          <TicketLines ticket={ticket} onQty={setLineQty} onRemove={removeLine} />
+          <TicketLines ticket={ticket} destacado={ultimo} onQty={setLineQty} onRemove={removeLine} />
         </div>
         <div className="flex shrink-0 items-end justify-between border-t border-dashed border-ink/20 px-4 py-3">
           <span className="text-[11px] uppercase tracking-[0.08em] text-ink-muted">Total</span>
           <span className="num text-3xl font-medium leading-none">{formatARS(total)}</span>
         </div>
       </section>
+
+      {cam && !payOpen ? (
+        <div className="flex shrink-0 gap-1.5">
+          <Button size="lg" variant="secondary" className="flex-1" onClick={() => setCam(false)}>
+            Listo
+          </Button>
+          <Button size="lg" className="flex-1" disabled={accion.deshabilitada} onClick={accion.hacer}>
+            {accion.etiqueta}
+          </Button>
+        </div>
+      ) : null}
 
       {payOpen ? (
       <div className="shrink-0 space-y-1.5">
@@ -399,45 +556,56 @@ export function PhoneSellView() {
           className="w-full"
           size="default"
           variant="secondary"
-          disabled={!ticket.length || sending}
-          onClick={() => void send()}
+          disabled={accion.deshabilitada}
+          onClick={accion.hacer}
         >
-          {sending ? "Enviando…" : "Enviar a la PC"}
+          {accion.etiqueta}
         </Button>
       </div>
       ) : null}
         </div>
       </div>
 
-      {cam ? (
-        <CameraScan
-          stayOpen
-          onClose={() => setCam(false)}
-          onCode={(c) => {
-            applyExact(c);
-          }}
-        />
-      ) : null}
+      <ProductPhoneDialog
+        open={Boolean(alta)}
+        tab={altaTab}
+        setTab={setAltaTab}
+        product={alta}
+        onChange={setAlta}
+        onSave={guardarAlta}
+        onClose={() => setAlta(null)}
+      />
     </div>
   );
 }
 
 function TicketLines({
   ticket,
+  destacado,
   onQty,
   onRemove,
 }: {
   ticket: TicketLine[];
+  /** El último leído: va arriba y resaltado. */
+  destacado?: string | null;
   onQty: (id: string, qty: number) => void;
   onRemove: (id: string) => void;
 }) {
   if (!ticket.length) {
     return <p className="py-4 text-center text-sm text-ink-muted">Un toque suma la unidad.</p>;
   }
+  const arriba = destacado ? ticket.find((l) => l.productId === destacado) : undefined;
+  const lineas = arriba ? [arriba, ...ticket.filter((l) => l !== arriba)] : ticket;
   return (
     <ul className="flex flex-col gap-2 pb-2">
-      {ticket.map((l) => (
-        <li key={l.productId} className="flex items-center gap-1 border-b border-ink/10 pb-2">
+      {lineas.map((l) => (
+        <li
+          key={l.productId}
+          className={cn(
+            "flex items-center gap-1 border-b border-ink/10 pb-2",
+            l === arriba && "-mx-2 rounded-md border-transparent bg-sage/20 px-2 pt-2",
+          )}
+        >
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium">{l.name}</div>
             <div className="num text-xs text-ink-muted">{formatARS(l.price)}</div>

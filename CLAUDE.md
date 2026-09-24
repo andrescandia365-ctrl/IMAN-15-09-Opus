@@ -168,7 +168,8 @@ igual. Si no queda escrito, vuelve a pasar.
 | `src/components/ledger-rows-config.tsx` | el dueño arma las filas y los tags |
 | `src/components/phone-sell / phone-floor / phone-receive` | el celu (Llegó carga costo opcional) |
 | `src/components/owner-desk.tsx` + `owner-pin-dialog.tsx` + `owner-prices.tsx` | Dueño. En el celu, Precios se mira |
-| `src/components/camera-scan.tsx` | escaneo con cámara (BarcodeDetector) |
+| `src/components/camera-scan.tsx` | escaneo con cámara a pantalla completa (PC, Inventario, Stock) |
+| `src/components/scan-strip.tsx` | la cámara como franja arriba del ticket, en Vender del celu |
 | `src/components/vendor-dashboard.tsx` | Taller (vendedor) |
 
 ### Núcleo
@@ -182,6 +183,8 @@ igual. Si no queda escrito, vuelve a pasar.
 | `src/lib/sync.ts` | `syncNow` (botón), `pushQuiet` (la cinta sube sola), `pullCopy` |
 | `src/lib/kiosk.ts` | servidor: `pushEvents`, `pullEvents` |
 | `src/lib/pack.ts` | `findByScan`: packBarcode → packQty unidades; barcode → 1 |
+| `src/lib/escaneo.ts` | lecturas por presencia, ritmo de la cámara, recorte visible, lector en modo teclado |
+| `src/lib/camara-lectora.ts` | el bucle de la cámara (BarcodeDetector) que usan las dos pantallas de escaneo |
 | `src/lib/ledger.ts` | filas de Asientos por tags, archivo del mes con las filas de entonces |
 | `src/lib/costo-guia.ts` | qué renglón de la boleta copiar, calculadora de bulto, sospechas |
 | `src/lib/fiscal.ts` | condición fiscal del local, tasa y nombre del impuesto (datos, no constantes) |
@@ -301,23 +304,6 @@ que abrió el último turno (`plegado.ts`). Hoy solo la PC abre turnos, así que
 solo ella pliega y el caso de dos aparatos plegando a la vez no existe. El día
 que el celu pueda abrir turnos sin que el servidor decida quién es la caja, ese
 caso aparece, y el resumen del mes puede quedar corto sin que nadie se entere.
-
-### Pendiente para el commit del escáner partido
-
-Las dos van juntas en ese commit, no sueltas:
-
-- **Código corto que coincide con el principio de uno largo.** El buscador
-  del celu (`phone-sell.tsx`, `onQueryChange`) busca coincidencia exacta a
-  cada tecla desde el cuarto dígito. Un lector en modo teclado escribe el
-  código de a un carácter: si existe un código corto igual al principio del
-  código de barras, suma ese producto a mitad del escaneo.
-- **El Vender del celu no enfoca solo el buscador.** Un lector en modo teclado
-  escribe donde esté el foco: si el encargado tocó otra cosa, el escaneo se
-  pierde.
-- **La cámara es lenta para una fila.** `camera-scan.tsx` mira un cuadro
-  cada 280 ms y no vuelve a leer el mismo código hasta pasado 1,1 s: dos
-  unidades iguales seguidas llevan más de un segundo cada una. Limita a
-  Android también, no solo al iPhone.
 
 ### ⚠ NO TOCAR: qué hace hoy el vencimiento de licencia
 
