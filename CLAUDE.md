@@ -309,7 +309,7 @@ resolver uno, se saca de acá en el mismo commit.
 **Producto**
 - Sugerencias en Inventario mucho más completas, con creación e impresión de afiches y carteles de promos y ofertas.
 - Revisar la lógica de vencimientos en celu y PC.
-- Gráfico de líneas en Dueño → El mes (total por día, comparado con otro mes).
+- Ventas por día de meses viejos: el gráfico de El mes arma los días viejos con los turnos cerrados (se guardan 90). Para meses más viejos haría falta guardar el total por día en el resumen plegado, que es tocar el plegado (necesita GO).
 
 **Técnico**
 - La cinta de eventos (`kiosk_event`) crece sin techo en el servidor.

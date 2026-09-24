@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ChevronDown,
   ChevronLeft,
@@ -12,7 +12,22 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
-import { Bar, BarChart, Cell, LabelList, ResponsiveContainer, XAxis, YAxis, type LabelProps } from "recharts";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  LabelList,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+  type LabelProps,
+} from "recharts";
+import { desdeVentasVivas, ventasPorDia } from "@/lib/ventas-dia";
+import { SALES_DAYS, SALES_KEEP } from "@/lib/cap";
 import { toast } from "sonner";
 import { LedgerSheet } from "@/components/ledger-grid";
 import { LedgerRowsConfig } from "@/components/ledger-rows-config";
@@ -42,7 +57,7 @@ import { OwnerPrices } from "@/components/owner-prices";
 import { OwnerTicket } from "@/components/owner-ticket";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PAY_LABEL, formatARS, todayKey } from "@/lib/format";
+import { PAY_LABEL, formatARS, formatARSCompact, todayKey } from "@/lib/format";
 import type { StoreMeta, StoreRollup } from "@/lib/kiosk";
 import type { MyAccess } from "@/lib/license";
 import { unitCost } from "@/lib/pricing";
@@ -354,6 +369,11 @@ export function OwnerDesk({
               ) : null}
 
               <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+                <div className="lg:col-span-2">
+                  <Tarjeta titulo="Ventas por día">
+                    <VentasPorDia ym={ym} />
+                  </Tarjeta>
+                </div>
                 <Tarjeta titulo="Ventas, últimos seis meses">
                   <VentasSeisMeses ym={ym} sales={sales} aggs={monthAggs} acostado={phone} />
                 </Tarjeta>
@@ -1297,5 +1317,162 @@ function Subtotal({ k, v }: { k: string; v: number }) {
         {formatARS(v)}
       </span>
     </li>
+  );
+}
+
+/**
+ * El total vendido de cada día del mes, en línea, contra otro mes (por
+ * defecto el anterior). Los días recientes salen de las ventas; los viejos, de
+ * los turnos cerrados (ver ventas-dia.ts). Un día sin dato es un hueco en la
+ * línea, no un cero. El mes de comparación va punteado: no depende solo del
+ * color.
+ */
+function VentasPorDia({ ym }: { ym: string }) {
+  const sales = useImanStore((s) => s.sales);
+  const shifts = useImanStore((s) => s.shifts);
+  const [otro, setOtro] = useState(() => moverMes(ym, -1));
+  useEffect(() => setOtro(moverMes(ym, -1)), [ym]);
+
+  const datos = useMemo(() => {
+    const opts = {
+      hoy: todayKey(),
+      desdeVivas: desdeVentasVivas(sales, { hoy: new Date(), dias: SALES_DAYS, tope: SALES_KEEP }),
+    };
+    const este = ventasPorDia(ym, sales, shifts, opts);
+    const comparado = ventasPorDia(otro, sales, shifts, opts);
+    return Array.from({ length: 31 }, (_, i) => ({
+      dia: i + 1,
+      este: este[i] ?? null,
+      otro: comparado[i] ?? null,
+    }));
+  }, [ym, otro, sales, shifts]);
+
+  const conDatoEste = datos.filter((d) => d.este != null);
+  const opciones = [-1, -2, -3, -4, -5, -6, -12].map((n) => moverMes(ym, n));
+  const nombre = (m: string) => `${MESES[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
+
+  // Pico y valle del mes elegido, escritos; el resto, al pasar el dedo.
+  const pico = conDatoEste.reduce<(typeof datos)[number] | null>((a, d) => (!a || (d.este ?? 0) > (a.este ?? 0) ? d : a), null);
+  const valle = conDatoEste.reduce<(typeof datos)[number] | null>((a, d) => (!a || (d.este ?? 0) < (a.este ?? 0) ? d : a), null);
+  const rotulo = (p: { x?: number; y?: number; index?: number }) => {
+    const d = datos[Number(p.index)];
+    if (!d || d.este == null || (d !== pico && d !== valle) || pico === valle) return <g />;
+    return (
+      <text
+        x={Number(p.x)}
+        y={Number(p.y) - 10}
+        textAnchor="middle"
+        className="fill-fg font-mono text-[11px]"
+      >
+        {formatARSCompact(d.este)}
+      </text>
+    );
+  };
+
+  return (
+    <div className="mt-2">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+        <span className="flex items-center gap-1.5">
+          <svg width="18" height="6" aria-hidden="true">
+            <line x1="0" y1="3" x2="18" y2="3" stroke="var(--color-accent)" strokeWidth="2" />
+          </svg>
+          {nombre(ym)}
+        </span>
+        <label className="flex items-center gap-1.5">
+          <svg width="18" height="6" aria-hidden="true">
+            <line x1="0" y1="3" x2="18" y2="3" stroke="var(--color-subtle)" strokeWidth="2" strokeDasharray="4 3" />
+          </svg>
+          <span className="sr-only">Comparar con</span>
+          <select
+            value={otro}
+            onChange={(e) => setOtro(e.target.value)}
+            className="rounded-md bg-elevated px-2 py-1 text-xs text-fg"
+            aria-label="Mes para comparar"
+          >
+            {opciones.map((m) => (
+              <option key={m} value={m}>
+                {nombre(m)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {!datos.some((d) => (d.este ?? 0) > 0 || (d.otro ?? 0) > 0) ? (
+        <Vacio>De estos meses no quedan ventas por día</Vacio>
+      ) : (
+        <div
+          className="mt-2 h-56"
+          role="img"
+          aria-label={`Ventas por día de ${nombre(ym)} contra ${nombre(otro)}${
+            pico?.este != null ? `. El día que más vendió, el ${pico.dia}: ${formatARS(pico.este)}` : ""
+          }`}
+        >
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={datos} margin={{ top: 18, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid vertical={false} stroke="var(--color-border)" strokeDasharray="0" />
+              <XAxis
+                dataKey="dia"
+                ticks={[1, 5, 10, 15, 20, 25, 31]}
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: "var(--color-muted)", fontSize: 11 }}
+              />
+              <YAxis
+                width={72}
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: "var(--color-muted)", fontSize: 11 }}
+                tickFormatter={(v: number) => formatARSCompact(v)}
+              />
+              <Tooltip
+                cursor={{ stroke: "var(--color-subtle)", strokeWidth: 1 }}
+                content={({ active, label }) => {
+                  if (!active) return null;
+                  const d = datos[Number(label) - 1];
+                  if (!d) return null;
+                  return (
+                    <div className="rounded-md bg-surface px-3 py-2 text-xs shadow-[var(--shadow-border)]">
+                      <p className="font-medium text-fg">Día {d.dia}</p>
+                      <p className="mt-0.5 text-muted">
+                        {nombre(ym)}: <span className="num text-fg">{d.este == null ? "sin dato" : formatARS(d.este)}</span>
+                      </p>
+                      <p className="text-muted">
+                        {nombre(otro)}: <span className="num text-fg">{d.otro == null ? "sin dato" : formatARS(d.otro)}</span>
+                      </p>
+                    </div>
+                  );
+                }}
+              />
+              <Line
+                type="monotone"
+                dataKey="otro"
+                stroke="var(--color-subtle)"
+                strokeWidth={2}
+                strokeDasharray="4 3"
+                dot={false}
+                activeDot={{ r: 4 }}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="este"
+                stroke="var(--color-accent)"
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 5, stroke: "var(--color-surface)", strokeWidth: 2 }}
+                isAnimationActive={false}
+                connectNulls={false}
+                label={rotulo}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+      <p className="mt-1 text-[11px] text-subtle">
+        Los días recientes salen de las ventas; los más viejos, de los turnos cerrados. Un hueco es un día sin
+        dato.
+      </p>
+    </div>
   );
 }
