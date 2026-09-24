@@ -43,3 +43,12 @@ export function recordarRubro(categoryId: string): void {
     /* sin lugar */
   }
 }
+
+/**
+ * Si al alta le falta el rubro. Un local sin rubros cargados no lo exige: si
+ * no, en un local recién creado no se podía dar de alta ningún producto. Ahí
+ * el producto queda sin rubro, como antes de esta regla.
+ */
+export function faltaRubro(categoryId: string, rubros: { id: string }[]): boolean {
+  return !categoryId && rubros.length > 0;
+}

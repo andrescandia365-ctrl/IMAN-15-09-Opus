@@ -21,7 +21,7 @@ import { lotsOf, soonestExpiry, unallocated } from "@/lib/lots";
 import { findByScan, packOf, productMatchesQuery, stockBreakdown } from "@/lib/pack";
 import { useImanStore } from "@/lib/store";
 import type { Product } from "@/lib/types";
-import { productoNuevo, recordarRubro } from "@/lib/producto-nuevo";
+import { faltaRubro, productoNuevo, recordarRubro } from "@/lib/producto-nuevo";
 import { cn } from "@/lib/utils";
 
 export function PhoneStockView() {
@@ -254,12 +254,13 @@ export function ProductPhoneDialog({
   onClose: () => void;
 }) {
   const products = useImanStore((s) => s.products);
+  const categorias = useImanStore((s) => s.categories);
   if (!product) return null;
   const set = (patch: Partial<Product>) => onChange({ ...product, ...patch });
   // Alta o edición según si el producto ya existe, no según si tiene nombre:
   // el título cambiaba a "Editar" apenas se escribía la primera letra.
   const nuevo = !products.some((p) => p.id === product.id);
-  const sinRubro = !product.categoryId;
+  const sinRubro = faltaRubro(product.categoryId, categorias);
   const guardar = () => {
     if (sinRubro) return;
     if (nuevo) recordarRubro(product.categoryId);
