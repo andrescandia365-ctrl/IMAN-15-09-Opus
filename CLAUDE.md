@@ -334,21 +334,17 @@ están escritas.
 
 - **a. Cada venta lleva su turno** y el arqueo cuenta por turno. Hecho.
 - **b. El rol de caja lo decide el servidor**, en lugar del ancho de
-  pantalla. Lo primero: la dirección del Sincronizar (`reviewCloud`).
-
-  **Antes del c: definir el mínimo de un kiosco solo celu.** Necesita más que
-  cobrar. Hoy Pedidos, Actualizar precios y la importación del catálogo son
-  solo de PC; en el celu los precios del dueño son de solo lectura; y la
-  planilla necesita una vista de un día para pantalla chica. Antes de construir
-  el cobro hay que definir el mínimo con el que un kiosco solo celu funciona de
-  verdad.
-- **c. Cobro en el celu.** Con él vuelven "Confirmar venta", "Cuánto pagó" y
-  el vuelto, que se **sacaron a propósito** de Vender del celu. "Confirmar
-  venta" mostraba un cartel verde de venta sin registrar nada: el encargado
-  creía que había vendido y cobraba en efectivo sin registro. El vuelto se
-  calcula donde está la plata, el cajón de la PC; mostrarlo en el celu invita
-  a manejar efectivo donde no hay cajón. Hasta el paso c, el celu solo manda
-  el ticket con el medio de pago. **No volver a ponerlos antes.**
+  pantalla. Hecho (rama `noche-celu-caja`): `rol.ts`, `caja-local.ts`,
+  `tomarCaja`.
+- **Mínimo de un kiosco solo celu.** Hecho con el c: cobrar, la caja (turno,
+  retiros, cierre), la planilla de un día, Actualizar precios, importar el
+  catálogo, y stock, alta, Llegó y Vence que ya estaban. Pestañas del celu que
+  es la caja: Vender · Caja · Stock · Más · Dueño.
+- **c. Cobro en el celu.** Hecho: "Confirmar venta", "Cuánto pagó" y el vuelto
+  están **solo en el aparato que es la caja**. En un celu de piso siguen
+  afuera, a propósito: "Confirmar venta" mostraba un cartel verde de venta sin
+  registrar nada y el encargado cobraba en efectivo sin registro; el vuelto se
+  calcula donde está la plata. **Un celu de piso nunca los muestra.**
 - **d. Pase de caja** de un aparato a otro. La primera versión pide el turno
   cerrado.
 

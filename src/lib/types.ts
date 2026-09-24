@@ -1,5 +1,5 @@
 export type PayMethod = "efectivo" | "mercadopago" | "debito";
-export type ViewId = "taller" | "counter" | "inventory" | "orders" | "cash" | "expire" | "reports" | "settings";
+export type ViewId = "taller" | "counter" | "inventory" | "orders" | "cash" | "expire" | "reports" | "settings" | "mas";
 export type ThemeMode = "dark" | "light";
 export type KioskRubro = "kiosco" | "almacen" | "despensa" | "maxikiosco" | "otro";
 export type FiscalCondition = "responsable_inscripto" | "monotributo" | "en_negro";

@@ -16,12 +16,17 @@ import { formatARS, formatTime } from "@/lib/format";
 import { useRol } from "@/lib/caja-local";
 import { useCashSnapshot, useImanStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { EncargadoBook } from "@/components/ledger-grid";
+import { EncargadoBook, LedgerDia } from "@/components/ledger-grid";
 import { PriceUpdateCard } from "@/components/price-calc";
 import { onShiftNow } from "@/lib/team";
 import { backupOnClose } from "@/lib/sync";
 
-export function CashView() {
+/**
+ * La caja: turno, retiros, cierre, historial y la planilla. `celu` es la caja
+ * en un celu: la planilla va de a un día, en lista, y Actualizar precios vive
+ * en la pestaña Más.
+ */
+export function CashView({ celu = false }: { celu?: boolean } = {}) {
   const cash = useCashSnapshot();
   const settings = useImanStore((s) => s.settings);
   const openShift = useImanStore((s) => s.openShift);
@@ -192,9 +197,9 @@ export function CashView() {
         ) : null}
       </section>
 
-      <EncargadoBook defaultOpen />
+      {celu ? <LedgerDia /> : <EncargadoBook defaultOpen />}
 
-      <PriceUpdateCard />
+      {celu ? null : <PriceUpdateCard />}
 
       <Dialog open={dropOpen} onOpenChange={setDropOpen}>
         <DialogContent>

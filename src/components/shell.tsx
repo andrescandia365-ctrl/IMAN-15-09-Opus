@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   ClipboardList,
+  Ellipsis,
   LayoutGrid,
   Moon,
   ShoppingBag,
@@ -23,6 +24,7 @@ import { OrdersView } from "@/components/orders-view";
 import { PhoneExpireView, PhoneStockView } from "@/components/phone-floor";
 import { PhoneReceiveView } from "@/components/phone-receive";
 import { PhoneSellView } from "@/components/phone-sell";
+import { PhoneMasView } from "@/components/phone-mas";
 import { ReceiptDialog } from "@/components/receipt";
 import { SyncButton } from "@/components/sync-button";
 import { Badge } from "@/components/ui/badge";
@@ -47,7 +49,7 @@ import { isBrowserOnline } from "@/lib/floor-lock";
 import { syncNow } from "@/lib/sync";
 import type { ViewId } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { useVigilarCaja } from "@/lib/caja-local";
+import { useRol, useVigilarCaja } from "@/lib/caja-local";
 import { usePhoneUi } from "@/lib/device";
 import { lockOwner } from "@/lib/owner-pin";
 import { errorText } from "@/lib/errors";
@@ -67,6 +69,18 @@ const PHONE_NAV: { id: ViewId | "owner"; label: string; icon: typeof LayoutGrid 
   { id: "inventory", label: "Stock", icon: ShoppingBag },
   { id: "orders", label: "Llegó", icon: Truck },
   { id: "expire", label: "Vence", icon: AlertTriangle },
+  { id: "owner", label: "Dueño", icon: UserRound },
+];
+
+/**
+ * El celu que es la caja: cobrar y la caja a un toque; Llegó, Vence, Actualizar
+ * precios e Importar van a Más, para no pasar de cinco pestañas.
+ */
+const PHONE_NAV_CAJA: { id: ViewId | "owner"; label: string; icon: typeof LayoutGrid }[] = [
+  { id: "counter", label: "Vender", icon: LayoutGrid },
+  { id: "cash", label: "Caja", icon: Wallet },
+  { id: "inventory", label: "Stock", icon: ShoppingBag },
+  { id: "mas", label: "Más", icon: Ellipsis },
   { id: "owner", label: "Dueño", icon: UserRound },
 ];
 
@@ -98,6 +112,9 @@ export function Shell({
   const cash = useCashSnapshot();
   const phone = usePhoneUi();
   useVigilarCaja(activeStoreId, consultarCaja);
+  // El celu que es la caja cobra y lleva el turno (ver rol.ts).
+  const { puedeCobrar } = useRol(activeStoreId);
+  const cajaCelu = phone && puedeCobrar;
   const [clock, setClock] = useState(() => new Date());
   const [tasksOpen, setTasksOpen] = useState(false);
   const [ownerOpen, setOwnerOpen] = useState(false);
@@ -136,10 +153,11 @@ export function Shell({
 
   useEffect(() => {
     if (!phone) return;
-    if (view === "cash" || view === "reports" || view === "settings") {
+    const soloCaja = view === "cash" || view === "mas";
+    if (view === "reports" || view === "settings" || (soloCaja && !cajaCelu)) {
       setView("counter");
     }
-  }, [phone, view, setView]);
+  }, [phone, cajaCelu, view, setView]);
 
   useEffect(() => {
     if (!ownerOpen) return;
@@ -227,6 +245,8 @@ export function Shell({
       if (view === "inventory") return <PhoneStockView />;
       if (view === "orders") return <PhoneReceiveView />;
       if (view === "expire") return <PhoneExpireView />;
+      if (view === "cash" && cajaCelu) return <CashView celu />;
+      if (view === "mas" && cajaCelu) return <PhoneMasView />;
       return <PhoneSellView />;
     }
     switch (view) {
@@ -239,7 +259,7 @@ export function Shell({
       default:
         return <CounterView />;
     }
-  }, [view, phone]);
+  }, [view, phone, cajaCelu]);
 
   return (
     <TooltipProvider delayDuration={250}>
@@ -443,9 +463,11 @@ export function Shell({
         </main>
 
         <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-surface pb-[env(safe-area-inset-bottom)] sm:hidden">
-          {PHONE_NAV.map((n) => {
+          {(cajaCelu ? PHONE_NAV_CAJA : PHONE_NAV).map((n) => {
             const Icon = n.icon;
-            const on = n.id === "owner" ? ownerOpen : !ownerOpen && view === n.id;
+            // Llegó y Vence se abren desde Más cuando el celu es la caja.
+            const enMas = cajaCelu && n.id === "mas" && (view === "orders" || view === "expire");
+            const on = n.id === "owner" ? ownerOpen : !ownerOpen && (view === n.id || enMas);
             return (
               <button
                 key={n.id}
