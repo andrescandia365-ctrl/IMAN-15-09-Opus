@@ -142,7 +142,7 @@ export function PhoneSellView() {
   }
 
   function abrirAlta(codigo: string) {
-    setAlta(productoNuevo(codigo, categories[0]?.id ?? "kio"));
+    setAlta(productoNuevo(codigo));
     setAltaTab("rapida");
     setAviso(null);
   }

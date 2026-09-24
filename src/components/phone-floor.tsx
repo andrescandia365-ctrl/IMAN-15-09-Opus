@@ -20,12 +20,11 @@ import { lotsOf, soonestExpiry, unallocated } from "@/lib/lots";
 import { findByScan, packOf, productMatchesQuery, stockBreakdown } from "@/lib/pack";
 import { useImanStore } from "@/lib/store";
 import type { Product } from "@/lib/types";
-import { productoNuevo } from "@/lib/producto-nuevo";
+import { productoNuevo, recordarRubro, ultimoRubro } from "@/lib/producto-nuevo";
 import { cn } from "@/lib/utils";
 
 export function PhoneStockView() {
   const products = useImanStore((s) => s.products);
-  const categories = useImanStore((s) => s.categories);
   const adjustStock = useImanStore((s) => s.adjustStock);
   const saveProduct = useImanStore((s) => s.saveProduct);
   const deleteProduct = useImanStore((s) => s.deleteProduct);
@@ -50,7 +49,7 @@ export function PhoneStockView() {
   }, [products, q, low]);
 
   function startNew(barcode = "") {
-    setDraft(productoNuevo(barcode, categories[0]?.id ?? "kio"));
+    setDraft(productoNuevo(barcode));
     setTab("rapida");
     setOpen(true);
   }
@@ -254,13 +253,25 @@ export function ProductPhoneDialog({
   onClose: () => void;
 }) {
   const categories = useImanStore((s) => s.categories);
+  const products = useImanStore((s) => s.products);
   if (!product) return null;
   const set = (patch: Partial<Product>) => onChange({ ...product, ...patch });
+  // Alta o edición según si el producto ya existe, no según si tiene nombre:
+  // el título cambiaba a "Editar" apenas se escribía la primera letra.
+  const nuevo = !products.some((p) => p.id === product.id);
+  const sinRubro = !product.categoryId;
+  const ultimo = nuevo ? ultimoRubro() : "";
+  const rubros = [...categories].sort((a, b) => (a.id === ultimo ? -1 : b.id === ultimo ? 1 : 0));
+  const guardar = () => {
+    if (sinRubro) return;
+    if (nuevo) recordarRubro(product.categoryId);
+    onSave();
+  };
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{product.name ? "Editar" : "Alta rápida"}</DialogTitle>
+          <DialogTitle>{nuevo ? "Alta rápida" : "Editar"}</DialogTitle>
           <DialogDescription>Nombre, código y precio para vender. Pack en Detalles.</DialogDescription>
         </DialogHeader>
         <div className="flex gap-1.5">
@@ -301,18 +312,28 @@ export function ProductPhoneDialog({
               <Input inputMode="numeric" value={product.price || ""} onChange={(e) => set({ price: Number(e.target.value) || 0 })} />
             </div>
             <div>
-              <Label>Rubro</Label>
-              <select
-                className="flex h-11 w-full rounded-md bg-elevated px-3 text-sm text-fg shadow-[var(--shadow-border)]"
-                value={product.categoryId}
-                onChange={(e) => set({ categoryId: e.target.value })}
-              >
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
+              {/* El rubro decide el margen y la factura: se elige siempre, no viene puesto. */}
+              <Label className={cn(sinRubro && "text-warn")}>{sinRubro ? "Rubro · elegilo" : "Rubro"}</Label>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {rubros.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    aria-pressed={product.categoryId === c.id}
+                    onClick={() => set({ categoryId: c.id })}
+                    className={cn(
+                      "h-10 rounded-full px-3.5 text-sm font-medium",
+                      product.categoryId === c.id
+                        ? "bg-accent text-accent-fg"
+                        : sinRubro
+                          ? "bg-elevated text-fg ring-1 ring-warn/60"
+                          : "bg-elevated text-muted",
+                    )}
+                  >
                     {c.name}
-                  </option>
+                  </button>
                 ))}
-              </select>
+              </div>
             </div>
           </div>
         ) : (
@@ -348,7 +369,9 @@ export function ProductPhoneDialog({
           <Button variant="secondary" onClick={onClose}>
             Cancelar
           </Button>
-          <Button onClick={onSave}>Guardar</Button>
+          <Button onClick={guardar} disabled={sinRubro}>
+            {sinRubro ? "Falta el rubro" : "Guardar"}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
