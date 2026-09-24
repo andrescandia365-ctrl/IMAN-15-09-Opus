@@ -156,3 +156,64 @@ Preguntas para Andres:
 
 No probado: en un celu real (tamaños de toque, el teclado numérico, el
 selector de archivos del celu para importar).
+
+---
+
+## Tarea 4 — Paso d: pasar la caja
+
+**Hecho.** Commit `8b9741a`.
+
+- **Dueño → Local → "Pasar la caja a este aparato"**, con PIN y red.
+- **Exige el turno cerrado.** Lo controla el servidor con los turnos de la
+  fotocopia del local y los eventos `shift` de la cinta (`turnosAbiertos`: un
+  turno cerrado en cualquiera de los dos lados queda cerrado; un turno nunca
+  se reabre). Frena con un turno abierto por **otro** aparato, o con uno de
+  antes de esta noche que no dice qué aparato lo abrió.
+- **Toma forzada** (la caja de antes se rompió o se perdió): si el pase se
+  frena por un turno abierto, el diálogo explica y ofrece "Forzar la toma",
+  avisando que lo que ese aparato no subió no llega. Los turnos que quedaron
+  abiertos quedan "heredados" en la caja nueva (`iman-caja-heredado:{local}`).
+- **Turno ajeno en la caja** (heredado, o abierto por otro aparato): no se
+  cobra, no se abre otro, no se devuelve. Se cierra en Caja contando la plata
+  y después se abre uno propio. Esto aplica **solo en la caja**: en un local
+  sin caja asignada, dos PC siguen compartiendo el turno como hoy.
+- **La caja nueva sincroniza apenas toma la caja.** Lo encontré probando: sin
+  esto, el celu veía abierto el turno que la PC ya había cerrado.
+
+Probado en la app (una PC y un celu):
+- la PC intenta tomar la caja con el turno viejo del local abierto: frenado;
+  lo cierra y la toma; abre su turno;
+- el celu intenta el pase con el turno de la PC abierto: frenado; la PC cierra
+  y el celu pasa la caja; abre su turno y vende;
+- el celu "se rompe" (sin red): la PC fuerza la toma; en el Mostrador aparece
+  "Hay un turno abierto de otro aparato" y no puede confirmar; cierra el turno
+  heredado contando ($15.000 + $2.500 de la venta del celu que había subido);
+  abre el suyo y cobra;
+- se volvió a pasar la prueba de dos aparatos de la tarea 2 (con la toma
+  forzada), los cuatro checks y `qa:arranque`.
+
+Decisiones que tomé solo (conservadoras):
+- **Un turno abierto de antes de esta noche (sin aparato anotado) frena el
+  pase normal**, aunque lo haya abierto el mismo aparato que pide la caja: no
+  hay forma de saber de quién es. Se cierra y se vuelve a abrir, y el turno
+  nuevo ya dice su aparato. Para un local que existe, la primera vez que
+  asigne la caja va a tener que cerrar el turno.
+- **En un turno ajeno se bloquea también "Devolver"**, no solo cobrar: una
+  devolución movería el arqueo del turno heredado.
+
+Límite conocido:
+- **El servidor solo controla los turnos que ya le llegaron.** Si la caja de
+  antes abrió un turno **sin red**, el pase normal lo deja pasar. Cuando ese
+  aparato sincroniza, la caja nueva ve ese turno como ajeno y no puede cobrar
+  en él hasta cerrarlo. No se mezclan ventas, pero hay un turno para cerrar
+  que nadie esperaba.
+
+Preguntas para Andres:
+- ¿Está bien que la primera asignación de caja en un local existente pida
+  cerrar el turno abierto (por ser de antes y no decir de qué aparato es)?
+- En la toma forzada, el cierre del turno heredado va a descuadrar por las
+  ventas que el aparato roto no subió. ¿Hace falta marcar ese cierre como
+  "forzado" en el historial, para que el dueño no lo lea como un faltante?
+
+No probado: en un celu real; con los dos aparatos perdiendo la red al mismo
+tiempo que se pasa la caja.
