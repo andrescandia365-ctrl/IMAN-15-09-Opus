@@ -26,7 +26,15 @@ import { alreadyInCopy, fromCopyStart, pullMode, pullStartAfter } from "@/lib/pu
 import { pullEvents, pushEvents, saveKiosk, selectStore } from "@/lib/kiosk";
 import { encodeCopyPayload } from "@/lib/copy-gzip";
 import { snapshotKiosk, useImanStore } from "@/lib/store";
-import { backupRecords, incomingCopy, mergeBackup, preferLiveCopy, prunePayload, puedeRespaldar } from "@/lib/cap";
+import {
+  backupRecords,
+  incomingCopy,
+  mergeBackup,
+  preferLiveCopy,
+  prunePayload,
+  puedeRespaldar,
+  registrosNuevos,
+} from "@/lib/cap";
 import { chunk } from "@/lib/event-queue";
 import { nombresBorrados, quitadosPor } from "@/lib/deleted";
 import type { ImanEvent } from "@/lib/events";
@@ -136,13 +144,15 @@ async function pullApply(storeId: string): Promise<{ pulled: number; more: boole
 /**
  * Turnos, retiros e historial que trajo la fotocopia de otro aparato quedan
  * también acá, sumados sobre el estado de ahora. Se lee y se escribe en el
- * mismo paso: lo que se cobre mientras tanto no se pierde.
+ * mismo paso: lo que se cobre mientras tanto no se pierde. Devuelve cuántos
+ * registros trajo, para que "Bajaron N cambios" los cuente.
  */
-function adoptRecords(server: KioskPayload): void {
+function adoptRecords(server: KioskPayload): number {
   const st = useImanStore.getState();
-  useImanStore.setState(
-    backupRecords(server, { shifts: st.shifts, drops: st.drops, movements: st.movements }),
-  );
+  const antes = { shifts: st.shifts, drops: st.drops, movements: st.movements };
+  const next = backupRecords(server, antes);
+  useImanStore.setState(next);
+  return registrosNuevos(antes, next);
 }
 
 /**
@@ -191,8 +201,10 @@ async function saveBlob(
       return { estado: "subida" as const, pulled: 0 };
     }
     if (opts.juntar === false) throw new Error("Otro aparato subió en el medio. Queda para el próximo Sincronizar.");
-    const { pulled } = await pullApply(storeId);
-    adoptRecords(res.payload);
+    const { pulled: deLaCinta } = await pullApply(storeId);
+    // Lo que trajo la fotocopia del otro aparato también bajó: sin esto,
+    // "Bajaron N cambios" decía cero aunque llegaran turnos o retiros.
+    const pulled = deLaCinta + adoptRecords(res.payload);
     const local = foto();
     await saveLocalSnapshot(storeId, liveCopy());
     // La marca es la de esta foto, no la que traía la fotocopia del otro aparato.

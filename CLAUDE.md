@@ -314,8 +314,6 @@ resolver uno, se saca de acá en el mismo commit.
 **Técnico**
 - La cinta de eventos (`kiosk_event`) crece sin techo en el servidor.
 - Los lotes quedan distintos entre aparatos (`consumeFifo` corre en cada uno con su propio estado).
-- El mensaje "bajaron N cambios" dice cero cuando los cambios llegan juntando fotocopias.
-- Caja: la nota del cierre de turno no tiene campo en pantalla (closeShift ya la acepta); los labels no tienen `htmlFor`.
 - 9 tests de `test:platform` fallan siempre (plugin de Grok y esquema de auth).
 - Dos cambios cruzados al mismo ítem terminan al revés entre aparatos.
 - Cambiar de local carga la fotocopia sin juntarla con la copia del aparato.
