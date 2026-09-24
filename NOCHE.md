@@ -3,10 +3,11 @@
 ## Resumen
 
 1. **Hecho:** las 8 tareas. El celu ya puede ser la caja (rol decidido por el servidor, cobro, caja, planilla del día, pase de caja con toma forzada, "¿Dónde vas a cobrar?"), el gráfico por día en El mes, los pendientes chicos y los análisis. Todo en `noche-celu-caja`, nada pusheado.
-2. **A medias / sin probar:** nada en un celu real; el asistente "Registrar más" con "Solo tengo celular"; los 9 tests de `test:platform` están explicados pero no arreglados (esperan tu OK).
-3. **URGENTE, en `main`:** en un local recién creado no se puede dar de alta ningún producto (la regla del rubro sin rubros cargados). El arreglo es `ad81419`: conviene llevarlo a `main` solo, antes que el resto.
-4. **Antes de pushear la rama:** sacá las variables de base de Preview en Vercel (la rama trae dos migraciones, `0016_caja` y `0017_cobra_en`). Ver Tarea 8.5.
-5. **Preguntas, en orden:** ¿la pregunta "¿Dónde vas a cobrar?" al entrar al local está bien? · ¿la primera asignación de caja en un local existente puede pedir cerrar el turno? · actualizar la landing (el celu ya cobra) · ¿rubros desde el celu? · ¿"Devolver" suelto en el celu que es la caja? · ¿marcar el cierre de un turno heredado como forzado? · ¿total por día en el resumen plegado? · ¿arreglo los tests de `test:platform`?
+2. **A medias / sin probar:** nada en un celu real; el asistente "Registrar más" con "Solo tengo celular".
+3. **Hecho el 24-09, en `main` y en producción:** el bug del rubro (`ad81419` llevado solo, como `52beedc`).
+4. **Hecho el 24-09, en la rama:** crear rubros desde el alta, Devolver en el celu que es la caja, la marca del arqueo heredado, y las notas de CLAUDE.md. Ver "Tanda del 24-09".
+5. **Antes de pushear la rama:** Andres arma la base de Preview (una rama de Neon propia). Guía paso a paso en "La base de Preview", al final.
+6. **Pregunta que sigue abierta:** actualizar la landing (el celu ya cobra).
 
 ## Reglas que seguí
 
@@ -543,3 +544,160 @@ cuenta toca datos reales). Por eso esta noche nada se pusheó.
 **Recomendación:** hacer el 1 antes de pushear `noche-celu-caja` (tiene dos
 migraciones), y el 3 como red. El 2 cuando haga falta probar migraciones
 contra datos reales.
+
+---
+
+## Tanda del 24-09 — las respuestas de Andres
+
+Las respuestas: la pregunta "¿Dónde vas a cobrar?" queda; la primera
+asignación de caja puede pedir el turno cerrado; el total por día en el
+plegado, todavía no; los tests de `test:platform` no se arreglan.
+
+### El bug del rubro, a `main`
+
+`ad81419` llevado solo con cherry-pick: `52beedc`, pusheado. Probado con una
+cuenta recién creada, sin rubros: alta de un producto en PC y en celu.
+
+### Crear un rubro desde el alta — `1735718`
+
+La fila de rubros del alta tiene "+ Rubro nuevo", en PC y en celu. Si ya
+existe un rubro con ese nombre (sin importar mayúsculas), lo elige y no lo
+duplica. Viaja con el evento `category` que ya existía.
+
+Probado: cuenta nueva, la PC crea "Golosinas"; escribir "golosinas " elige el
+existente; el celu, después de Sincronizar, ve "Golosinas" y crea "Bebidas".
+
+### Devolver en el celu que es la caja — `3471178`
+
+En Vender, arriba del ticket, "Devolver" abre el mismo diálogo de la PC. Solo
+lo ve la caja. Con un turno ajeno abierto no aparece. Con la caja cerrada
+avisa "Abrí la caja para devolver plata" antes de abrir el diálogo.
+
+Probado en un celu simulado:
+- De piso no ve Devolver.
+- Toma la caja forzando. Con el turno heredado abierto no lo ve.
+- Cierra el turno heredado. Con la caja cerrada, aviso.
+- Abre la caja y devuelve 2 Havanna en efectivo: devolución de $5.000 dentro del
+  turno, stock de 20 a 22.
+
+### La marca del arqueo heredado — `c193283`
+
+El historial de Caja dice "Lo cerró otro aparato, no el que abrió el turno".
+El turno cerrado lleva dos campos nuevos:
+- `closedBy`: el aparato que cerró.
+- `heredado`: si se cerró después de forzar la toma.
+
+`heredado` hace falta porque los turnos abiertos antes de esta rama no dicen
+qué aparato los abrió. En producción, hoy, son todos. Viaja en el evento
+`shift` que ya existía: solo se agregan campos. Un aparato viejo guarda el
+turno entero y no muestra la marca hasta que se actualice.
+
+Probado con PC y celu:
+- La PC cierra un turno propio: sin marca.
+- La PC abre otro. El celu fuerza la toma y lo cierra: marca en el celu.
+- Después de sincronizar los dos, la marca aparece en la PC, solo en ese turno.
+
+### CLAUDE.md — `97ad873`
+
+- `test:platform`, en "Verificación": sus 9 tests son de la plataforma Grok y
+  fallan por diseño. Salió de Pendientes.
+- El total por día en el plegado sigue en Pendientes con "Andres: todavía no".
+
+Cada commit: los cuatro checks en verde (284 tests) y `qa:arranque` OK.
+
+---
+
+## La base de Preview — paso a paso para Andres
+
+**Qué se busca.** Hoy Production y Preview comparten las variables. Pushear
+esta rama arma una vista previa, y esa vista corre las migraciones `0016` y
+`0017` contra la base real. La idea es que Preview tenga **su propia rama de
+Neon**: una copia de la base, aparte. Se puede probar con dos aparatos y un
+celu real sin tocar a ningún kiosco.
+
+Van a hacer falta dos pestañas abiertas: Neon (console.neon.tech) y Vercel
+(vercel.com), con el proyecto `iman2`.
+
+### A. En Neon: crear la rama `preview`
+
+1. Entrá a console.neon.tech y abrí el proyecto de IMAN.
+2. En el menú de la izquierda, **Branches**. Vas a ver la rama de producción
+   (casi seguro se llama `main` o `production`, con la etiqueta "Default").
+3. Arriba a la derecha, **New branch** (o "Create branch").
+4. Completá:
+   - **Name:** `preview`
+   - **Parent branch:** la de producción, la que dice "Default".
+   - **Include data:** "Current data" (o "Head"): copia la base como está hoy.
+   - Si aparece **"Automatically delete branch after…"** o un vencimiento,
+     **destildalo**: si no, la rama se borra sola.
+5. **Create branch.**
+6. Te muestra la conexión. Si no, en la rama `preview`, botón **Connect**.
+   - En la ventana de conexión, elegí **Branch: preview**. Fijate bien: por
+     defecto muestra la de producción.
+   - Con **"Connection pooling" prendido**, copiá la cadena completa
+     (`postgresql://…-pooler…`). Esa es la **DATABASE_URL de Preview**.
+   - Con **"Connection pooling" apagado**, copiá la otra (sin `-pooler`). Esa es
+     la **DATABASE_MIGRATE_URL de Preview**.
+   - Guardá las dos en un lugar seguro: tienen la contraseña de la base.
+
+Ojo: la rama `preview` copia los datos reales. Para probar, usá cuentas de
+prueba, no las de los kioscos. Si más adelante querés refrescarla con los
+datos de hoy: Branches → `preview` → **Reset from parent**. Borra lo que se
+probó ahí.
+
+### B. En Vercel: que Preview use esa rama
+
+1. Entrá a vercel.com, abrí el proyecto `iman2` → **Settings** → **Environment
+   Variables**.
+2. Buscá estas cuatro. Cada una muestra al lado en qué entornos vale:
+   `DATABASE_URL`, `DATABASE_MIGRATE_URL`, `BETTER_AUTH_URL`,
+   `BETTER_AUTH_SECRET`.
+3. Para cada una de las cuatro:
+   - Menú de los tres puntos → **Edit**.
+   - En "Environments", **destildá Preview** y dejá solo Production.
+   - **No cambies el valor.** Save.
+4. Ahora agregá las de Preview. Botón **Add New** (o "Add Environment
+   Variable"). En cada una, en Environments, **solo Preview**:
+
+   | Key | Value |
+   |---|---|
+   | `DATABASE_URL` | la cadena con pooling de la rama `preview` (paso A.6) |
+   | `DATABASE_MIGRATE_URL` | la cadena sin pooling de la rama `preview` |
+   | `BETTER_AUTH_SECRET` | una clave nueva: 32 letras y números al azar (en una terminal: `openssl rand -base64 32`). **No uses la de producción.** |
+
+5. `BETTER_AUTH_URL` va aparte, porque es la dirección de la vista previa y
+   cambia por rama. Add New:
+   - Key `BETTER_AUTH_URL`, Environments **solo Preview**.
+   - Donde dice "Preview", elegí **una rama específica** ("Select a custom
+     Preview branch" o el desplegable de Git branch) y escribí
+     `noche-celu-caja`.
+   - Value: `https://iman2-git-noche-celu-caja-<equipo>.vercel.app`, donde
+     `<equipo>` es el nombre corto de tu cuenta en Vercel. Si no sabés cuál
+     es, dejalo así: en el paso C se corrige.
+6. Si querés el Estudio en la vista previa: `IMAN_ESTUDIO_PASSWORD`, solo
+   Preview, con una clave distinta a la de producción.
+7. Revisá que **todas las demás** variables (`VITE_AUTH_ENABLED` y las que
+   haya) sigan tildadas en Preview. Esas no se tocan.
+
+Las variables nuevas valen recién desde el próximo deploy. Nada cambia en
+producción: Production quedó con las mismas variables de siempre.
+
+### C. Cuando me digas, pusheo la rama y revisamos juntos
+
+1. Me avisás y pusheo `noche-celu-caja`. Vercel arma la vista previa sola.
+2. En Vercel → **Deployments**, abrí el deploy de `noche-celu-caja` →
+   **Building / Build Logs**. Al final tienen que aparecer `0016_caja` y
+   `0017_cobra_en` aplicadas. Mirá en Neon, rama `preview` → **Tables** →
+   `kiosk_store`: tiene que tener la columna `caja_device`. En la rama de
+   producción, **no**.
+3. Copiá la dirección que muestra el deploy en "Domains", la que tiene
+   `-git-noche-celu-caja-`. Si no es igual a la que pusiste en
+   `BETTER_AUTH_URL`, corregí la variable y en el deploy, menú → **Redeploy**.
+   Sin eso, entrar con la cuenta da "Invalid origin".
+4. **Deployment Protection:** la vista previa pide iniciar sesión en Vercel.
+   En el celu real, entrá con tu cuenta de Vercel en el navegador, o en el
+   deploy usá **Share** para sacar un link que se pueda abrir sin login.
+
+**Si algo sale mal:** borrar las variables de Preview y la rama de Neon no
+toca producción. Lo único que no hay que hacer es pushear la rama antes de
+terminar el paso B.
