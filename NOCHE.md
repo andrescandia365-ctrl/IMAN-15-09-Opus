@@ -97,3 +97,62 @@ Cosas que encontré:
 Preguntas para Andres: ninguna nueva en esta tarea.
 
 No probado: en un celu real; con muchos aparatos (probé dos).
+
+---
+
+## Tarea 3 — El mínimo de un kiosco solo celu
+
+**Hecho.** Commit `76fa843`.
+
+Cuando el celu **es la caja**:
+- **Cobrar:** medio de pago, "Cuánto pagó" (con billetes de un toque), vuelto
+  y "Confirmar venta" que hace `checkout` de verdad (con `shiftId`, `deviceId`
+  y turno abierto). Si la caja está cerrada, ofrece abrirla desde Vender.
+- **Recibe los tickets de otros aparatos** ("Ticket de otro aparato ·
+  Ponerlo acá"; si ya hay un ticket armado, los suma).
+- **Caja:** la misma pantalla de la PC (turno, retiros, cierre contando la
+  plata, historial) con la **planilla de un día en lista** (`LedgerDia`), con
+  flechas para ir a días anteriores.
+- **Más:** Llegó, Vence, **Actualizar precios** (la de la PC) e **Importar
+  catálogo** (el mismo diálogo de la PC, eligiendo un archivo).
+- **Stock, alta, Llegó y Vence:** los que ya existían.
+- **El recibo no muestra "Imprimir" en el celu.**
+
+**Las pestañas (5):** Vender · Caja · Stock · Más · Dueño. Por qué: cobrar y
+la caja son lo de todos los días y quedan a un toque; Stock se usa seguido;
+Llegó, Vence, Actualizar precios e Importar son de a ratos y van a Más. Dueño
+queda donde está siempre.
+
+Cuando el celu **no es la caja**: igual que antes. Arma el ticket, elige
+medio de pago y lo manda. Dice "Enviar a la PC" si el local no tiene caja
+asignada y "Enviar a la caja" si la tiene. Nunca muestra "Confirmar venta",
+"Cuánto pagó" ni el vuelto.
+
+Probado en la app (celu simulado Pixel 5, PC y otro celu, la misma cuenta):
+- el celu toma la caja → pestañas Vender · Caja · Stock · Más · Dueño;
+- venta en efectivo: pagó $10.000, vuelto $4.300, la venta queda con turno y
+  aparato; el recibo sin "Imprimir";
+- retiro de $2.000, cierre contando: esperado $18.700 ($15.000 + $5.700 −
+  $2.000), cuadra;
+- con la caja cerrada, Vender avisa y no deja confirmar; abrir desde Vender y
+  cobrar con MP;
+- planilla del día: un valor cargado sigue después de recargar;
+- Actualizar precios abre; importar un CSV agrega el producto;
+- la PC de piso manda un ticket y el celu lo recibe y lo pone en su ticket;
+- otro celu, de piso: pestañas de siempre, "Enviar a la caja", sin cobro;
+- se volvieron a pasar las pruebas del escáner, del flujo del celu a la PC y
+  `qa:arranque`.
+
+Decisiones que tomé solo:
+- **Las devoluciones en el celu que es la caja:** quedan las del recibo
+  (botón "Devolver 1" en cada renglón, que ya existía). No agregué el diálogo
+  "Devolver" suelto del Mostrador: no estaba en la lista del mínimo.
+- **La planilla del día llega hasta hoy**: las flechas no dejan pasar a días
+  futuros.
+
+Preguntas para Andres:
+- ¿El celu que es la caja necesita el "Devolver" suelto (sin ticket) del
+  Mostrador? Hoy solo puede devolver desde el recibo de la venta.
+
+No probado: en un celu real (tamaños de toque, el teclado numérico, el
+selector de archivos del celu para importar).
