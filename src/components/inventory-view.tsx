@@ -36,7 +36,7 @@ import { stockCorrection } from "@/lib/events";
 import { BORRADO_MIENTRAS_EDITABAS } from "@/lib/deleted";
 import { bloqueoPorRubros } from "@/lib/rubros";
 import { findByScan, packOf, productMatchesQuery, shortCodeOf, stockBreakdown } from "@/lib/pack";
-import { productoNuevo, recordarRubro } from "@/lib/producto-nuevo";
+import { faltaRubro, productoNuevo, recordarRubro } from "@/lib/producto-nuevo";
 import { buildSuggestions } from "@/lib/suggest";
 import { useImanStore } from "@/lib/store";
 import type { Category, Product } from "@/lib/types";
@@ -468,13 +468,14 @@ function ProductDialog({
   onSave: () => void;
 }) {
   const products = useImanStore((s) => s.products);
+  const categorias = useImanStore((s) => s.categories);
   const [tab, setTab] = useState<"rapida" | "detalles">("rapida");
   if (!product) return null;
   const set = (patch: Partial<Product>) => onChange({ ...product, ...patch });
   // Alta o edición según si el producto ya existe, no según si tiene nombre:
   // el título cambiaba con la primera letra.
   const isNew = !products.some((p) => p.id === product.id);
-  const sinRubro = !product.categoryId;
+  const sinRubro = faltaRubro(product.categoryId, categorias);
   const guardar = () => {
     if (sinRubro) return;
     if (isNew) recordarRubro(product.categoryId);
@@ -889,6 +890,7 @@ function ShortCodesDialog({
   store: string;
   onSave: (p: Product) => void;
 }) {
+  const categorias = useImanStore((s) => s.categories);
   const [productId, setProductId] = useState("");
   const [code, setCode] = useState("");
   const [alta, setAlta] = useState(false);
@@ -931,7 +933,7 @@ function ShortCodesDialog({
         setErr("Falta el nombre");
         return;
       }
-      if (!newCat) {
+      if (faltaRubro(newCat, categorias)) {
         setErr("Falta el rubro");
         return;
       }

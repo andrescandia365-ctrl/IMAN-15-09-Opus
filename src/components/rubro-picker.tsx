@@ -24,6 +24,13 @@ export function RubroPicker({
   const falta = !value;
   const ultimo = nuevo ? ultimoRubro() : "";
   const rubros = [...categories].sort((a, b) => (a.id === ultimo ? -1 : b.id === ultimo ? 1 : 0));
+  if (!rubros.length) {
+    return (
+      <p className={cn("text-sm text-muted", className)}>
+        Todavía no hay rubros cargados: el producto queda sin rubro por ahora.
+      </p>
+    );
+  }
   return (
     <div className={className}>
       <Label className={cn(falta && "text-warn")}>{falta ? "Rubro · elegilo" : "Rubro"}</Label>
