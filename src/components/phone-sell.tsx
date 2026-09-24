@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { sendOrQueueDeskTicket } from "@/lib/desk-outbox";
 import { useDragScroll } from "@/lib/drag-scroll";
-import { formatARS, PAY_LABEL } from "@/lib/format";
+import { formatARS } from "@/lib/format";
 import { vibrar } from "@/lib/camara-lectora";
 import { crearLectorTeclado, FIN_SIN_ENTER_MS } from "@/lib/escaneo";
 import { findByScan } from "@/lib/pack";
@@ -18,7 +18,6 @@ import type { PayMethod, Product, TicketLine } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { errorText } from "@/lib/errors";
 
-const BILLS = [1000, 10_000, 20_000];
 const PACK_TOAST = "Eso es el bulto. Sumá stock en Inventario o Pedidos.";
 const SWIPE = 36;
 
@@ -49,8 +48,6 @@ export function PhoneSellView() {
   const clearTicket = useImanStore((s) => s.clearTicket);
   const payMethod = useImanStore((s) => s.payMethod);
   const setPayMethod = useImanStore((s) => s.setPayMethod);
-  const paidInput = useImanStore((s) => s.paidInput);
-  const setPaidInput = useImanStore((s) => s.setPaidInput);
   const deskStoreId = useImanStore((s) => s.deskStoreId);
   const saveProduct = useImanStore((s) => s.saveProduct);
 
@@ -71,8 +68,6 @@ export function PhoneSellView() {
   const swipe = useRef<{ y: number; moved: boolean } | null>(null);
   const ignoreClick = useRef(false);
   const total = ticketTotal(ticket);
-  const paid = Number(paidInput) || 0;
-  const change = payMethod === "efectivo" ? Math.max(0, paid - total) : 0;
 
   const filtered = useMemo(() => {
     return products
@@ -139,6 +134,12 @@ export function PhoneSellView() {
     vibrar(true);
     setUltimo(hit.product.id);
     avisar({ tipo: "ok", texto: antes ? `${hit.product.name} · ahora ×${antes + 1}` : `Leído: ${hit.product.name}` });
+  }
+
+  /** Listo: con productos, lo que sigue es mandar el ticket; sin, vuelve a la lista. */
+  function terminarEscaneo() {
+    setCam(false);
+    if (useImanStore.getState().ticket.length) setPayOpen(true);
   }
 
   function abrirAlta(codigo: string) {
@@ -243,18 +244,6 @@ export function PhoneSellView() {
     }
   }
 
-  function confirmSale() {
-    if (!ticket.length) {
-      toast.error("Armá el ticket primero");
-      return;
-    }
-    toast.success(
-      payMethod === "efectivo" && paid > 0
-        ? `${formatARS(total)} · ${PAY_LABEL[payMethod]} · vuelto ${formatARS(change)}`
-        : `${formatARS(total)} · ${PAY_LABEL[payMethod]}`,
-    );
-  }
-
   async function send() {
     if (!ticket.length) {
       toast.error("Armá el ticket primero");
@@ -270,7 +259,8 @@ export function PhoneSellView() {
         storeId: deskStoreId,
         lines: ticket,
         payMethod,
-        paid: payMethod === "efectivo" ? Number(paidInput) || null : null,
+        // Lo que pagó y el vuelto se cuentan en la PC, donde está el cajón.
+        paid: null,
       });
       clearTicket();
       setPayOpen(false);
@@ -447,7 +437,7 @@ export function PhoneSellView() {
             className="flex touch-none select-none justify-center py-2"
             role="button"
             tabIndex={0}
-            aria-label={payOpen ? "Ocultar cobro" : "Mostrar cobro"}
+            aria-label={payOpen ? "Achicar el ticket" : "Agrandar el ticket"}
             onPointerDown={onHandlePointerDown}
             onPointerMove={onSwipeMove}
             onPointerUp={onSwipeUp}
@@ -467,16 +457,32 @@ export function PhoneSellView() {
           <div className="flex items-center justify-between gap-2">
             <h2 className="font-display text-lg tracking-tight">Ticket</h2>
             {payOpen ? (
-              <span className="text-[11px] uppercase tracking-[0.08em] text-ink-muted">deslizá abajo</span>
-            ) : cam ? null : (
               <button
                 type="button"
-                className="h-9 rounded-md bg-ink px-3 text-sm font-medium text-paper disabled:opacity-40"
-                disabled={accion.deshabilitada}
-                onClick={accion.hacer}
+                className="h-9 rounded-md border border-ink/25 px-3 text-sm font-medium text-ink"
+                onClick={() => setPayOpen(false)}
               >
-                {accion.etiqueta}
+                Volver a la lista
               </button>
+            ) : cam ? null : (
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  className="h-9 rounded-md border border-ink/25 px-3 text-sm font-medium text-ink disabled:opacity-40"
+                  disabled={!ticket.length}
+                  onClick={() => setPayOpen(true)}
+                >
+                  Ver ticket
+                </button>
+                <button
+                  type="button"
+                  className="h-9 rounded-md bg-ink px-3 text-sm font-medium text-paper disabled:opacity-40"
+                  disabled={accion.deshabilitada}
+                  onClick={accion.hacer}
+                >
+                  {accion.etiqueta}
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -491,7 +497,7 @@ export function PhoneSellView() {
 
       {cam && !payOpen ? (
         <div className="flex shrink-0 gap-1.5">
-          <Button size="lg" variant="secondary" className="flex-1" onClick={() => setCam(false)}>
+          <Button size="lg" variant="secondary" className="flex-1" onClick={terminarEscaneo}>
             Listo
           </Button>
           <Button size="lg" className="flex-1" disabled={accion.deshabilitada} onClick={accion.hacer}>
@@ -502,6 +508,9 @@ export function PhoneSellView() {
 
       {payOpen ? (
       <div className="shrink-0 space-y-1.5">
+        {/* Cómo paga el cliente viaja con el ticket y la PC lo recibe cargado.
+            Lo que pagó y el vuelto no: se cuentan donde está el cajón. */}
+        <p className="px-1 text-[11px] uppercase tracking-[0.08em] text-subtle">Cómo paga</p>
         <div className="grid grid-cols-3 gap-1.5">
           {methods.map((m) => {
             const Icon = m.icon;
@@ -510,55 +519,20 @@ export function PhoneSellView() {
               <button
                 key={m.id}
                 type="button"
+                aria-pressed={on}
                 onClick={() => setPayMethod(m.id)}
                 className={cn(
-                  "flex h-10 flex-col items-center justify-center gap-0.5 rounded-md text-[11px] font-medium",
+                  "flex h-12 flex-col items-center justify-center gap-0.5 rounded-md text-xs font-medium",
                   on ? "bg-accent text-accent-fg" : "bg-elevated text-muted",
                 )}
               >
-                <Icon className="size-3.5" />
+                <Icon className="size-4" />
                 {m.label}
               </button>
             );
           })}
         </div>
-        {payMethod === "efectivo" ? (
-          <div className="space-y-1.5">
-            <div className="flex gap-1.5">
-              <Input
-                inputMode="numeric"
-                value={paidInput}
-                onChange={(e) => setPaidInput(e.target.value.replace(/[^\d]/g, ""))}
-                placeholder="Cuánto pagó"
-                className="h-10 min-w-0 flex-1 text-base font-medium"
-              />
-              {BILLS.map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  className="h-10 shrink-0 rounded-md bg-elevated px-2 text-[11px] text-muted"
-                  onClick={() => setPaidInput(String(k))}
-                >
-                  {formatARS(k)}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-baseline justify-between px-1">
-              <span className="text-[11px] uppercase tracking-[0.08em] text-subtle">Vuelto</span>
-              <span className="num text-lg font-medium text-sage">{formatARS(change)}</span>
-            </div>
-          </div>
-        ) : null}
-        <Button className="w-full" size="lg" disabled={!ticket.length} onClick={confirmSale}>
-          Confirmar venta
-        </Button>
-        <Button
-          className="w-full"
-          size="default"
-          variant="secondary"
-          disabled={accion.deshabilitada}
-          onClick={accion.hacer}
-        >
+        <Button className="w-full" size="lg" disabled={accion.deshabilitada} onClick={accion.hacer}>
           {accion.etiqueta}
         </Button>
       </div>

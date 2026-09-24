@@ -293,7 +293,13 @@ están escritas.
   planilla necesita una vista de un día para pantalla chica. Antes de construir
   el cobro hay que definir el mínimo con el que un kiosco solo celu funciona de
   verdad.
-- **c. Cobro en el celu.**
+- **c. Cobro en el celu.** Con él vuelven "Confirmar venta", "Cuánto pagó" y
+  el vuelto, que se **sacaron a propósito** de Vender del celu. "Confirmar
+  venta" mostraba un cartel verde de venta sin registrar nada: el encargado
+  creía que había vendido y cobraba en efectivo sin registro. El vuelto se
+  calcula donde está la plata, el cajón de la PC; mostrarlo en el celu invita
+  a manejar efectivo donde no hay cajón. Hasta el paso c, el celu solo manda
+  el ticket con el medio de pago. **No volver a ponerlos antes.**
 - **d. Pase de caja** de un aparato a otro. La primera versión pide el turno
   cerrado.
 
