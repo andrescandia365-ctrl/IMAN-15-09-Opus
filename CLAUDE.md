@@ -81,6 +81,10 @@ del navegador vive en IndexedDB (`iman-local`) y no se borra con el restart.
 - Moneda: ARS es-AR vía `src/lib/format.ts`
 - Hostinger = landing + WooCommerce (venta de licencias). **No corre el código de
   la app.** Las escrituras del POS van a Neon.
+- Producción: **https://iman2-ochre.vercel.app** (Vercel, cada push a `main`).
+  Las otras direcciones `*.vercel.app` del proyecto (las de cada despliegue)
+  están detrás del login de Vercel: para mirar producción desde afuera, usar
+  esta.
 
 ---
 
