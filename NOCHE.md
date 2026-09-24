@@ -333,3 +333,49 @@ Decisiones que tomé solo:
 Preguntas para Andres:
 - ¿Guardamos el total por día en el resumen plegado (toca el plegado) para
   poder comparar meses viejos por día?
+
+---
+
+## Tarea 7 — Pendientes chicos y seguros
+
+**Hecho.** Commits `b37086e` (Caja) y `56f12c0` (el contador).
+
+- **La nota del cierre de turno:** un campo "Nota del cierre (opcional)" en el
+  diálogo de cierre. `closeShift` ya la aceptaba; viaja en el evento `shift` y
+  sale en el historial. Probado: se cierra con "Faltó un billete de 100" y la
+  nota aparece en el historial de la PC que cerró y en el de otra PC después
+  de sincronizar.
+- **Los labels de Caja:** todos atados a su campo con `htmlFor` (fondo,
+  retiro, contado, caja fuerte, cargas del celular, SUBE, nota).
+- **"Bajaron N cambios":** al juntar dos fotocopias, lo que se adopta de la
+  otra (turnos, retiros, historial de stock) no se contaba. Ahora sí
+  (`registrosNuevos`, con test). Probado: con otra PC que vendió, retiró y
+  cerró, antes decía "Bajaron 3 cambios" (solo la cinta) y ahora "Bajaron 4".
+  No reproduje el caso exacto de "cero" (cuando todo llega solo por la
+  fotocopia); la cuenta nueva lo cubre y está en el test.
+- **Los 9 tests de `test:platform`:**
+  - **8 de `grok-pwa-plugin.test.mjs`: el plugin NO es código muerto.**
+    `vite.config.ts` lo usa en cada build (sirve el service worker de IMAN e
+    inyecta las etiquetas del `<head>`), así que no lo borré. **La causa:** el
+    plugin lee la identidad del sitio de `src/lib/og/site.json` en la carpeta de
+    trabajo, y en este repo ese archivo dice "IMAN" con tarjeta propia; los
+    tests son de la plantilla de Grok y esperan que no exista (por ejemplo,
+    esperan `og:title = "Hello World"` y el plugin, correctamente, pone "IMAN").
+    **Verificado:** corridos desde una carpeta vacía, pasan los 47. El arreglo
+    sería que esos tests usen una carpeta de trabajo propia (con un archivo de
+    identidad de prueba). No lo hice porque la instrucción era borrarlos solo si
+    el código estaba muerto.
+  - **1 del esquema de auth (`migration-plan.test.mjs`, "the auth schema ships
+    outside the globbed directory"): no lo toqué.** Afirma que la carpeta
+    `migrations/` no tiene ningún `.sql` suelto, cosa que solo es cierta en la
+    plantilla vacía; este repo tiene las migraciones 0001 a 0017 ahí, así que
+    falla desde la primera. **La parte que importa sí se cumple:** el esquema de
+    auth está en `migrations/auth/0001_auth.sql`, y el test que verifica que la
+    copia de `migrations/0001_auth.sql` es idéntica al original **pasa**. No hay
+    un problema de auth, es un test de plantilla.
+
+Preguntas para Andres:
+- ¿Arreglo los 8 tests del plugin para que usen una carpeta de prueba, y el de
+  auth para que mire solo lo que importa (que el esquema esté en
+  `migrations/auth/` y que la copia sea idéntica)? Así `test:platform` quedaría
+  en verde y serviría para algo.
