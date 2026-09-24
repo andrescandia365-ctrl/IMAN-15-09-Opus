@@ -44,6 +44,10 @@ npm run typecheck && npm run check:auth && npm test && npm run lint
 No declares una tarea lista sin correr los cuatro. `check:auth` existe porque
 las invariantes de auth ya se rompieron antes.
 
+`npm run test:platform` **no** es parte de la verificación: sus 9 tests fallan
+por diseño en este repo. Son de la plataforma Grok (su plugin y su esquema de
+auth), no de IMAN. No se arreglan.
+
 **Los cuatro checks no prueban que la app funcione.** Una función que envuelve
 una API del navegador con contrato de corrientes (streams) no queda probada por
 un test unitario: los tests corren en Node, y Node y el navegador no se portan
@@ -309,12 +313,11 @@ resolver uno, se saca de acá en el mismo commit.
 **Producto**
 - Sugerencias en Inventario mucho más completas, con creación e impresión de afiches y carteles de promos y ofertas.
 - Revisar la lógica de vencimientos en celu y PC.
-- Ventas por día de meses viejos: el gráfico de El mes arma los días viejos con los turnos cerrados (se guardan 90). Para meses más viejos haría falta guardar el total por día en el resumen plegado, que es tocar el plegado (necesita GO).
+- Ventas por día de meses viejos: el gráfico de El mes arma los días viejos con los turnos cerrados (se guardan 90). Para meses más viejos haría falta guardar el total por día en el resumen plegado, que es tocar el plegado. Andres: todavía no.
 
 **Técnico**
 - La cinta de eventos (`kiosk_event`) crece sin techo en el servidor.
 - Los lotes quedan distintos entre aparatos (`consumeFifo` corre en cada uno con su propio estado).
-- 9 tests de `test:platform` fallan siempre (plugin de Grok y esquema de auth).
 - Dos cambios cruzados al mismo ítem terminan al revés entre aparatos.
 - Cambiar de local carga la fotocopia sin juntarla con la copia del aparato.
 - Los editores guardan campos que el usuario no tocó (pisan cambios de otro aparato).
