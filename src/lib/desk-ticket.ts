@@ -49,7 +49,9 @@ function asTicket(raw: unknown): DeskTicket | null {
   const pay = v.payMethod;
   const payMethod: PayMethod | undefined =
     pay === "efectivo" || pay === "mercadopago" || pay === "debito" ? pay : undefined;
-  const paidN = Number(v.paid);
+  // Sin dato es null, no 0: Number(null) da 0 y la PC abría el cobro en
+  // efectivo con "Recibir: 0", que el encargado tenía que borrar cada vez.
+  const paidN = v.paid == null || v.paid === "" ? Number.NaN : Number(v.paid);
   return {
     id: v.id,
     storeId: v.storeId,
