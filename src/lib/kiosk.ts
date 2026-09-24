@@ -6,6 +6,7 @@ import { LOCAL_TOO_HEAVY } from "@/lib/errors";
 import { startOfDay } from "@/lib/format";
 import { eventRows } from "@/lib/event-rows";
 import { blankKiosk, MAX_STORES } from "@/lib/kiosk-blank";
+import { esCobraEn, type CobraEn } from "@/lib/cobra-en";
 import { localeCapFor } from "@/lib/license";
 import type { KioskPayload, Sale } from "@/lib/types";
 import type { ImanEvent } from "@/lib/events";
@@ -235,19 +236,26 @@ export const addStore = createServerFn({ method: "POST" })
 
 export const registerLocals = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((data: { locals: { name: string; alias: string; city?: string }[] }) => {
+  .validator((data: {
+    locals: { name: string; alias: string; city?: string; cobraEn?: CobraEn }[];
+    /** El aparato que registra, y si es un celu: "Solo tengo celular" lo deja como caja. */
+    device?: string;
+    esCelu?: boolean;
+  }) => {
     const locals = Array.isArray(data?.locals) ? data.locals : [];
     const cleaned = locals
       .map((l) => ({
         name: String(l?.name ?? "").trim().slice(0, 40),
         alias: String(l?.alias ?? "").trim().slice(0, 24),
         city: String(l?.city ?? "").trim().slice(0, 40),
+        cobraEn: esCobraEn(l?.cobraEn) ? l.cobraEn : null,
       }))
       .filter((l) => l.name)
       .map((l) => ({ ...l, alias: l.alias || l.name }));
     if (!cleaned.length) throw new Error("Registrá al menos un local");
     if (cleaned.length > MAX_STORES) throw new Error(`Máximo ${MAX_STORES} locales`);
-    return { locals: cleaned };
+    const device = String(data?.device ?? "").trim().slice(0, 64);
+    return { locals: cleaned, device, esCelu: data?.esCelu === true };
   })
   .handler(async ({ context, data }): Promise<AccountBundle> => {
     await migrateLegacy(context.userId);
@@ -270,9 +278,17 @@ export const registerLocals = createServerFn({ method: "POST" })
       const payload = blankKiosk(loc.name, "empty", loc.city);
       const saved = await saveActive(context.userId, storeId, payload);
       await sql`
-        update kiosk_store set alias = ${loc.alias}
+        update kiosk_store set alias = ${loc.alias}, cobra_en = ${loc.cobraEn}
         where user_id = ${context.userId} and store_id = ${storeId}
       `;
+      // Un local recién creado no tiene caja ni ventas: si el dueño dijo que
+      // solo tiene celular y lo registra desde el celu, ese celu es la caja.
+      if (loc.cobraEn === "celu" && data.esCelu && data.device) {
+        await sql`
+          update kiosk_store set caja_device = ${data.device}, caja_ver = 1, caja_desde = now()
+          where user_id = ${context.userId} and store_id = ${storeId} and caja_ver = 0
+        `;
+      }
       if (!firstId) {
         firstId = storeId;
         firstPayload = payload;
@@ -681,3 +697,62 @@ export const verCaja = createServerFn({ method: "POST" })
     return { storeId: data.storeId };
   })
   .handler(async ({ context, data }): Promise<CajaServidor> => leerCaja(context.userId, data.storeId));
+
+/** Lo que contestó el dueño a "¿Dónde vas a cobrar?" para el local; null = todavía no. */
+export const verCobraEn = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((data: { storeId: string }) => {
+    if (!data?.storeId) throw new Error("Falta el local");
+    return { storeId: data.storeId };
+  })
+  .handler(async ({ context, data }): Promise<CobraEn | null> => {
+    const sql = await getSql();
+    const rows = await sql<{ cobra_en: string | null }>`
+      select cobra_en from kiosk_store where user_id = ${context.userId} and store_id = ${data.storeId} limit 1
+    `;
+    const v = rows[0]?.cobra_en;
+    return esCobraEn(v) ? v : null;
+  });
+
+/**
+ * Guarda la respuesta a "¿Dónde vas a cobrar?". "Solo tengo celular",
+ * contestado desde un celu, deja ese celu como caja, pero solo en un local que
+ * nunca tuvo caja y nunca vendió: en un local que ya vende, asignarla sola le
+ * cortaría la caja a otro aparato en medio del día. Ahí se pasa desde Dueño.
+ */
+export const responderCobraEn = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((data: { storeId: string; cobraEn: CobraEn; device: string; esCelu: boolean }) => {
+    if (!data?.storeId || !esCobraEn(data.cobraEn)) throw new Error("Respuesta inválida");
+    return {
+      storeId: data.storeId,
+      cobraEn: data.cobraEn,
+      device: String(data.device ?? "").trim().slice(0, 64),
+      esCelu: data.esCelu === true,
+    };
+  })
+  .handler(async ({ context, data }): Promise<{ caja: CajaServidor; asignada: boolean }> => {
+    const sql = await getSql();
+    await sql`
+      update kiosk_store set cobra_en = ${data.cobraEn}
+      where user_id = ${context.userId} and store_id = ${data.storeId}
+    `;
+    let asignada = false;
+    if (data.cobraEn === "celu" && data.esCelu && data.device) {
+      const row = await readStore(context.userId, data.storeId);
+      const vendio = await sql<{ n: number }>`
+        select count(*)::int as n from kiosk_event
+        where user_id = ${context.userId} and store_id = ${data.storeId} and type = 'sale'
+      `;
+      const nuevo = row && !row.payload.sales.length && !(row.payload.monthAggs ?? []).length && !Number(vendio[0]?.n ?? 0);
+      if (nuevo) {
+        const r = await sql<{ caja_ver: number }>`
+          update kiosk_store set caja_device = ${data.device}, caja_ver = 1, caja_desde = now()
+          where user_id = ${context.userId} and store_id = ${data.storeId} and caja_ver = 0
+          returning caja_ver
+        `;
+        asignada = Boolean(r[0]);
+      }
+    }
+    return { caja: await leerCaja(context.userId, data.storeId), asignada };
+  });

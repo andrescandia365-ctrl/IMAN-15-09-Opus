@@ -26,6 +26,7 @@ import { PhoneReceiveView } from "@/components/phone-receive";
 import { PhoneSellView } from "@/components/phone-sell";
 import { PhoneMasView } from "@/components/phone-mas";
 import { ReceiptDialog } from "@/components/receipt";
+import { DondeCobras } from "@/components/donde-cobras";
 import { SyncButton } from "@/components/sync-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -513,6 +514,7 @@ export function Shell({
         </Sheet>
 
         <ReceiptDialog />
+        <DondeCobras storeId={activeStoreId} />
         {pinAsk ? (
           <OwnerPinDialog
             open

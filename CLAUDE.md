@@ -93,10 +93,20 @@ del navegador vive en IndexedDB (`iman-local`) y no se borra con el restart.
 1. **El encargado vende y hace CAJA sin PIN.** Nunca le pidas PIN para vender.
 2. **El overlay de Dueño y la pestaña Dueño del celu piden PIN de dueño**
    (4–8 dígitos, SHA-256 de `iman.dueno.v1:{pin}`, desbloqueo por 20 min).
-3. **El celu revisa el local, no es una segunda caja.** Tabs: Vender, Stock,
-   Llegó, Vence, Dueño. **Sin caja, sin voz.** El celu marca Llegó y manda el
-   ticket a la PC; nunca cobra.
-4. **La PC es la caja:** Mostrador, Inventario, Pedidos, Caja, Dueño (logo).
+3. **Cada local tiene una sola caja, y la decide el servidor.** La caja puede
+   ser la PC, una tablet o un celu: es un **rol** del aparato, no el tamaño de
+   pantalla (`rol.ts`). El ancho decide la disposición; el rol, los permisos.
+   Pasar la caja pide red y PIN del dueño, y el turno cerrado (o la toma
+   forzada, si la caja de antes se rompió). Los demás aparatos son **de
+   piso**: arman el ticket y lo mandan a la caja con el medio de pago. **Un
+   aparato de piso nunca cobra, ni abre turno, ni muestra "Confirmar venta",
+   "Cuánto pagó" o el vuelto.** Sin voz en el celu, sea caja o piso. Un local
+   **sin caja anotada** se comporta como antes: cobra la pantalla de PC.
+4. **La caja cobra y lleva el turno.** En PC: Mostrador, Inventario, Pedidos,
+   Caja, Dueño (logo). En un celu que es la caja: Vender (con cobro) · Caja ·
+   Stock · Más (Llegó, Vence, Actualizar precios, Importar) · Dueño. El celu de
+   piso: Vender · Stock · Llegó · Vence · Dueño. En un turno de otro aparato
+   (toma forzada), la caja no cobra hasta cerrarlo contando la plata.
 5. **Nunca pisar el local con un blob JSON completo en cada scan.** Sync =
    cinta de eventos append-only + snapshot al tocar Sincronizar. La fotocopia va
    con `rev`: si otro aparato subió algo, junta y reintenta una vez en lugar de
@@ -189,7 +199,10 @@ igual. Si no queda escrito, vuelve a pasar.
 | `src/lib/pack.ts` | `findByScan`: packBarcode → packQty unidades; barcode → 1 |
 | `src/lib/rol.ts` | el rol del aparato (caja / piso / sin asignar) y `puedeCobrar`: el ancho decide la disposición, el rol los permisos |
 | `src/lib/caja-local.ts` | lo que el aparato sabe de la caja (`iman-caja:{local}`), `useRol`, `useVigilarCaja` |
-| `src/components/caja-del-local.tsx` | Dueño → Local: quién es la caja y "Tomar la caja en este aparato" |
+| `src/components/caja-del-local.tsx` | Dueño → Local: quién es la caja y "Pasar la caja a este aparato" (con toma forzada) |
+| `src/components/donde-cobras.tsx` | "¿Dónde vas a cobrar?" al entrar por primera vez a un local; "Solo tengo celular" deja la caja en ese celu si el local es nuevo |
+| `src/lib/cobra-en.ts` | las opciones de "¿Dónde vas a cobrar?" y los avisos (`AVISO_CELU_*`) |
+| `src/components/phone-mas.tsx` | la pestaña Más del celu que es la caja |
 | `src/lib/escaneo.ts` | lecturas por presencia, ritmo de la cámara, recorte visible, lector en modo teclado |
 | `src/lib/camara-lectora.ts` | el bucle de la cámara (BarcodeDetector) que usan las dos pantallas de escaneo |
 | `src/lib/ledger.ts` | filas de Asientos por tags, archivo del mes con las filas de entonces |
@@ -345,8 +358,13 @@ están escritas.
   afuera, a propósito: "Confirmar venta" mostraba un cartel verde de venta sin
   registrar nada y el encargado cobraba en efectivo sin registro; el vuelto se
   calcula donde está la plata. **Un celu de piso nunca los muestra.**
-- **d. Pase de caja** de un aparato a otro. La primera versión pide el turno
-  cerrado.
+- **d. Pase de caja** de un aparato a otro. Hecho: pide el turno cerrado, o
+  la toma forzada con el turno heredado.
+
+"¿Dónde vas a cobrar?" (`donde-cobras.tsx`, `cobra-en.ts`): la respuesta de
+cada local queda en `kiosk_store.cobra_en` y el Estudio la cuenta. **Si cambia
+lo que el celu puede hacer, actualizar los `AVISO_CELU_*` de `cobra-en.ts` y
+avisarle a Andres para que cambie la landing.**
 
 El iPhone queda en pausa hasta poder probarlo en uno real.
 

@@ -4,10 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AR_CITIES } from "@/lib/cities";
+import { AVISO_CELU_CAJA, AVISO_CELU_PASAR, COBRA_EN, type CobraEn } from "@/lib/cobra-en";
+import { usePhoneUi } from "@/lib/device";
+import { getDeviceId } from "@/lib/local-db";
 import { registerLocals, type AccountBundle, type StoreMeta } from "@/lib/kiosk";
 import { errorText } from "@/lib/errors";
+import { cn } from "@/lib/utils";
 
-type Row = { name: string; city: string };
+type Row = { name: string; city: string; cobraEn: CobraEn | "" };
 
 export function LocalsWizard({
   seats,
@@ -22,10 +26,11 @@ export function LocalsWizard({
 }) {
   const need = Math.max(0, seats - existing.length);
   const blanks = useMemo<Row[]>(
-    () => Array.from({ length: Math.max(1, need) }, () => ({ name: "", city: "" })),
+    () => Array.from({ length: Math.max(1, need) }, () => ({ name: "", city: "", cobraEn: "" as const })),
     [need],
   );
   const [rows, setRows] = useState<Row[]>(blanks);
+  const esCelu = usePhoneUi();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,16 +41,24 @@ export function LocalsWizard({
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    const locals = rows
-      .map((r) => ({ name: r.name.trim(), alias: "", city: r.city.trim() }))
-      .filter((r) => r.name);
-    if (!locals.length) {
+    const conNombre = rows.filter((r) => r.name.trim());
+    if (!conNombre.length) {
       setError("Poné al menos el nombre de un local");
       return;
     }
+    if (conNombre.some((r) => !r.cobraEn)) {
+      setError("Elegí dónde vas a cobrar en cada local");
+      return;
+    }
+    const locals = conNombre.map((r) => ({
+      name: r.name.trim(),
+      alias: "",
+      city: r.city.trim(),
+      cobraEn: r.cobraEn || undefined,
+    }));
     setBusy(true);
     try {
-      const bundle = await registerLocals({ data: { locals } });
+      const bundle = await registerLocals({ data: { locals, device: getDeviceId(), esCelu } });
       toast.success(locals.length === 1 ? "Local listo" : `${locals.length} locales listos`);
       onDone(bundle);
     } catch (err) {
@@ -101,6 +114,33 @@ export function LocalsWizard({
                   placeholder="Córdoba"
                   maxLength={40}
                 />
+              </div>
+              <div className="mt-3">
+                <p id={`loc-cobra-${i}`} className="text-sm font-medium">
+                  ¿Dónde vas a cobrar?
+                </p>
+                <div role="radiogroup" aria-labelledby={`loc-cobra-${i}`} className="mt-2 grid gap-1.5">
+                  {COBRA_EN.map((o) => (
+                    <button
+                      key={o.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={row.cobraEn === o.id}
+                      onClick={() => patch(i, "cobraEn", o.id)}
+                      className={cn(
+                        "h-11 rounded-md px-3 text-left text-sm font-medium",
+                        row.cobraEn === o.id ? "bg-accent text-accent-fg" : "bg-elevated text-fg",
+                      )}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+                {row.cobraEn === "celu" ? (
+                  <p role="status" className="mt-2 rounded-md bg-warn/10 px-3 py-2.5 text-sm text-fg">
+                    {esCelu ? AVISO_CELU_CAJA : AVISO_CELU_PASAR}
+                  </p>
+                ) : null}
               </div>
             </div>
           ))}
