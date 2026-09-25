@@ -195,7 +195,7 @@ igual. Si no queda escrito, vuelve a pasar.
 | Archivo | Qué es |
 |---|---|
 | `src/lib/store.ts` | Zustand. `checkout`, `refundCliente`, `refundProveedor`, `saveProduct`, `adjustStock`, `setLedgerCell`, `receiveOrder`, `saveSettings`, `saveSupplier`, `importCatalog`, `applyCategoryPrices` — **todos llaman `recordEvent`** |
-| `src/lib/events.ts` | `applyEvent`. Tipos: sale, stock, ledger, product, product.delete, refund, receive, order, staff, category, lot, supplier, settings, price, shift, drop |
+| `src/lib/events.ts` | `applyEvent`. Tipos: sale, stock, ledger, product, product.delete, refund, receive, order, staff, category, lot, supplier, settings, price, shift, drop, markup |
 | `src/lib/local-db.ts` | IndexedDB, `recordEvent`, `pendingEvents`, `markAcked`, `editQueue` |
 | `src/lib/event-queue.ts` | cola local pura (append/ack/trim/chunk) + tests |
 | `src/lib/sync.ts` | `syncNow` (botón), `pushQuiet` (la cinta sube sola), `pullCopy` |
@@ -226,7 +226,8 @@ igual. Si no queda escrito, vuelve a pasar.
 - **`price`:** plata (costo y/o góndola). Actualizar precios, alinear un rubro, el cruce del dueño. No da de alta ni revive.
 - **`product`:** alta (con stock inicial) o edición de ficha (nombre, código, pack, rubro…). Update: ficha completa, sin stock ni lots.
 - **`lot`:** un lote de vencimiento. Stock y lots no viajan en `product`.
-- **`settings`:** márgenes, redondeo, comisión MP, condición fiscal, filas de Asientos. PIN y logo solo si ese toque los cambió.
+- **`settings`:** redondeo, comisión MP, condición fiscal, filas de Asientos. PIN y logo solo si ese toque los cambió. **Ya no lleva márgenes.**
+- **`markup`:** el margen de un rubro: `{ categoryId, fac: "X" | "A", value }` (`value: null` = sin margen propio). Dice qué cambió, no la lista entera: con la lista, un aparato atrasado pisaba los márgenes que otro había cambiado en otros rubros. Un aparato sin actualizar lo ignora (no se entera hasta actualizar). Si un aparato viejo todavía manda la lista entera en `settings`, el nuevo solo toma los rubros que no tiene (un rubro nuevo llega con su margen) y no pisa los que ya están.
 - **`supplier`:** alta/edición/baja de proveedor (`op: save` o `delete`).
 - **`shift`:** apertura y cierre de turno (`op: open` / `close`). El cierre manda el turno entero y la fila de la planilla de ese día. El turno cerrado lleva `closedBy` (el aparato que hizo el arqueo) y `heredado` si se cerró después de forzar la toma de la caja: el historial de Caja marca "Lo cerró otro aparato" (`cerradoPorOtro`).
 - **`drop`:** retiro de caja a fuerte, con el `shiftId` del turno.

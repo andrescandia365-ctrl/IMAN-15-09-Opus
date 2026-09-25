@@ -50,7 +50,8 @@ export type ImanEvent = {
     | "settings"
     | "price"
     | "shift"
-    | "drop";
+    | "drop"
+    | "markup";
   body: Json;
   acked?: boolean;
 };
@@ -68,6 +69,61 @@ export function settingsEventPatch(patch: Partial<Settings>, prev?: Partial<Sett
     (body as Record<string, unknown>)[key] = value;
   }
   return body;
+}
+
+/**
+ * El margen de un rubro: dice qué cambió, no cómo quedó la lista entera.
+ * Antes los márgenes viajaban en `settings` como la lista completa del
+ * aparato que tocaba uno, y un aparato con la lista vieja pisaba los márgenes
+ * que otro había cambiado en otros rubros. `value: null` = sin margen propio.
+ * Tipo nuevo: un aparato sin actualizar cae en el `default` y lo ignora.
+ */
+export type MarkupBody = { categoryId: string; fac: "X" | "A"; value: number | null };
+
+const MAPA_FAC = { X: "priceMarkups", A: "priceMarkupsA" } as const;
+export const MAPAS_DE_MARGEN = ["priceMarkups", "priceMarkupsA"] as const;
+
+export function applyMarkup(settings: Settings, b: MarkupBody): Settings {
+  const key = MAPA_FAC[b.fac];
+  const next = { ...(settings[key] ?? {}) };
+  if (b.value == null) delete next[b.categoryId];
+  else next[b.categoryId] = b.value;
+  return { ...settings, [key]: next };
+}
+
+/** Los rubros que un parche de ajustes cambia de margen: uno por rubro y Fac. */
+export function markupChanges(prev: Partial<Settings>, patch: Partial<Settings>): MarkupBody[] {
+  const out: MarkupBody[] = [];
+  for (const fac of ["X", "A"] as const) {
+    const key = MAPA_FAC[fac];
+    const nuevo = patch[key];
+    if (!nuevo) continue;
+    const viejo = prev[key] ?? {};
+    for (const id of new Set([...Object.keys(viejo), ...Object.keys(nuevo)])) {
+      const v = nuevo[id] ?? null;
+      if (v !== (viejo[id] ?? null)) out.push({ categoryId: id, fac, value: v });
+    }
+  }
+  return out;
+}
+
+/**
+ * Un `settings` de un aparato sin actualizar todavía trae la lista entera de
+ * márgenes. Esa lista es lo que ese aparato tenía, no lo que cambió: aplicarla
+ * entera pisaría lo que otros cambiaron por `markup`. Solo se toman los rubros
+ * que este aparato no tiene (un rubro nuevo llega con su margen); los demás
+ * se dejan como están.
+ */
+function margenesDeAparatoViejo(local: Settings, patch: Partial<Settings>): Partial<Settings> {
+  const out: Partial<Settings> = {};
+  for (const key of MAPAS_DE_MARGEN) {
+    const llega = patch[key];
+    if (!llega) continue;
+    const tengo = local[key] ?? {};
+    const faltan = Object.fromEntries(Object.entries(llega).filter(([id]) => !(id in tengo)));
+    if (Object.keys(faltan).length) out[key] = { ...tengo, ...faltan };
+  }
+  return out;
 }
 
 /** Catálogo: no es stock ni lotes. El update lleva la ficha completa, no un diff. */
@@ -468,6 +524,10 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) return payload;
       const patch = settingsEventPatch(raw as Partial<Settings>);
       if (!Object.keys(patch).length) return payload;
+      const margenes = margenesDeAparatoViejo(payload.settings, patch);
+      for (const key of MAPAS_DE_MARGEN) delete patch[key];
+      Object.assign(patch, margenes);
+      if (!Object.keys(patch).length) return payload;
       const merged = { ...payload.settings, ...patch };
       const shouldAdopt =
         "ledgerRows" in patch ||
@@ -517,6 +577,12 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
           notes: cierre.notes ?? cur.notes,
         }),
       };
+    }
+    case "markup": {
+      const b = ev.body as Partial<MarkupBody> | null;
+      if (!b?.categoryId || (b.fac !== "X" && b.fac !== "A")) return payload;
+      const value = typeof b.value === "number" && Number.isFinite(b.value) && b.value > 0 ? b.value : null;
+      return { ...payload, settings: applyMarkup(payload.settings, { categoryId: b.categoryId, fac: b.fac, value }) };
     }
     case "drop": {
       const d = ev.body as unknown as CashDrop;

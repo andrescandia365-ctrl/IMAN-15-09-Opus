@@ -5,6 +5,7 @@ import {
   applyEvents,
   catalogSaveEvent,
   keepStockAndLots,
+  markupChanges,
   productEventBody,
   pulledPatch,
   settingsEventPatch,
@@ -194,8 +195,13 @@ test("PC cambia Fac A y redondeo, celu un proveedor: los dos órdenes dejan los 
       storeLogo: "data:logo",
     },
   });
+  // El margen viaja solo, en markup; el redondeo sigue en settings.
+  const margenPc = ev(
+    { categoryId: "c-bebidas", fac: "A", value: 1.9 },
+    { id: "ev_margen", type: "markup", at: "2026-09-18T10:00:00.000Z", deviceId: "dev_pc" },
+  );
   const deLaPc = ev(
-    { priceMarkupsA: { "c-bebidas": 1.9 }, roundStep: 50 },
+    { roundStep: 50 },
     { id: "ev_ajustes", type: "settings", at: "2026-09-18T10:00:00.000Z", deviceId: "dev_pc" },
   );
   const delCelu = ev(
@@ -203,8 +209,8 @@ test("PC cambia Fac A y redondeo, celu un proveedor: los dos órdenes dejan los 
     { id: "ev_prov", type: "supplier", at: "2026-09-18T11:00:00.000Z", deviceId: "dev_celu" },
   );
 
-  const unOrden = applyEvents(base, [deLaPc, delCelu]);
-  const otroOrden = applyEvents(base, [delCelu, deLaPc]);
+  const unOrden = applyEvents(base, [margenPc, deLaPc, delCelu]);
+  const otroOrden = applyEvents(base, [delCelu, margenPc, deLaPc]);
   assert.deepEqual(unOrden.settings.priceMarkupsA, otroOrden.settings.priceMarkupsA);
   assert.equal(unOrden.settings.roundStep, otroOrden.settings.roundStep);
   assert.equal(unOrden.suppliers[0]?.name, otroOrden.suppliers[0]?.name);
@@ -927,4 +933,69 @@ test("el celu que no actualizó ignora los eventos de caja y no pierde nada", ()
     applyEvent79191af(antes, ev({ id: "dr_9", shiftId: "sh_1", amount: 100 }, { type: "drop" })),
     antes,
   );
+});
+
+// ── Márgenes por rubro (evento markup) ─────────────────────────────────────
+
+function margen(id: string, deviceId: string, body: { categoryId: string; fac: "X" | "A"; value: number | null }): ImanEvent {
+  return { id, type: "markup", at: "2026-09-25T10:00:00.000Z", deviceId, storeId: "s1", body };
+}
+
+const conMargenes = (x: Record<string, number>, a: Record<string, number> = {}) =>
+  payload({ settings: { ...settings, priceMarkups: x, priceMarkupsA: a } });
+
+test("markup cambia un rubro y no toca los demás", () => {
+  const next = applyEvent(conMargenes({ "c-bebidas": 1.5, "c-almacen": 1.85 }), margen("m1", "dev_celu", { categoryId: "c-bebidas", fac: "X", value: 1.6 }));
+  assert.deepEqual(next.settings.priceMarkups, { "c-bebidas": 1.6, "c-almacen": 1.85 });
+  assert.equal(pulledPatch(next).settings.priceMarkups?.["c-bebidas"], 1.6);
+});
+
+test("markup con value null saca el margen propio del rubro", () => {
+  const next = applyEvent(conMargenes({}, { "c-bebidas": 1.8 }), margen("m1", "dev_pc", { categoryId: "c-bebidas", fac: "A", value: null }));
+  assert.deepEqual(next.settings.priceMarkupsA, {});
+});
+
+test("el cruce: cada aparato cambia un rubro distinto sin sincronizar, y al juntar no se pisan", () => {
+  const inicio = conMargenes({ "c-bebidas": 1.5, "c-almacen": 1.85 });
+  // Cada uno lo aplica en su aparato, y después baja el del otro.
+  const delCelu = margen("m-celu", "dev_celu", { categoryId: "c-bebidas", fac: "X", value: 1.6 });
+  const deLaPc = margen("m-pc", "dev_pc", { categoryId: "c-almacen", fac: "X", value: 2.12 });
+  const celu = applyEvents(inicio, [delCelu, deLaPc]);
+  const pc = applyEvents(inicio, [deLaPc, delCelu]);
+  const esperado = { "c-bebidas": 1.6, "c-almacen": 2.12 };
+  assert.deepEqual(celu.settings.priceMarkups, esperado);
+  assert.deepEqual(pc.settings.priceMarkups, esperado);
+});
+
+test("un aparato viejo que manda la lista entera en settings no pisa los márgenes de los rubros que ya están", () => {
+  // La PC ya subió Bebidas a 1.6 por markup; el celu viejo manda su lista con Bebidas en 1.5
+  // y un rubro nuevo, Juguetes, con su margen.
+  const pc = conMargenes({ "c-bebidas": 1.6, "c-almacen": 1.85 });
+  const viejo: ImanEvent = {
+    id: "ev_viejo",
+    type: "settings",
+    at: "2026-09-25T10:00:00.000Z",
+    deviceId: "dev_celu_viejo",
+    storeId: "s1",
+    body: { priceMarkups: { "c-bebidas": 1.5, "c-almacen": 1.85, "c-juguetes": 1.45 }, roundStep: 50 },
+  };
+  const next = applyEvent(pc, viejo);
+  assert.deepEqual(next.settings.priceMarkups, { "c-bebidas": 1.6, "c-almacen": 1.85, "c-juguetes": 1.45 });
+  // El resto del settings viejo se aplica como siempre.
+  assert.equal(next.settings.roundStep, 50);
+});
+
+test("markupChanges manda solo los rubros que cambiaron, de cada Fac", () => {
+  const prev = { priceMarkups: { "c-bebidas": 1.5, "c-almacen": 1.85 }, priceMarkupsA: { "c-bebidas": 1.8 } };
+  assert.deepEqual(markupChanges(prev, { priceMarkups: { "c-bebidas": 1.6, "c-almacen": 1.85 } }), [
+    { categoryId: "c-bebidas", fac: "X", value: 1.6 },
+  ]);
+  assert.deepEqual(markupChanges(prev, { priceMarkupsA: {} }), [{ categoryId: "c-bebidas", fac: "A", value: null }]);
+  assert.deepEqual(markupChanges(prev, { roundStep: 50 }), []);
+});
+
+test("markup mal formado no toca nada", () => {
+  const antes = conMargenes({ "c-bebidas": 1.5 });
+  const next = applyEvent(antes, { id: "m", type: "markup", at: "", deviceId: "d", storeId: "s1", body: { fac: "X", value: 2 } });
+  assert.equal(next, antes);
 });
