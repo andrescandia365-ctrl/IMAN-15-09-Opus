@@ -3,8 +3,8 @@
   <rect width="110" height="110" fill="#14130f"/>
   <path d="M 34,44 C 26,20 84,20 76,44" stroke="#8eae8a" stroke-width="5" fill="none" stroke-linecap="round"/>
   <path d="M 34,68 C 26,92 84,92 76,68" stroke="#8eae8a" stroke-width="5" fill="none" stroke-linecap="round"/>
-  <path d="M 32,42 C 18,4 92,4 78,42" stroke="#8eae8a" stroke-width="3.5" fill="none" stroke-linecap="round" opacity="0.6"/>
-  <path d="M 32,70 C 18,106 92,106 78,70" stroke="#8eae8a" stroke-width="3.5" fill="none" stroke-linecap="round" opacity="0.6"/>
+  <path d="M 31,51 C 17,48 18,11 55,11 C 92,11 93,48 79,51" stroke="#8eae8a" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <path d="M 31,61 C 17,64 18,101 55,101 C 92,101 93,64 79,61" stroke="#8eae8a" stroke-width="3.5" fill="none" stroke-linecap="round"/>
   <rect x="34" y="44" width="4" height="24" rx="1" fill="#8eae8a"/>
   <rect x="40" y="44" width="2" height="24" rx="1" fill="#8eae8a"/>
   <rect x="44" y="44" width="5" height="24" rx="1" fill="#8eae8a"/>

@@ -73,6 +73,11 @@ cualquier pieza animada.
 - **Cambiar los colores**, ni siquiera "parecidos". Para fondo claro está el
   negativo; para una tinta, las de un color.
 - **Rotar** ni inclinar.
+- **Poner transparencia a las líneas de campo.** Van sólidas: el verde al 60%
+  sobre la tinta se veía barroso en el celu.
+- **Juntar las puntas de las líneas de afuera con las de adentro.** Las de
+  afuera nacen más abajo, de la cara de cada polo: con las cuatro puntas en la
+  esquina del bloque, la silueta parecía una U.
 - **Dibujar las líneas de campo de un extremo al otro** en una animación:
   nacen del imán hacia afuera.
 - Ponerlo **sobre fotos o fondos sin contraste**. Si el fondo es cargado, va

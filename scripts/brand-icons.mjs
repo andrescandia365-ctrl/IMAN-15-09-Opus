@@ -27,12 +27,18 @@ const X_LIBRE = 12;
 
 // ── Geometría ──────────────────────────────────────────────────────────────
 
-/** Líneas de campo de la completa: [d, grosor, ¿exterior?]. */
+/**
+ * Líneas de campo de la completa: [d, grosor]. Las de adentro salen de las
+ * esquinas del bloque de barras. Las de afuera (variante B, elegida por Andres
+ * el 25-09) nacen más abajo, de la cara de cada polo, y van en verde sólido:
+ * con las puntas juntas en las esquinas armaban dos "orejas" y la silueta
+ * parecía una U; con el verde al 60% se veían barrosas sobre la tinta.
+ */
 const CAMPO_COMPLETA = [
-  ["M 34,44 C 26,20 84,20 76,44", 5, false],
-  ["M 34,68 C 26,92 84,92 76,68", 5, false],
-  ["M 32,42 C 18,4 92,4 78,42", 3.5, true],
-  ["M 32,70 C 18,106 92,106 78,70", 3.5, true],
+  ["M 34,44 C 26,20 84,20 76,44", 5],
+  ["M 34,68 C 26,92 84,92 76,68", 5],
+  ["M 31,51 C 17,48 18,11 55,11 C 92,11 93,48 79,51", 3.5],
+  ["M 31,61 C 17,64 18,101 55,101 C 92,101 93,64 79,61", 3.5],
 ];
 /** Barras de la completa: [x, ancho]. Las cuatro primeras son el polo verde. */
 const BARRAS_COMPLETA = [[34, 4], [40, 2], [44, 5], [51, 2], [57, 2], [61, 5], [68, 2], [72, 4]];
@@ -43,15 +49,11 @@ const CAMPO_SIMPLE = [
 ];
 const BARRAS_SIMPLE = [[34, 8], [46, 6], [58, 6], [68, 8]];
 
-/**
- * El símbolo completo. `medioTono: false` es para la versión de un color: la
- * impresión a una tinta no tiene opacidades.
- */
-function completa({ campo, izq, der, medioTono = true }) {
-  const lineas = CAMPO_COMPLETA.map(([d, w, exterior]) => {
-    const op = exterior && medioTono ? ` opacity="0.6"` : "";
-    return `<path d="${d}" stroke="${campo}" stroke-width="${w}" fill="none" stroke-linecap="round"${op}/>`;
-  });
+/** El símbolo completo. Sin opacidades: todas las líneas van sólidas. */
+function completa({ campo, izq, der }) {
+  const lineas = CAMPO_COMPLETA.map(
+    ([d, w]) => `<path d="${d}" stroke="${campo}" stroke-width="${w}" fill="none" stroke-linecap="round"/>`,
+  );
   const barras = BARRAS_COMPLETA.map(
     ([x, w], i) => `<rect x="${x}" y="44" width="${w}" height="24" rx="1" fill="${i < 4 ? izq : der}"/>`,
   );
@@ -70,24 +72,28 @@ function simplificada({ campo, izq, der }) {
 
 const COMPLETA = { campo: VERDE, izq: VERDE, der: CREMA };
 const NEGATIVO = { campo: VERDE_OSC, izq: VERDE_OSC, der: TINTA };
-const unColor = (c) => ({ campo: c, izq: c, der: c, medioTono: false });
+const unColor = (c) => ({ campo: c, izq: c, der: c });
 
 /** Caja de tinta del símbolo completo: las curvas con su grosor y las barras. */
 function cajaCompleta() {
   let x0 = 34, x1 = 76, y0 = 44, y1 = 68;
   for (const [d, w] of CAMPO_COMPLETA) {
-    const [p0, p1, p2, p3] = d.match(/-?\d+(\.\d+)?/g).map(Number).reduce((acc, n, i) => {
+    const pts = d.match(/-?\d+(\.\d+)?/g).map(Number).reduce((acc, n, i) => {
       if (i % 2 === 0) acc.push([n]);
       else acc[acc.length - 1].push(n);
       return acc;
     }, []);
-    // Con punta redonda, la caja de la curva más medio grosor es exacta.
-    for (let i = 0; i <= 2000; i++) {
-      const t = i / 2000, u = 1 - t;
-      const x = u ** 3 * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t ** 3 * p3[0];
-      const y = u ** 3 * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t ** 3 * p3[1];
-      x0 = Math.min(x0, x - w / 2); x1 = Math.max(x1, x + w / 2);
-      y0 = Math.min(y0, y - w / 2); y1 = Math.max(y1, y + w / 2);
+    // Un tramo o varios: M p0 C p1 p2 p3 [C p4 p5 p6 …], cada tramo arranca donde terminó el anterior.
+    for (let s = 0; s + 3 < pts.length; s += 3) {
+      const [p0, p1, p2, p3] = pts.slice(s, s + 4);
+      // Con punta redonda, la caja de la curva más medio grosor es exacta.
+      for (let i = 0; i <= 2000; i++) {
+        const t = i / 2000, u = 1 - t;
+        const x = u ** 3 * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t ** 3 * p3[0];
+        const y = u ** 3 * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t ** 3 * p3[1];
+        x0 = Math.min(x0, x - w / 2); x1 = Math.max(x1, x + w / 2);
+        y0 = Math.min(y0, y - w / 2); y1 = Math.max(y1, y + w / 2);
+      }
     }
   }
   return { x0, x1, y0, y1 };
