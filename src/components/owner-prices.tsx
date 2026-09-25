@@ -25,6 +25,7 @@ import {
 } from "@/lib/pricing";
 import { usePhoneUi } from "@/lib/device";
 import { useImanStore } from "@/lib/store";
+import { syncNow } from "@/lib/sync";
 import type { Category, Product, Settings, Supplier } from "@/lib/types";
 import { cn, uid } from "@/lib/utils";
 
@@ -90,6 +91,9 @@ export function OwnerPrices() {
   // los de su primer arranque), y alinear desde ahí repreciaba la góndola con
   // márgenes viejos. Márgenes y precios se cambian en la caja.
   const soloVer = usePhoneUi();
+  const storeId = useImanStore((s) => s.deskStoreId);
+  // Alinear y confirmar el cruce reescriben la góndola: antes se sincroniza.
+  const [alDia, setAlDia] = useState(false);
 
   const [factorX, setFactorX] = useState<Record<string, string>>(() =>
     Object.fromEntries(categories.map((c) => [c.id, shownFactor(c.id, c.name, "X", settings.priceMarkups, settings)])),
@@ -124,9 +128,39 @@ export function OwnerPrices() {
     setAviso((desalineados.get(id) ?? 0) > 0 ? id : null);
   }
 
-  function alinear(ids: string[]) {
+  /**
+   * Alinear y confirmar el cruce reescriben la góndola entera: se hacen con los
+   * márgenes al día. Pide red y sincroniza justo antes, en PC y en celu; así
+   * un margen que otro aparato cambió entra antes de calcular. Cambiar un
+   * margen no lo pide: viaja solo (evento markup) y no pisa nada.
+   */
+  async function margenesAlDia(): Promise<boolean> {
+    if (!navigator.onLine) {
+      toast.error("Sin red. Alinear cambia los precios de góndola: se hace con internet, así usa los márgenes al día.");
+      return false;
+    }
+    setAlDia(true);
+    try {
+      const r = await syncNow(storeId);
+      if (!r.ok) {
+        toast.error("No se pudo sincronizar. Probá de nuevo: los precios se cambian con los márgenes al día.");
+        return false;
+      }
+      return true;
+    } catch {
+      toast.error("No se pudo sincronizar. Probá de nuevo: los precios se cambian con los márgenes al día.");
+      return false;
+    } finally {
+      setAlDia(false);
+    }
+  }
+
+  /** `null` = todos los rubros: después de sincronizar, los desalineados pueden ser otros. */
+  async function alinear(ids: string[] | null) {
+    if (alDia || !(await margenesAlDia())) return;
+    const lista = ids ?? useImanStore.getState().categories.map((c) => c.id);
     let n = 0;
-    for (const id of ids) n += applyCategoryPrices(id);
+    for (const id of lista) n += applyCategoryPrices(id);
     setAviso(null);
     toast.success(n ? `${n} ${n === 1 ? "precio" : "precios"} de góndola` : "Sin cambios");
   }
@@ -239,16 +273,46 @@ export function OwnerPrices() {
     setPreviewed(false);
   }
 
-  function confirm() {
+  /** Lo que el cruce va a pisar, calculado con el estado de ahora (no el de la última vez que se dibujó). */
+  function cruceAhora(): { id: string; price: number }[] {
+    const st = useImanStore.getState();
+    const sup = st.suppliers.find((s) => s.id === supId) ?? null;
+    const stStep = st.settings.roundStep && st.settings.roundStep > 0 ? st.settings.roundStep : 100;
+    return priceRows({
+      products: st.products,
+      categories: st.categories,
+      suppliers: st.suppliers,
+      settings: st.settings,
+      step: stStep,
+      mode: st.settings.roundMode === "down" ? "down" : "up",
+      category: st.categories.find((c) => c.id === catId) ?? null,
+      supplier: sup,
+      invoice: sup ? invoiceOf(sup) : null,
+      picked: productIds.map((id) => st.products.find((p) => p.id === id)).filter((p): p is Product => Boolean(p)),
+    })
+      .filter((r) => r.next != null && r.next !== r.p.price)
+      .map((r) => ({ id: r.p.id, price: r.next! }));
+  }
+
+  async function confirm() {
     if (!previewed) {
       toast.error("Listá el cruce primero");
       return;
     }
-    const updates = ready
-      .filter((r) => r.next != null)
-      .map((r) => ({ id: r.p.id, price: r.next! }));
-    if (!updates.length) {
+    const antes = cruceAhora();
+    if (!antes.length) {
       toast.error("Nada para pisar. Falta costo por unidad o el precio ya está.");
+      return;
+    }
+    if (alDia || !(await margenesAlDia())) return;
+    // Si otro aparato cambió márgenes, costos o precios, la lista que se miró
+    // ya no es la que se aplicaría: se muestra la nueva y se confirma de nuevo.
+    const updates = cruceAhora();
+    const igual =
+      updates.length === antes.length &&
+      updates.every((u, i) => u.id === antes[i]!.id && u.price === antes[i]!.price);
+    if (!igual) {
+      toast.error("Cambiaron márgenes o costos desde otro aparato. Revisá la lista y confirmá de nuevo.");
       return;
     }
     const n = setProductPrices(updates);
@@ -319,8 +383,8 @@ export function OwnerPrices() {
                 Listar
               </Button>
               {soloVer ? null : (
-                <Button disabled={!previewed || !ready.length} onClick={confirm}>
-                  Confirmar {ready.length ? `(${ready.length})` : ""}
+                <Button disabled={!previewed || !ready.length || alDia} onClick={() => void confirm()}>
+                  {alDia ? "Sincronizando…" : `Confirmar ${ready.length ? `(${ready.length})` : ""}`}
                 </Button>
               )}
               <Button variant="secondary" onClick={limpiar}>
@@ -491,10 +555,10 @@ export function OwnerPrices() {
               <Button
                 size="sm"
                 className="ml-auto"
-                disabled={soloVer}
-                onClick={() => alinear(categories.filter((c) => (desalineados.get(c.id) ?? 0) > 0).map((c) => c.id))}
+                disabled={soloVer || alDia}
+                onClick={() => void alinear(null)}
               >
-                Alinear todo
+                {alDia ? "Sincronizando…" : "Alinear todo"}
               </Button>
             </div>
           ) : null}
@@ -554,9 +618,9 @@ export function OwnerPrices() {
                               <button
                                 type="button"
                                 aria-label={`Alinear ${c.name}`}
-                                disabled={soloVer}
+                                disabled={soloVer || alDia}
                                 className="h-8 rounded-full bg-elevated px-2.5 text-xs font-medium text-muted hover:text-fg disabled:opacity-50"
-                                onClick={() => alinear([c.id])}
+                                onClick={() => void alinear([c.id])}
                               >
                                 Alinear
                               </button>
@@ -573,7 +637,7 @@ export function OwnerPrices() {
                                 {n === 1 ? "precio" : "precios"} de góndola.
                               </p>
                               <div className="ml-auto flex gap-2">
-                                <Button size="sm" disabled={soloVer} onClick={() => alinear([c.id])}>
+                                <Button size="sm" disabled={soloVer || alDia} onClick={() => void alinear([c.id])}>
                                   Aplicar ahora
                                 </Button>
                                 <Button size="sm" variant="secondary" onClick={() => setAviso(null)}>
