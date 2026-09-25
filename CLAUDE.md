@@ -203,7 +203,8 @@ igual. Si no queda escrito, vuelve a pasar.
 | `src/lib/pack.ts` | `findByScan`: packBarcode → packQty unidades; barcode → 1 |
 | `src/lib/rol.ts` | el rol del aparato (caja / piso / sin asignar) y `puedeCobrar`: el ancho decide la disposición, el rol los permisos |
 | `src/lib/caja-local.ts` | lo que el aparato sabe de la caja (`iman-caja:{local}`), `useRol`, `useVigilarCaja` |
-| `src/components/caja-del-local.tsx` | Dueño → Local: quién es la caja y "Pasar la caja a este aparato" (con toma forzada) |
+| `src/components/caja-del-local.tsx` | arriba de todo del panel del dueño (PC y celu): "La caja de este local:" en palabras y "Pasar la caja a este aparato" (con toma forzada) |
+| `src/lib/tipo-aparato.ts` | qué tipo de aparato es la caja (celu, tablet, computadora) y cómo se le dice al dueño; lo guarda `kiosk_store.caja_tipo` al tomar la caja |
 | `src/components/donde-cobras.tsx` | "¿Dónde vas a cobrar?" al entrar por primera vez a un local; "Solo tengo celular" deja la caja en ese celu si el local es nuevo |
 | `src/lib/cobra-en.ts` | las opciones de "¿Dónde vas a cobrar?" y los avisos (`AVISO_CELU_*`) |
 | `src/components/phone-mas.tsx` | la pestaña Más del celu que es la caja |

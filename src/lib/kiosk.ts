@@ -12,6 +12,7 @@ import type { KioskPayload, Sale } from "@/lib/types";
 import type { ImanEvent } from "@/lib/events";
 import type { CajaServidor } from "@/lib/rol";
 import { turnosAbiertos } from "@/lib/turno";
+import { esTipoAparato, type TipoAparato } from "@/lib/tipo-aparato";
 
 export type StoreMeta = {
   id: string;
@@ -285,7 +286,7 @@ export const registerLocals = createServerFn({ method: "POST" })
       // solo tiene celular y lo registra desde el celu, ese celu es la caja.
       if (loc.cobraEn === "celu" && data.esCelu && data.device) {
         await sql`
-          update kiosk_store set caja_device = ${data.device}, caja_ver = 1, caja_desde = now()
+          update kiosk_store set caja_device = ${data.device}, caja_ver = 1, caja_desde = now(), caja_tipo = 'celu'
           where user_id = ${context.userId} and store_id = ${storeId} and caja_ver = 0
         `;
       }
@@ -638,14 +639,22 @@ export type TomarCajaResult =
  */
 export const tomarCaja = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((data: { storeId: string; device: string; esperado: number; pinHash: string; forzar?: boolean }) => {
+  .validator((data: {
+    storeId: string;
+    device: string;
+    esperado: number;
+    pinHash: string;
+    forzar?: boolean;
+    /** Qué tipo de aparato toma la caja, para mostrárselo al dueño. Opcional: un aparato viejo no lo manda. */
+    tipo?: TipoAparato;
+  }) => {
     const storeId = String(data?.storeId ?? "").trim();
     const device = String(data?.device ?? "").trim().slice(0, 64);
     const pinHash = String(data?.pinHash ?? "").trim();
     const esperado = Number(data?.esperado);
     if (!storeId || !device) throw new Error("Falta el local o el aparato");
     if (!Number.isInteger(esperado) || esperado < 0) throw new Error("Versión de la caja inválida");
-    return { storeId, device, esperado, pinHash, forzar: data?.forzar === true };
+    return { storeId, device, esperado, pinHash, forzar: data?.forzar === true, tipo: esTipoAparato(data?.tipo) ? data.tipo : null };
   })
   .handler(async ({ context, data }): Promise<TomarCajaResult> => {
     const row = await readStore(context.userId, data.storeId);
@@ -678,7 +687,7 @@ export const tomarCaja = createServerFn({ method: "POST" })
     }
     const updated = await sql<{ caja_ver: number }>`
       update kiosk_store
-      set caja_device = ${data.device}, caja_ver = caja_ver + 1, caja_desde = now()
+      set caja_device = ${data.device}, caja_ver = caja_ver + 1, caja_desde = now(), caja_tipo = ${data.tipo}
       where user_id = ${context.userId} and store_id = ${data.storeId} and caja_ver = ${data.esperado}
       returning caja_ver
     `;
@@ -697,6 +706,32 @@ export const verCaja = createServerFn({ method: "POST" })
     return { storeId: data.storeId };
   })
   .handler(async ({ context, data }): Promise<CajaServidor> => leerCaja(context.userId, data.storeId));
+
+export type DetalleCaja = CajaServidor & { tipo: TipoAparato | null; desde: string | null };
+
+/** La caja con lo que el dueño necesita leer: qué tipo de aparato es y desde cuándo. */
+export const detalleCaja = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((data: { storeId: string }) => {
+    if (!data?.storeId) throw new Error("Falta el local");
+    return { storeId: data.storeId };
+  })
+  .handler(async ({ context, data }): Promise<DetalleCaja> => {
+    const sql = await getSql();
+    const rows = await sql<{ caja_device: string | null; caja_ver: number | null; caja_tipo: string | null; caja_desde: string | Date | null }>`
+      select caja_device, coalesce(caja_ver, 0) as caja_ver, caja_tipo, caja_desde from kiosk_store
+      where user_id = ${context.userId} and store_id = ${data.storeId}
+      limit 1
+    `;
+    const r = rows[0];
+    const desde = r?.caja_desde ? new Date(r.caja_desde).toISOString() : null;
+    return {
+      device: r?.caja_device ?? null,
+      ver: Number(r?.caja_ver ?? 0),
+      tipo: esTipoAparato(r?.caja_tipo) ? r.caja_tipo : null,
+      desde,
+    };
+  });
 
 /** Lo que contestó el dueño a "¿Dónde vas a cobrar?" para el local; null = todavía no. */
 export const verCobraEn = createServerFn({ method: "POST" })
@@ -747,7 +782,7 @@ export const responderCobraEn = createServerFn({ method: "POST" })
       const nuevo = row && !row.payload.sales.length && !(row.payload.monthAggs ?? []).length && !Number(vendio[0]?.n ?? 0);
       if (nuevo) {
         const r = await sql<{ caja_ver: number }>`
-          update kiosk_store set caja_device = ${data.device}, caja_ver = 1, caja_desde = now()
+          update kiosk_store set caja_device = ${data.device}, caja_ver = 1, caja_desde = now(), caja_tipo = 'celu'
           where user_id = ${context.userId} and store_id = ${data.storeId} and caja_ver = 0
           returning caja_ver
         `;

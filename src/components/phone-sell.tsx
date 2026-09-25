@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Banknote, CreditCard, Info, Minus, Plus, ScanBarcode, Search, Smartphone, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { ProductPhoneDialog } from "@/components/phone-floor";
@@ -25,7 +25,8 @@ import { errorText } from "@/lib/errors";
 const PACK_TOAST = "Eso es el bulto. Sumá stock en Inventario o Pedidos.";
 /** Billetes de un toque para "Cuánto pagó", en el celu que es la caja. */
 const BILLETES = [1000, 10_000, 20_000];
-const SWIPE = 36;
+/** Cuántos "más vendidos" muestra la búsqueda con el buscador vacío. */
+const MAS_VENDIDOS = 12;
 
 function matchesNameOrCode(p: Product, q: string) {
   if (!q) return true;
@@ -40,12 +41,9 @@ function matchesNameOrCode(p: Product, q: string) {
   );
 }
 
-function isTicketChrome(target: EventTarget | null) {
-  return target instanceof Element && Boolean(target.closest("button"));
-}
-
 export function PhoneSellView() {
   const products = useImanStore((s) => s.products);
+  const sales = useImanStore((s) => s.sales);
   const categories = useImanStore((s) => s.categories);
   const ticket = useImanStore((s) => s.ticket);
   const addToTicket = useImanStore((s) => s.addToTicket);
@@ -92,25 +90,33 @@ export function PhoneSellView() {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string | "all">("all");
   const [asked, setAsked] = useState<Product | null>(null);
-  const [payOpen, setPayOpen] = useState(false);
+  // La búsqueda abierta: un panel encima de la parte de arriba del ticket.
+  const [buscando, setBuscando] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
   const [sending, setSending] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
   const catsRef = useDragScroll<HTMLDivElement>();
   const listRef = useDragScroll<HTMLDivElement>();
-  const swipe = useRef<{ y: number; moved: boolean } | null>(null);
-  const ignoreClick = useRef(false);
   const total = ticketTotal(ticket);
   const paid = Number(paidInput) || 0;
   const change = payMethod === "efectivo" ? Math.max(0, paid - total) : 0;
 
-  const filtered = useMemo(() => {
-    return products
-      .filter((p) => p.active)
-      .filter((p) => cat === "all" || p.categoryId === cat)
-      .filter((p) => matchesNameOrCode(p, q))
-      .sort((a, b) => a.name.localeCompare(b.name, "es"))
-      .slice(0, 80);
-  }, [products, cat, q]);
+  // Lo que más sale, contado en las ventas que tiene este aparato: para lo
+  // que no tiene código (golosinas sueltas, cigarrillos).
+  const vendidos = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const v of sales) for (const it of v.items) n.set(it.productId, (n.get(it.productId) ?? 0) + it.qty);
+    return n;
+  }, [sales]);
+
+  const resultados = useMemo(() => {
+    const activos = products.filter((p) => p.active);
+    const porNombre = (a: Product, b: Product) => a.name.localeCompare(b.name, "es");
+    if (q.trim()) return activos.filter((p) => matchesNameOrCode(p, q)).sort(porNombre).slice(0, 80);
+    const masVendido = (a: Product, b: Product) => (vendidos.get(b.id) ?? 0) - (vendidos.get(a.id) ?? 0) || porNombre(a, b);
+    if (cat !== "all") return activos.filter((p) => p.categoryId === cat).sort(masVendido).slice(0, 80);
+    return [...activos].sort(masVendido).slice(0, MAS_VENDIDOS);
+  }, [products, cat, q, vendidos]);
 
   function addProduct(p: Product) {
     const r = addToTicket(p.id, 1);
@@ -138,6 +144,7 @@ export function PhoneSellView() {
   // lector cuando termina de escribir (ver el efecto del lector en modo teclado).
   function onQueryChange(raw: string) {
     setQ(raw);
+    setBuscando(true);
     setAsked(null);
   }
 
@@ -170,10 +177,22 @@ export function PhoneSellView() {
     avisar({ tipo: "ok", texto: antes ? `${hit.product.name} · ahora ×${antes + 1}` : `Leído: ${hit.product.name}` });
   }
 
-  /** Listo: con productos, lo que sigue es mandar el ticket; sin, vuelve a la lista. */
+  /** Listo: apaga la cámara; el ticket queda con el cobro a la vista. */
   function terminarEscaneo() {
     setCam(false);
-    if (useImanStore.getState().ticket.length) setPayOpen(true);
+  }
+
+  /** Un producto tocado en la búsqueda: suma uno, lo resalta y deja el buscador listo. */
+  function elegir(p: Product) {
+    if (!addProduct(p)) return;
+    setUltimo(p.id);
+    setQ("");
+    searchRef.current?.focus();
+  }
+
+  function cerrarBusqueda() {
+    setBuscando(false);
+    setAsked(null);
   }
 
   function abrirAlta(codigo: string) {
@@ -265,6 +284,20 @@ export function PhoneSellView() {
 
   useEffect(() => () => window.clearTimeout(avisoTimer.current), []);
 
+  // Tocar afuera del buscador y del panel cierra la búsqueda.
+  useEffect(() => {
+    if (!buscando) return;
+    const afuera = (e: PointerEvent) => {
+      const t = e.target;
+      if (!(t instanceof Node)) return;
+      if (panelRef.current?.contains(t) || searchRef.current?.parentElement?.contains(t)) return;
+      setBuscando(false);
+      setAsked(null);
+    };
+    document.addEventListener("pointerdown", afuera, true);
+    return () => document.removeEventListener("pointerdown", afuera, true);
+  }, [buscando]);
+
   function onSearchSubmit() {
     const raw = q.trim();
     if (!raw) return;
@@ -272,10 +305,7 @@ export function PhoneSellView() {
       setQ("");
       return;
     }
-    if (filtered.length === 1) {
-      addProduct(filtered[0]!);
-      setQ("");
-    }
+    if (resultados.length === 1) elegir(resultados[0]!);
   }
 
   async function send() {
@@ -297,7 +327,6 @@ export function PhoneSellView() {
         paid: null,
       });
       clearTicket();
-      setPayOpen(false);
       if (result === "queued") {
         toast("Sin red. El sobre espera. La venta en este aparato sigue.");
       } else {
@@ -310,45 +339,6 @@ export function PhoneSellView() {
     }
   }
 
-  function onSwipeDown(e: ReactPointerEvent<HTMLElement>) {
-    if (e.pointerType === "mouse" && e.button !== 0) return;
-    if (isTicketChrome(e.target)) return;
-    ignoreClick.current = false;
-    swipe.current = { y: e.clientY, moved: false };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-
-  function onSwipeMove(e: ReactPointerEvent<HTMLElement>) {
-    const start = swipe.current;
-    if (!start) return;
-    if (Math.abs(e.clientY - start.y) > 10) {
-      start.moved = true;
-      ignoreClick.current = true;
-    }
-  }
-
-  function onSwipeUp(e: ReactPointerEvent<HTMLElement>) {
-    const start = swipe.current;
-    swipe.current = null;
-    if (!start) return;
-    const dy = e.clientY - start.y;
-    if (dy < -SWIPE) setPayOpen(true);
-    else if (dy > SWIPE) setPayOpen(false);
-  }
-
-  function onHandleClick() {
-    if (ignoreClick.current) {
-      ignoreClick.current = false;
-      return;
-    }
-    setPayOpen((v) => !v);
-  }
-
-  function onHandlePointerDown(e: ReactPointerEvent<HTMLElement>) {
-    e.stopPropagation();
-    onSwipeDown(e);
-  }
-
   // El botón principal del ticket. Hoy manda el ticket a la PC; cuando el celu
   // cobre (paso c del plan del celu) cambia acá y nada más.
   const accion = cobra
@@ -357,7 +347,6 @@ export function PhoneSellView() {
         deshabilitada: !ticket.length,
         hacer: () => {
           setCam(false);
-          setPayOpen(true);
         },
       }
     : {
@@ -374,7 +363,6 @@ export function PhoneSellView() {
       toast.error(r.error);
       return;
     }
-    setPayOpen(false);
     setUltimo(null);
     toast.success("Venta registrada");
   }
@@ -393,7 +381,6 @@ export function PhoneSellView() {
     const cur = useImanStore.getState();
     if (cur.ticket.length) replaceTicket(mergeTicketLines(cur.ticket, t.lines), { payMethod: cur.payMethod, paidInput: cur.paidInput });
     else replaceTicket(t.lines, { payMethod: t.payMethod, paidInput: t.paid != null ? String(t.paid) : "" });
-    setPayOpen(true);
   }
 
   const methods: { id: PayMethod; label: string; icon: typeof Banknote }[] = [
@@ -403,7 +390,9 @@ export function PhoneSellView() {
   ];
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col gap-1.5 overflow-hidden">
+    // Si en un celu chico no entra todo, la pantalla se desliza: el ticket
+    // tiene un alto mínimo y el botón de cobrar nunca queda cortado.
+    <div className="relative flex h-full min-h-0 flex-col gap-1.5 overflow-y-auto overflow-x-hidden">
       {cam ? (
         <ScanStrip
           onLeido={(c) => leido(c, "camara")}
@@ -418,8 +407,11 @@ export function PhoneSellView() {
           ref={searchRef}
           value={q}
           onChange={(e) => onQueryChange(e.target.value)}
+          onFocus={() => setBuscando(true)}
+          onPointerDown={() => setBuscando(true)}
           onKeyDown={(e) => {
             if (e.key === "Enter") onSearchSubmit();
+            if (e.key === "Escape") cerrarBusqueda();
           }}
           placeholder="Nombre o código"
           className="h-16 rounded-xl bg-paper pl-12 pr-14 text-lg font-medium text-ink shadow-[var(--shadow-ticket)] ticket-grain placeholder:text-ink-muted"
@@ -427,11 +419,16 @@ export function PhoneSellView() {
           autoCapitalize="off"
           spellCheck={false}
           aria-label="Buscar por nombre o código"
+          aria-expanded={buscando}
+          aria-controls="celu-busqueda"
         />
         <button
           type="button"
           className="absolute right-2 top-1/2 grid size-12 -translate-y-1/2 place-items-center text-ink-muted"
-          onClick={() => setCam(true)}
+          onClick={() => {
+            cerrarBusqueda();
+            setCam(true);
+          }}
           aria-label="Cámara"
         >
           <ScanBarcode className="size-6" />
@@ -439,61 +436,6 @@ export function PhoneSellView() {
       </div>
       )}
 
-      <div className="relative flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden">
-        <div className={cn("flex min-h-32 flex-1 flex-col gap-1.5", payOpen && "invisible", cam && "hidden")}>
-          <div ref={catsRef} className="flex shrink-0 cursor-grab gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
-            <Chip active={cat === "all"} onClick={() => setCat("all")}>
-              Todo
-            </Chip>
-            {categories.map((c) => (
-              <Chip key={c.id} active={cat === c.id} onClick={() => setCat(c.id)}>
-                {c.name}
-              </Chip>
-            ))}
-          </div>
-          <div className="relative min-h-0 flex-1 overflow-hidden">
-            <div ref={listRef} className="h-full cursor-grab overflow-y-auto">
-              {filtered.length === 0 ? (
-                <p className="px-2 py-8 text-center text-sm text-subtle">
-                  {products.filter((p) => p.active).length === 0
-                    ? "Todavía no hay productos. Cargalos en Stock."
-                    : "Nada con esa búsqueda."}
-                </p>
-              ) : (
-                <ul>
-                  {filtered.map((p) => (
-                    <li key={p.id}>
-                      <ProductRow product={p} onAdd={() => addProduct(p)} onAsk={() => setAsked(p)} />
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            {asked ? (
-              <>
-                <button
-                  type="button"
-                  className="absolute inset-0 z-20 bg-bg/70"
-                  aria-label="Cerrar consulta"
-                  onClick={() => setAsked(null)}
-                />
-                <div className="absolute inset-x-2 top-2 z-30 rounded-xl bg-surface px-4 py-4 shadow-[var(--shadow-border)]">
-                  <p className="truncate font-display text-xl">{asked.name}</p>
-                  <p className="num mt-1 text-3xl text-sage">{formatARS(asked.price)}</p>
-                  <p className="mt-1 text-sm text-muted">{asked.stock} u. en góndola</p>
-                  <p className="mt-0.5 font-mono text-[11px] text-subtle">{asked.barcode}</p>
-                </div>
-              </>
-            ) : null}
-          </div>
-        </div>
-
-        <div
-          className={cn(
-            "flex min-h-0 flex-col gap-1.5",
-            payOpen ? "absolute inset-0 z-20" : "relative min-h-40 flex-1",
-          )}
-        >
       {cobra && inbox.incoming ? (
         <div className="flex shrink-0 items-center justify-between gap-2 rounded-xl bg-sage/15 px-3 py-2.5">
           <p className="min-w-0 text-sm">
@@ -510,89 +452,94 @@ export function PhoneSellView() {
           </div>
         </div>
       ) : null}
-      <section
-        data-ticket-sheet
-        data-pay-open={payOpen ? "1" : "0"}
-        className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-paper text-ink shadow-[var(--shadow-ticket)] ticket-grain"
-        onPointerDown={onSwipeDown}
-        onPointerMove={onSwipeMove}
-        onPointerUp={onSwipeUp}
-        onPointerCancel={() => {
-          swipe.current = null;
-        }}
-      >
-        <div className="flex shrink-0 flex-col px-4 pt-2 pb-2">
-          <div
-            className="flex touch-none select-none justify-center py-2"
-            role="button"
-            tabIndex={0}
-            aria-label={payOpen ? "Achicar el ticket" : "Agrandar el ticket"}
-            onPointerDown={onHandlePointerDown}
-            onPointerMove={onSwipeMove}
-            onPointerUp={onSwipeUp}
-            onPointerCancel={() => {
-              swipe.current = null;
-            }}
-            onClick={onHandleClick}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                setPayOpen((v) => !v);
-              }
-            }}
-          >
-            <div className="h-1.5 w-12 rounded-full bg-ink/25" />
-          </div>
-          <div className="flex items-center justify-between gap-2">
+
+      {/* El ticket ocupa la pantalla: en el celu nadie recorre la lista, escanea
+          o busca. La búsqueda se abre encima de la parte de arriba del ticket y
+          nunca tapa el total ni el botón de cobrar. */}
+      <section className="relative flex min-h-44 flex-1 flex-col overflow-hidden rounded-xl bg-paper text-ink shadow-[var(--shadow-ticket)] ticket-grain">
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-center justify-between gap-2 px-4 pt-3 pb-2">
             <h2 className="font-display text-lg tracking-tight">Ticket</h2>
-            {payOpen ? (
+            {cobra && puedeCobrar && !turnoAjeno && !cam ? (
+              // Solo la caja devuelve plata: sale del cajón del turno abierto.
               <button
                 type="button"
                 className="h-9 rounded-md border border-ink/25 px-3 text-sm font-medium text-ink"
-                onClick={() => setPayOpen(false)}
+                onClick={() => {
+                  if (!cash.open) toast.error("Abrí la caja para devolver plata");
+                  else setRefundOpen(true);
+                }}
               >
-                Volver a la lista
+                Devolver
               </button>
-            ) : cam ? null : (
-              <div className="flex gap-1.5">
-                {cobra ? (
-                  // Solo la caja devuelve plata: sale del cajón del turno abierto.
-                  puedeCobrar && !turnoAjeno ? (
+            ) : null}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4">
+            <TicketLines ticket={ticket} destacado={ultimo} onQty={setLineQty} onRemove={removeLine} />
+          </div>
+          {buscando && !cam ? (
+            <div
+              ref={panelRef}
+              id="celu-busqueda"
+              // Tocar un resultado no le saca el foco al buscador: el teclado
+              // queda arriba para el siguiente.
+              onMouseDown={(e) => e.preventDefault()}
+              className="absolute inset-0 z-20 flex flex-col gap-1.5 bg-bg/60 p-2 backdrop-blur-[1px]"
+            >
+              {q.trim() ? null : (
+                <div ref={catsRef} className="flex shrink-0 cursor-grab gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+                  <Chip active={cat === "all"} onClick={() => setCat("all")}>
+                    Más vendidos
+                  </Chip>
+                  {categories.map((c) => (
+                    <Chip key={c.id} active={cat === c.id} onClick={() => setCat(c.id)}>
+                      {c.name}
+                    </Chip>
+                  ))}
+                </div>
+              )}
+              <div className="relative min-h-0 flex-1 overflow-hidden">
+                <div ref={listRef} className="h-full cursor-grab overflow-y-auto">
+                  {resultados.length === 0 ? (
+                    <p className="rounded-md bg-surface px-3 py-4 text-center text-sm text-subtle">
+                      {products.filter((p) => p.active).length === 0
+                        ? "Todavía no hay productos. Cargalos en Stock."
+                        : "Nada con esa búsqueda."}
+                    </p>
+                  ) : (
+                    <ul className="flex flex-col gap-1">
+                      {resultados.map((p) => (
+                        <li key={p.id}>
+                          <ProductRow
+                            product={p}
+                            enTicket={ticket.find((l) => l.productId === p.id)?.qty ?? 0}
+                            onAdd={() => elegir(p)}
+                            onAsk={() => setAsked(p)}
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                {asked ? (
+                  <>
                     <button
                       type="button"
-                      className="h-9 rounded-md border border-ink/25 px-3 text-sm font-medium text-ink"
-                      onClick={() => {
-                        if (!cash.open) toast.error("Abrí la caja para devolver plata");
-                        else setRefundOpen(true);
-                      }}
-                    >
-                      Devolver
-                    </button>
-                  ) : null
-                ) : (
-                  <button
-                    type="button"
-                    className="h-9 rounded-md border border-ink/25 px-3 text-sm font-medium text-ink disabled:opacity-40"
-                    disabled={!ticket.length}
-                    onClick={() => setPayOpen(true)}
-                  >
-                    Ver ticket
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="h-9 rounded-md bg-ink px-3 text-sm font-medium text-paper disabled:opacity-40"
-                  disabled={accion.deshabilitada}
-                  onClick={accion.hacer}
-                >
-                  {accion.etiqueta}
-                </button>
+                      className="absolute inset-0 z-20 bg-bg/70"
+                      aria-label="Cerrar consulta"
+                      onClick={() => setAsked(null)}
+                    />
+                    <div className="absolute inset-x-2 top-2 z-30 rounded-xl bg-surface px-4 py-4 shadow-[var(--shadow-border)]">
+                      <p className="truncate font-display text-xl">{asked.name}</p>
+                      <p className="num mt-1 text-3xl text-sage">{formatARS(asked.price)}</p>
+                      <p className="mt-1 text-sm text-muted">{asked.stock} u. en góndola</p>
+                      <p className="mt-0.5 font-mono text-[11px] text-subtle">{asked.barcode}</p>
+                    </div>
+                  </>
+                ) : null}
               </div>
-            )}
-          </div>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-4">
-          <TicketLines ticket={ticket} destacado={ultimo} onQty={setLineQty} onRemove={removeLine} />
+            </div>
+          ) : null}
         </div>
         <div className="flex shrink-0 items-end justify-between border-t border-dashed border-ink/20 px-4 py-3">
           <span className="text-[11px] uppercase tracking-[0.08em] text-ink-muted">Total</span>
@@ -600,7 +547,7 @@ export function PhoneSellView() {
         </div>
       </section>
 
-      {cam && !payOpen ? (
+      {cam ? (
         <div className="flex shrink-0 gap-1.5">
           <Button size="lg" variant="secondary" className="flex-1" onClick={terminarEscaneo}>
             Listo
@@ -609,9 +556,7 @@ export function PhoneSellView() {
             {accion.etiqueta}
           </Button>
         </div>
-      ) : null}
-
-      {payOpen ? (
+      ) : (
       <div className="shrink-0 space-y-1.5">
         {/* En un celu de piso, cómo paga viaja con el ticket y la caja lo recibe
             cargado; lo que pagó y el vuelto se cuentan en la caja. */}
@@ -637,7 +582,7 @@ export function PhoneSellView() {
             );
           })}
         </div>
-        {cobra && payMethod === "efectivo" ? (
+        {cobra && cash.open && payMethod === "efectivo" ? (
           <div className="space-y-1.5">
             <div className="flex gap-1.5">
               <label htmlFor="celu-pago" className="sr-only">
@@ -673,15 +618,16 @@ export function PhoneSellView() {
             Hay un turno abierto de otro aparato. Cerralo en Caja contando la plata antes de cobrar.
           </p>
         ) : null}
+        {/* Con la caja cerrada, el botón principal la abre: sin turno no hay
+            venta, y así el ticket no pierde lugar con un cartel más. */}
         {cobra && !cash.open ? (
-          <div className="rounded-md bg-warn/10 px-3 py-2.5">
-            <p className="text-sm text-warn">La caja está cerrada. Abrila para cobrar.</p>
-            <Button className="mt-2 w-full" variant="secondary" onClick={abrirCaja} disabled={!puedeCobrar}>
+          <>
+            <p className="px-1 text-sm text-warn">La caja está cerrada. Abrila para cobrar.</p>
+            <Button className="w-full" size="lg" variant="secondary" onClick={abrirCaja} disabled={!puedeCobrar || turnoAjeno}>
               Abrir caja con {formatARS(cashFloat)}
             </Button>
-          </div>
-        ) : null}
-        {cobra ? (
+          </>
+        ) : cobra ? (
           <Button className="w-full" size="lg" disabled={!ticket.length || !cash.open || turnoAjeno} onClick={confirmar}>
             Confirmar venta
           </Button>
@@ -691,9 +637,7 @@ export function PhoneSellView() {
           </Button>
         )}
       </div>
-      ) : null}
-        </div>
-      </div>
+      )}
 
       <ClienteRefundDialog open={refundOpen} onOpenChange={setRefundOpen} />
       <ProductPhoneDialog
@@ -722,7 +666,7 @@ function TicketLines({
   onRemove: (id: string) => void;
 }) {
   if (!ticket.length) {
-    return <p className="py-4 text-center text-sm text-ink-muted">Un toque suma la unidad.</p>;
+    return <p className="py-4 text-center text-sm text-ink-muted">Escaneá o buscá arriba.</p>;
   }
   const arriba = destacado ? ticket.find((l) => l.productId === destacado) : undefined;
   const lineas = arriba ? [arriba, ...ticket.filter((l) => l !== arriba)] : ticket;
@@ -773,10 +717,13 @@ function TicketLines({
 
 function ProductRow({
   product,
+  enTicket,
   onAdd,
   onAsk,
 }: {
   product: Product;
+  /** Cuántos hay ya en el ticket: el toque suma uno y se ve al instante. */
+  enTicket: number;
   onAdd: () => void;
   onAsk: () => void;
 }) {
@@ -792,7 +739,8 @@ function ProductRow({
   }
 
   return (
-    <div className="flex items-center gap-0.5">
+    // Fondo sólido: el panel es semitransparente, cada resultado tiene que leerse.
+    <div className={cn("flex items-center gap-0.5 rounded-md bg-surface text-fg shadow-[var(--shadow-border)]", enTicket > 0 && "ring-2 ring-sage/60")}>
       <button
         type="button"
         onPointerDown={(e) => {
@@ -823,9 +771,12 @@ function ProductRow({
           start.current = null;
         }}
         onContextMenu={(e) => e.preventDefault()}
-        className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2.5 text-left hover:bg-elevated/70"
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-3 text-left active:bg-elevated"
       >
         <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{product.name}</span>
+        {enTicket > 0 ? (
+          <span className="num shrink-0 rounded-full bg-sage/20 px-2 text-xs font-medium text-sage">×{enTicket}</span>
+        ) : null}
         <span className="num shrink-0 text-sage">{formatARS(product.price)}</span>
       </button>
       <button

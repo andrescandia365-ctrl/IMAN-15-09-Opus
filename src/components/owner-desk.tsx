@@ -187,11 +187,15 @@ export function OwnerDesk({
               Volver
             </Button>
           </div>
+          {/* Arriba de todo: quién es la caja y pasarla, sin entrar a Local. */}
+          <CajaDelLocal storeId={activeStoreId} />
           <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
             {tabs.map(([id, label, Icon]) => tabBtn(id, label, Icon))}
           </div>
         </div>
       ) : (
+        <>
+        <CajaDelLocal storeId={activeStoreId} />
         <div className="flex shrink-0 items-center gap-2">
           <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto no-scrollbar">
             {tabs.map(([id, label, Icon]) => tabBtn(id, label, Icon))}
@@ -205,6 +209,7 @@ export function OwnerDesk({
             </Button>
           </div>
         </div>
+        </>
       )}
 
       <div className="min-h-0 flex-1 overflow-hidden">
@@ -510,7 +515,6 @@ export function OwnerDesk({
         {tab === "local" ? (
           <div className="grid h-full min-h-0 gap-3 overflow-y-auto lg:grid-cols-[minmax(16rem,0.7fr)_minmax(0,1.3fr)]">
             <div className="flex flex-col gap-3">
-            <CajaDelLocal storeId={activeStoreId} />
             <div className="rounded-xl bg-surface p-5 shadow-[var(--shadow-border)]">
               <p className="text-xs font-medium uppercase tracking-[0.14em] text-subtle">Locales</p>
               <ul className="mt-3 space-y-1">

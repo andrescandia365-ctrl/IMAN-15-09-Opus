@@ -253,16 +253,23 @@ html.light {
   animation: iman-open-scan 420ms linear 300ms backwards;
 }
 
+/*
+ * Las líneas de campo nacen del imán hacia afuera, como un campo de verdad:
+ * cada una arranca aplastada contra el centro del bloque de barras (55, 56)
+ * y se abre para arriba y para abajo a la vez. Primero las de adentro,
+ * después las de afuera. Nunca de izquierda a derecha (brand/README.md).
+ * El pulso de la espera también va hacia afuera, en el mismo orden.
+ */
 .iman-open-field path {
-  animation: iman-open-draw 520ms ease-out 720ms backwards;
+  transform-box: view-box;
+  transform-origin: 55px 56px;
+  animation:
+    iman-open-nace 520ms cubic-bezier(0.2, 0.7, 0.3, 1) 720ms backwards,
+    iman-open-pulse 1.6s ease-in-out 1320ms infinite;
 }
 
 .iman-open-field .iman-open-outer {
-  animation-delay: 800ms;
-}
-
-.iman-open-field {
-  animation: iman-open-pulse 1.6s ease-in-out 1320ms infinite;
+  animation-delay: 880ms, 1480ms;
 }
 
 .iman-open-label::after {
@@ -300,29 +307,30 @@ html.light {
   }
 }
 
-/* Con punta redonda, un trazo de largo cero igual pinta un punto: se esconde hasta arrancar. */
-@keyframes iman-open-draw {
+/* Aplastada, la línea queda detrás de las barras salvo las puntas: se esconde hasta abrirse un poco. */
+@keyframes iman-open-nace {
   from {
-    stroke-dasharray: 1;
-    stroke-dashoffset: 1;
+    transform: scaleY(0);
     stroke-opacity: 0;
   }
-  2% {
+  20% {
     stroke-opacity: 1;
   }
   to {
-    stroke-dasharray: 1;
-    stroke-dashoffset: 0;
+    transform: scaleY(1);
   }
 }
 
+/* Respira hacia afuera: se estira un poco desde el imán y vuelve. */
 @keyframes iman-open-pulse {
   0%,
   100% {
-    opacity: 1;
+    transform: scaleY(1);
+    stroke-opacity: 1;
   }
   50% {
-    opacity: 0.55;
+    transform: scaleY(1.07);
+    stroke-opacity: 0.55;
   }
 }
 

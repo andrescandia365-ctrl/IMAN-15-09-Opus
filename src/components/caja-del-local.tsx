@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,13 +12,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { anotarCaja, anotarHeredados, useRol } from "@/lib/caja-local";
 import { errorText } from "@/lib/errors";
-import { tomarCaja, verCaja } from "@/lib/kiosk";
+import { detalleCaja, tomarCaja, verCaja, type DetalleCaja } from "@/lib/kiosk";
 import { getDeviceId } from "@/lib/local-db";
 import { hashPin, pinLooksOk } from "@/lib/owner-pin";
 import { syncNow } from "@/lib/sync";
+import { describirCaja, tipoDeEsteAparato } from "@/lib/tipo-aparato";
 
 /**
- * Qué aparato es la caja del local, y pasarla a este. Pide red y el PIN del
+ * Arriba de todo del panel del dueño, en PC y en celu: qué aparato es la caja
+ * del local, en palabras, y pasarla a este sin entrar a Local. Pide red y el PIN del
  * dueño: lo decide el servidor (ver rol.ts y tomarCaja). Pasar exige el turno
  * cerrado en la caja de antes; si ese aparato se rompió o se perdió, se fuerza
  * la toma y el turno que quedó abierto se cierra acá contando la plata.
@@ -30,13 +32,28 @@ export function CajaDelLocal({ storeId }: { storeId: string }) {
   const [busy, setBusy] = useState(false);
   // El pase normal se frenó por un turno abierto: se ofrece forzar.
   const [frenado, setFrenado] = useState(false);
+  // Tipo de aparato y desde cuándo: lo sabe el servidor. Sin red, lo que se sabe acá.
+  const [detalle, setDetalle] = useState<DetalleCaja | null>(null);
+  const ver = caja?.ver ?? 0;
 
+  useEffect(() => {
+    if (!storeId || !navigator.onLine) return;
+    let vivo = true;
+    void detalleCaja({ data: { storeId } })
+      .then((d) => {
+        if (vivo) setDetalle(d);
+      })
+      .catch(() => {});
+    return () => {
+      vivo = false;
+    };
+  }, [storeId, ver]);
+
+  const al = detalle && detalle.ver === ver ? detalle : null;
   const estado =
-    rol === "caja"
-      ? "Este aparato es la caja del local: cobra, abre y cierra el turno."
-      : rol === "piso"
-        ? "La caja es otro aparato. Este arma el ticket y lo manda a la caja."
-        : "Sin caja asignada: cobra la computadora, como siempre.";
+    rol === "sin-asignar"
+      ? "Todavía no hay una caja anotada: cobra la computadora, como siempre."
+      : describirCaja({ esEste: rol === "caja", tipo: al?.tipo ?? null, desde: al?.desde ?? null });
 
   async function tomar(forzar = false) {
     if (!pinLooksOk(pin)) {
@@ -55,7 +72,14 @@ export function CajaDelLocal({ storeId }: { storeId: string }) {
       const ahora = await verCaja({ data: { storeId } }).catch(() => caja);
       anotarCaja(storeId, ahora);
       const r = await tomarCaja({
-        data: { storeId, device: getDeviceId(), esperado: ahora?.ver ?? 0, pinHash: await hashPin(pin), forzar },
+        data: {
+          storeId,
+          device: getDeviceId(),
+          esperado: ahora?.ver ?? 0,
+          pinHash: await hashPin(pin),
+          forzar,
+          tipo: tipoDeEsteAparato(),
+        },
       });
       anotarCaja(storeId, r.caja);
       if (!r.ok) {
@@ -83,11 +107,19 @@ export function CajaDelLocal({ storeId }: { storeId: string }) {
   }
 
   return (
-    <div className="rounded-xl bg-surface p-5 shadow-[var(--shadow-border)]">
-      <p className="text-xs font-medium uppercase tracking-[0.14em] text-subtle">Caja del local</p>
-      <p className="mt-2 text-sm">{estado}</p>
+    <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-xl bg-surface px-4 py-3 shadow-[var(--shadow-border)]">
+      <p className="min-w-0 text-sm" data-caja-del-local>
+        {rol === "sin-asignar" ? (
+          estado
+        ) : (
+          <>
+            <span className="text-muted">La caja de este local: </span>
+            <span className="font-medium">{estado}</span>
+          </>
+        )}
+      </p>
       {rol === "caja" ? null : (
-        <Button className="mt-3 w-full" variant="secondary" onClick={() => setOpen(true)}>
+        <Button size="sm" variant="secondary" className="max-sm:w-full" onClick={() => setOpen(true)}>
           Pasar la caja a este aparato
         </Button>
       )}
