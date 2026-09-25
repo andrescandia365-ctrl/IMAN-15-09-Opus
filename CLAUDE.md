@@ -185,7 +185,7 @@ igual. Si no queda escrito, vuelve a pasar.
 | `src/components/settings-view.tsx` | Ajustes: condición fiscal, filas de Asientos |
 | `src/components/ledger-rows-config.tsx` | el dueño arma las filas y los tags |
 | `src/components/phone-sell / phone-floor / phone-receive` | el celu (Llegó carga costo opcional) |
-| `src/components/owner-desk.tsx` + `owner-pin-dialog.tsx` + `owner-prices.tsx` | Dueño. En el celu, Precios se mira |
+| `src/components/owner-desk.tsx` + `owner-pin-dialog.tsx` + `owner-prices.tsx` | Dueño. Precios, igual en PC y celu (detrás del PIN): alinear y confirmar el cruce piden red y sincronizan antes |
 | `src/components/camera-scan.tsx` | escaneo con cámara a pantalla completa (PC, Inventario, Stock) |
 | `src/components/scan-strip.tsx` | la cámara como franja arriba del ticket, en Vender del celu |
 | `src/components/vendor-dashboard.tsx` | Taller (vendedor) |
