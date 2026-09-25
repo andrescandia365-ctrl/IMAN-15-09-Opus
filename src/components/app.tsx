@@ -30,6 +30,7 @@ import {
   setActiveLocalStore,
   writeBlobRev,
 } from "@/lib/local-db";
+import { anotarCaja } from "@/lib/caja-local";
 import { flushDeskOutbox } from "@/lib/desk-outbox";
 import { recallLocalName, rememberLocalName } from "@/lib/local-name";
 import { decideFloorBoot, isBrowserOnline, lockFloor, readFloorLockSync, type FloorLock } from "@/lib/floor-lock";
@@ -273,6 +274,7 @@ export function App() {
           setActiveStoreId(storeId);
           setActiveLocalStore(storeId);
           void writeBlobRev(storeId, account.rev);
+          if (storeId === account.activeStoreId) anotarCaja(storeId, account.caja);
           const local = await loadLocalSnapshot(storeId);
           const payload = localHasCopy(local)
             ? mergePayload(account.payload, local!)
@@ -480,6 +482,7 @@ export function App() {
     setStores(bundle.stores);
     setActiveStoreId(bundle.activeStoreId);
     void writeBlobRev(bundle.activeStoreId, bundle.rev);
+    anotarCaja(bundle.activeStoreId, bundle.caja);
     hydrateKiosk(bundle.payload);
     setGate(nextGate);
   }
@@ -509,6 +512,7 @@ export function App() {
       setStores(bundle.stores);
       setActiveStoreId(bundle.activeStoreId);
       void writeBlobRev(bundle.activeStoreId, bundle.rev);
+      anotarCaja(bundle.activeStoreId, bundle.caja);
       if (!localHasCopy(local)) await startFromCopy(bundle.activeStoreId, bundle.payload);
       hydrateKiosk(payload, { restore: !localHasCopy(local) });
       setLocalReady(true);

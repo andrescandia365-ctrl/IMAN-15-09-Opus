@@ -1,5 +1,5 @@
 export type PayMethod = "efectivo" | "mercadopago" | "debito";
-export type ViewId = "taller" | "counter" | "inventory" | "orders" | "cash" | "expire" | "reports" | "settings";
+export type ViewId = "taller" | "counter" | "inventory" | "orders" | "cash" | "expire" | "reports" | "settings" | "mas";
 export type ThemeMode = "dark" | "light";
 export type KioskRubro = "kiosco" | "almacen" | "despensa" | "maxikiosco" | "otro";
 export type FiscalCondition = "responsable_inscripto" | "monotributo" | "en_negro";
@@ -77,6 +77,17 @@ export interface CashShift {
    * mes (ver plegado.ts). Ausente en los turnos de antes.
    */
   deviceId?: string;
+  /**
+   * El aparato que lo cerró. Si no es el que lo abrió, el arqueo lo hizo otro
+   * (una toma forzada de la caja): el historial lo marca. Ausente en los de antes.
+   */
+  closedBy?: string;
+  /**
+   * Se cerró en la caja nueva después de forzar la toma. Hace falta además de
+   * `closedBy`: los turnos abiertos antes de que existiera `deviceId` no dicen
+   * quién los abrió.
+   */
+  heredado?: boolean;
   openingCash: number;
   closingCash: number | null;
   expectedCash: number | null;

@@ -411,6 +411,26 @@ export function backupRecords(
 }
 
 /**
+ * Cuántos registros trae `despues` que `antes` no tenía: turnos nuevos o que
+ * cambiaron de estado (se cerraron en otro aparato), retiros e historial de
+ * stock nuevos. Es lo que "bajó" al juntar dos fotocopias, aunque no haya
+ * llegado por la cinta.
+ */
+export function registrosNuevos(
+  antes: Pick<KioskPayload, "shifts" | "drops" | "movements">,
+  despues: Pick<KioskPayload, "shifts" | "drops" | "movements">,
+): number {
+  const estado = new Map((antes.shifts ?? []).map((s) => [s.id, s.status]));
+  const drops = new Set((antes.drops ?? []).map((d) => d.id));
+  const movs = new Set((antes.movements ?? []).map((m) => m.id));
+  return (
+    (despues.shifts ?? []).filter((s) => estado.get(s.id) !== s.status).length +
+    (despues.drops ?? []).filter((d) => !drops.has(d.id)).length +
+    (despues.movements ?? []).filter((m) => !movs.has(m.id)).length
+  );
+}
+
+/**
  * El respaldo cuando dos fotocopias chocan: lo de mergePayload (ventas,
  * devoluciones y pedidos sumados; el resto, de este aparato) más turnos,
  * retiros e historial sumados. Ajustes y proveedores ya van por la cinta:

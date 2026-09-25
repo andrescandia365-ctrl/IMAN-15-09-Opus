@@ -635,7 +635,7 @@ function ProductDialog({
   );
 }
 
-function ImportDialog({
+export function ImportDialog({
   open,
   onOpenChange,
   onApply,

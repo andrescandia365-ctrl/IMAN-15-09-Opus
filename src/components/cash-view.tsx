@@ -13,19 +13,30 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatARS, formatTime } from "@/lib/format";
+import { useRol, useTurnoAjeno } from "@/lib/caja-local";
 import { useCashSnapshot, useImanStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { EncargadoBook } from "@/components/ledger-grid";
+import { EncargadoBook, LedgerDia } from "@/components/ledger-grid";
 import { PriceUpdateCard } from "@/components/price-calc";
 import { onShiftNow } from "@/lib/team";
 import { backupOnClose } from "@/lib/sync";
+import { cerradoPorOtro } from "@/lib/turno";
 
-export function CashView() {
+/**
+ * La caja: turno, retiros, cierre, historial y la planilla. `celu` es la caja
+ * en un celu: la planilla va de a un día, en lista, y Actualizar precios vive
+ * en la pestaña Más.
+ */
+export function CashView({ celu = false }: { celu?: boolean } = {}) {
   const cash = useCashSnapshot();
   const settings = useImanStore((s) => s.settings);
   const openShift = useImanStore((s) => s.openShift);
   const closeShift = useImanStore((s) => s.closeShift);
   const addDrop = useImanStore((s) => s.addDrop);
+  // Abrir, retirar y cerrar son de la caja del local (ver rol.ts).
+  const deskStoreId = useImanStore((s) => s.deskStoreId);
+  const { rol, puedeCobrar } = useRol(deskStoreId);
+  const turnoAjeno = useTurnoAjeno(deskStoreId) && rol === "caja";
   const shifts = useImanStore((s) => s.shifts);
   const drops = useImanStore((s) => s.drops);
   const refunds = useImanStore((s) => s.refunds);
@@ -41,6 +52,7 @@ export function CashView() {
   const [subeAmt, setSubeAmt] = useState("");
   const [safeAmt, setSafeAmt] = useState("");
   const [dropAmt, setDropAmt] = useState("");
+  const [closeNote, setCloseNote] = useState("");
   const [closeOpen, setCloseOpen] = useState(false);
   const [dropOpen, setDropOpen] = useState(false);
 
@@ -87,11 +99,21 @@ export function CashView() {
 
         <section className="flex flex-col rounded-xl bg-surface p-6 shadow-[var(--shadow-border)]">
           <h2 className="font-display text-xl tracking-tight">Turno de caja</h2>
-          {cash.open ? (
+          {!puedeCobrar ? (
+            <p className="mt-2 text-sm text-muted">
+              Esta PC no es la caja del local. El turno se abre, se retira y se cierra en la caja.
+            </p>
+          ) : cash.open ? (
             <>
               <p className="mt-2 text-sm text-muted">
                 Abierta a las {formatTime(cash.open.openedAt)} · fondo {formatARS(cash.open.openingCash)}
               </p>
+              {turnoAjeno ? (
+                <p className="mt-2 rounded-md bg-warn/10 px-3 py-2 text-sm text-warn">
+                  Este turno es del aparato que era la caja. Cerralo contando la plata que hay en el cajón;
+                  después abrí uno propio.
+                </p>
+              ) : null}
               <div className="mt-auto flex flex-wrap gap-2 pt-8">
                 <Button variant="secondary" onClick={() => setDropOpen(true)}>
                   <Landmark className="size-4" />
@@ -106,8 +128,9 @@ export function CashView() {
           ) : (
             <>
               <div className="mt-5">
-                <Label>Fondo inicial</Label>
+                <Label htmlFor="caja-fondo">Fondo inicial</Label>
                 <Input
+                  id="caja-fondo"
                   inputMode="numeric"
                   value={openAmt}
                   onChange={(e) => setOpenAmt(e.target.value.replace(/[^\d]/g, ""))}
@@ -146,6 +169,11 @@ export function CashView() {
                   {s.closedAt ? ` → ${formatTime(s.closedAt)}` : ""}
                   {s.note ? ` · ${s.note}` : ""}
                 </div>
+                {cerradoPorOtro(s) ? (
+                  <div className="mt-0.5 text-[11px] font-medium text-warn">
+                    Lo cerró otro aparato, no el que abrió el turno
+                  </div>
+                ) : null}
               </div>
               <div className="num text-sm text-sage">
                 {s.status === "closed"
@@ -185,9 +213,9 @@ export function CashView() {
         ) : null}
       </section>
 
-      <EncargadoBook defaultOpen />
+      {celu ? <LedgerDia /> : <EncargadoBook defaultOpen />}
 
-      <PriceUpdateCard />
+      {celu ? null : <PriceUpdateCard />}
 
       <Dialog open={dropOpen} onOpenChange={setDropOpen}>
         <DialogContent>
@@ -195,8 +223,9 @@ export function CashView() {
             <DialogTitle>Retiro a caja fuerte</DialogTitle>
             <DialogDescription>Sale de la caja chica, no de las ventas digitales.</DialogDescription>
           </DialogHeader>
-          <Label>Monto</Label>
+          <Label htmlFor="caja-retiro">Monto</Label>
           <Input
+            id="caja-retiro"
             inputMode="numeric"
             value={dropAmt}
             onChange={(e) => setDropAmt(e.target.value.replace(/[^\d]/g, ""))}
@@ -231,30 +260,41 @@ export function CashView() {
               se hacen en otra app — acá solo anotás cuánto fue.
             </DialogDescription>
           </DialogHeader>
-          <Label>Efectivo contado (caja chica)</Label>
+          <Label htmlFor="caja-contado">Efectivo contado (caja chica)</Label>
           <Input
+            id="caja-contado"
             inputMode="numeric"
             value={closeAmt}
             onChange={(e) => setCloseAmt(e.target.value.replace(/[^\d]/g, ""))}
           />
-          <Label className="mt-2">Caja fuerte (contado)</Label>
+          <Label htmlFor="caja-fuerte" className="mt-2">Caja fuerte (contado)</Label>
           <Input
+            id="caja-fuerte"
             inputMode="numeric"
             value={safeAmt}
             onChange={(e) => setSafeAmt(e.target.value.replace(/[^\d]/g, ""))}
             placeholder="Lo que hay en el ahorro"
           />
-          <Label className="mt-2">Cargas virtuales · celular</Label>
+          <Label htmlFor="caja-cel" className="mt-2">Cargas virtuales · celular</Label>
           <Input
+            id="caja-cel"
             inputMode="numeric"
             value={celAmt}
             onChange={(e) => setCelAmt(e.target.value.replace(/[^\d]/g, ""))}
           />
-          <Label className="mt-2">Cargas SUBE</Label>
+          <Label htmlFor="caja-sube" className="mt-2">Cargas SUBE</Label>
           <Input
+            id="caja-sube"
             inputMode="numeric"
             value={subeAmt}
             onChange={(e) => setSubeAmt(e.target.value.replace(/[^\d]/g, ""))}
+          />
+          <Label htmlFor="caja-nota" className="mt-2">Nota del cierre (opcional)</Label>
+          <Input
+            id="caja-nota"
+            value={closeNote}
+            onChange={(e) => setCloseNote(e.target.value.slice(0, 200))}
+            placeholder="Faltante, billete falso, quién cerró…"
           />
           {closeAmt ? (
             <p
@@ -278,6 +318,8 @@ export function CashView() {
                   virtualCel: Number(celAmt) || 0,
                   virtualSube: Number(subeAmt) || 0,
                   safeCount: Number(safeAmt) || Number(closeAmt) || 0,
+                  note: closeNote.trim() || undefined,
+                  heredado: turnoAjeno,
                 });
                 if (!r.ok) toast.error(r.error);
                 else {
@@ -294,6 +336,7 @@ export function CashView() {
                   setCelAmt("");
                   setSubeAmt("");
                   setSafeAmt("");
+                  setCloseNote("");
                   setCloseOpen(false);
                 }
               }}

@@ -3,11 +3,13 @@ import { Check, RefreshCw } from "lucide-react";
 import { onQueueChange, listSyncLog, syncMeta, type SyncLogItem } from "@/lib/local-db";
 import { haceCuanto, SYNC_AMARILLO_H, syncAgeTone } from "@/lib/sync-log";
 import { reviewCloud } from "@/lib/sync";
+import { useRol } from "@/lib/caja-local";
 import { usePhoneUi } from "@/lib/device";
 import { cn } from "@/lib/utils";
 
 export function SyncButton({ storeId }: { storeId: string }) {
   const phone = usePhoneUi();
+  const { puedeCobrar } = useRol(storeId);
   const [last, setLast] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
@@ -58,7 +60,9 @@ export function SyncButton({ storeId }: { storeId: string }) {
     setChecking(true);
     if (phone) setLive("Revisando si hay trabajo en la nube");
     try {
-      const r = await reviewCloud(storeId, { phone });
+      // La dirección la decide el rol, no el ancho: la caja sube primero lo suyo
+      // (turnos, retiros); un aparato de piso baja primero (ver rol.ts).
+      const r = await reviewCloud(storeId, { phone: !puedeCobrar });
       setLive(r.message);
       await listSyncLog(storeId).then(setItems);
       const m = await syncMeta(storeId);

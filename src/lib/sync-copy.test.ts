@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { backupRecords, incomingCopy, mergeBackup, mergeOrders, mergePayload, preferLiveCopy, puedeRespaldar, richerOrder, richerShift } from "./cap.ts";
+import { backupRecords, incomingCopy, mergeBackup, mergeOrders, mergePayload, preferLiveCopy, puedeRespaldar, registrosNuevos, richerOrder, richerShift } from "./cap.ts";
 import { haceCuanto, pruneSyncLog, syncAgeTone, trimSyncLog, type SyncLogItem } from "./sync-log.ts";
 import type { CashShift, KioskPayload, MonthAgg, OrderDraft, Sale, Settings } from "./types.ts";
 
@@ -392,5 +392,22 @@ describe("un local sin catálogo igual tiene plata que respaldar", () => {
     assert.equal(junto.drops.length, 1);
     assert.equal(junto.drops[0]?.amount, 6161);
     assert.equal(junto.shifts[0]?.safeCount, 15151);
+  });
+});
+
+describe("registrosNuevos", () => {
+  const turno = (id: string, status: "open" | "closed") => ({ id, status, openingCash: 0, closingCash: null, expectedCash: null, salesTotal: null, salesCount: null, note: null, openedAt: "2026-09-24T09:00:00.000Z", closedAt: null }) as CashShift;
+  it("cuenta lo que trajo la otra fotocopia: un turno que se cerró allá y un retiro nuevo", () => {
+    const antes = { shifts: [turno("t1", "open")], drops: [], movements: [] };
+    const despues = {
+      shifts: [turno("t1", "closed")],
+      drops: [{ id: "d1", shiftId: "t1", amount: 100, note: "", createdAt: "2026-09-24T10:00:00.000Z" }],
+      movements: [],
+    };
+    assert.equal(registrosNuevos(antes, despues), 2);
+  });
+  it("si no trajo nada, cero", () => {
+    const antes = { shifts: [turno("t1", "open")], drops: [], movements: [] };
+    assert.equal(registrosNuevos(antes, antes), 0);
   });
 });

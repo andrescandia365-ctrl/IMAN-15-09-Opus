@@ -2,6 +2,7 @@ import { formatARS, formatDateTime, PAY_LABEL } from "@/lib/format";
 import { TICKET_FISCAL_HINT, TICKET_NOT_FISCAL } from "@/lib/fiscal";
 import { packOf } from "@/lib/pack";
 import { printTicket } from "@/lib/print";
+import { usePhoneUi } from "@/lib/device";
 import { useImanStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +16,7 @@ import { toast } from "sonner";
 
 export function ReceiptDialog() {
   const open = useImanStore((s) => s.receiptOpen);
+  const celu = usePhoneUi();
   const close = useImanStore((s) => s.closeReceipt);
   const lastId = useImanStore((s) => s.lastSaleId);
   const sales = useImanStore((s) => s.sales);
@@ -117,6 +119,8 @@ export function ReceiptDialog() {
           {TICKET_NOT_FISCAL} {TICKET_FISCAL_HINT}
         </p>
         <div className="mt-3 flex gap-2">
+          {/* El kiosco sin PC no imprime: en el celu no hay impresora. */}
+          {celu ? null : (
           <Button
             className="flex-1"
             variant="secondary"
@@ -133,6 +137,7 @@ export function ReceiptDialog() {
           >
             Imprimir
           </Button>
+          )}
           <Button className="flex-1" onClick={close}>
             Listo
           </Button>

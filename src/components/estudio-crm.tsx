@@ -6,10 +6,12 @@ import { VendorPanel } from "@/components/vendor-panel";
 import { signOut } from "@/lib/auth/client";
 import { useCurrentUser } from "@/lib/auth/use-current-user";
 import {
+  countCobraEn,
   grantExtraLocal,
   listCrmUsers,
   resetOwnerPassword,
   resetOwnerPin,
+  type CobraEnConteo,
   type CrmUser,
 } from "@/lib/crm";
 import type { MyAccess } from "@/lib/license";
@@ -28,6 +30,7 @@ export function EstudioCrm({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [flash, setFlash] = useState<Record<string, string>>({});
+  const [cobran, setCobran] = useState<CobraEnConteo | null>(null);
 
   function reload() {
     void listCrmUsers()
@@ -40,6 +43,9 @@ export function EstudioCrm({
 
   useEffect(() => {
     reload();
+    void countCobraEn()
+      .then(setCobran)
+      .catch(() => setCobran(null));
   }, []);
 
   function patch(next: CrmUser) {
@@ -70,6 +76,34 @@ export function EstudioCrm({
       </header>
 
       <main className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-6 sm:px-6">
+        {cobran ? (
+          <section className="rounded-xl bg-surface p-5 shadow-[var(--shadow-border)]">
+            <p className="text-[11px] uppercase tracking-[0.16em] text-subtle">Locales</p>
+            <h2 className="mt-1 font-display text-2xl tracking-tight">¿Dónde cobran?</h2>
+            <p className="mt-1 text-sm text-muted">
+              Lo que contestó cada dueño a "¿Dónde vas a cobrar?", un local por respuesta. "Solo
+              celular" son los locales que dijeron no tener computadora ni tablet.
+            </p>
+            <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {(
+                [
+                  ["Computadora", cobran.computadora],
+                  ["Tablet", cobran.tablet],
+                  ["Solo celular", cobran.celu],
+                  ["Sin responder", cobran.sinResponder],
+                ] as const
+              ).map(([label, n]) => (
+                <div key={label} className="rounded-lg bg-bg px-3 py-2.5">
+                  <dt className="text-xs text-subtle">{label}</dt>
+                  <dd className="num mt-0.5 text-2xl">{n}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className="mt-3 text-xs text-subtle">
+              Sin responder: todavía no contestaron (la pregunta aparece al entrar al local).
+            </p>
+          </section>
+        ) : null}
         <section className="rounded-xl bg-paper p-5 text-ink shadow-[var(--shadow-ticket)]">
           <p className="text-[11px] uppercase tracking-[0.16em] text-ink-muted">Usuarios</p>
           <h2 className="mt-1 font-display text-2xl tracking-tight">Cuentas de dueño</h2>

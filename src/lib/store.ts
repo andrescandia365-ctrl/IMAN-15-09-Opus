@@ -138,7 +138,14 @@ export interface ImanState {
   openShift: (opening: number) => { ok: boolean; error?: string };
   closeShift: (
     closing: number,
-    extra?: { note?: string; virtualCel?: number; virtualSube?: number; safeCount?: number },
+    extra?: {
+      note?: string;
+      virtualCel?: number;
+      virtualSube?: number;
+      safeCount?: number;
+      /** El turno lo abrió la caja de antes y se cierra acá después de forzar la toma. */
+      heredado?: boolean;
+    },
   ) => { ok: boolean; error?: string };
   addDrop: (amount: number, note?: string) => { ok: boolean; error?: string };
   upsertBook: (row: DayBook) => void;
@@ -885,6 +892,8 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           virtualSube,
           safeCount,
           closedAt: new Date().toISOString(),
+          closedBy: getDeviceId(),
+          ...(extra?.heredado ? { heredado: true } : {}),
         };
         set({
           shifts: st.shifts.map((s) => (s.id === open.id ? closed : s)),

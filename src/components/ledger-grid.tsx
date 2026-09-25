@@ -313,3 +313,89 @@ export function LedgerSheet({
     </div>
   );
 }
+
+/**
+ * La planilla de un día, en lista: para cargar los asientos en pantalla chica.
+ * Las mismas filas, las mismas fórmulas y el mismo guardado que la del mes.
+ */
+export function LedgerDia() {
+  const books = useImanStore((s) => s.books);
+  const sheets = useImanStore((s) => s.monthSheets);
+  const settings = useImanStore((s) => s.settings);
+  const setLedgerCell = useImanStore((s) => s.setLedgerCell);
+  const hoy = todayKey();
+  const [date, setDate] = useState(hoy);
+  const ym = date.slice(0, 7);
+  const allRows = useMemo(() => ledgerRowsForYm(ym, settings, sheets), [ym, settings, sheets]);
+  const rows = useMemo(() => visibleLedgerRows(allRows).filter((r) => r.kind !== "spacer"), [allRows]);
+  const head = formatDayHead(date);
+
+  function mover(dias: number) {
+    const d = new Date(`${date}T12:00:00`);
+    d.setDate(d.getDate() + dias);
+    const k = todayKey(d);
+    if (k <= hoy) setDate(k);
+  }
+
+  return (
+    <section className="rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-subtle">Asientos del día</p>
+          <p className="mt-0.5 font-display text-xl tracking-tight">
+            {head.wd} {head.n} · {monthTitle(ym)}
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-1">
+          <Button size="sm" variant="secondary" aria-label="Día anterior" onClick={() => mover(-1)}>
+            ‹
+          </Button>
+          <Button size="sm" variant="secondary" disabled={date === hoy} onClick={() => setDate(hoy)}>
+            Hoy
+          </Button>
+          <Button size="sm" variant="secondary" aria-label="Día siguiente" disabled={date >= hoy} onClick={() => mover(1)}>
+            ›
+          </Button>
+        </div>
+      </div>
+      <ul className="mt-3 divide-y divide-border rounded-lg bg-paper text-ink">
+        {rows.map((row) => {
+          const v = cellValue(books, date, row.id, allRows);
+          const title = rowTitle(row, settings.ledgerLabels) || "—";
+          const campo = `ld-dia-${row.id}`;
+          return (
+            <li key={`${row.id}:${date}`} className="flex items-center justify-between gap-3 px-3 py-2">
+              {row.kind === "formula" ? (
+                <>
+                  <span className="min-w-0 text-sm font-medium">{title}</span>
+                  <span className="num shrink-0 font-mono text-sm">{v ? formatARS(v) : "—"}</span>
+                </>
+              ) : (
+                <>
+                  <label htmlFor={campo} className="min-w-0 text-sm font-medium">
+                    {title}
+                  </label>
+                  <input
+                    id={campo}
+                    className="h-10 w-32 shrink-0 rounded-md bg-bg/10 px-2 text-right font-mono text-base text-ink outline-none ring-1 ring-ink/15 focus:ring-2 focus:ring-sage"
+                    inputMode="numeric"
+                    defaultValue={v ? formatMiles(v) : ""}
+                    onFocus={(e) => {
+                      e.currentTarget.value = v ? String(v) : "";
+                      e.currentTarget.select();
+                    }}
+                    onBlur={(e) => {
+                      const n = Number(e.target.value.replace(/[^\d]/g, "")) || 0;
+                      e.currentTarget.value = n ? formatMiles(n) : "";
+                      setLedgerCell(date, row.id, n);
+                    }}
+                  />
+                </>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}

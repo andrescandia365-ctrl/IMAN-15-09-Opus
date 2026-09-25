@@ -30,6 +30,7 @@ import { findByScan, productMatchesQuery, stockBreakdown } from "@/lib/pack";
 import { ticketTotal, useCashSnapshot, useImanStore } from "@/lib/store";
 import { sendOrQueueDeskTicket } from "@/lib/desk-outbox";
 import { useDeskInbox } from "@/lib/desk-listen";
+import { useRol, useTurnoAjeno } from "@/lib/caja-local";
 import { usePhoneUi } from "@/lib/device";
 import { useDragScroll } from "@/lib/drag-scroll";
 import type { PayMethod, Product, TicketLine } from "@/lib/types";
@@ -78,6 +79,7 @@ export function CounterView() {
   const openShift = useImanStore((s) => s.openShift);
 
   function openCash() {
+    if (!puedeCobrar || turnoAjeno) return;
     const r = openShift(cashFloat);
     if (!r.ok) toast.error(r.error);
     else toast.success("Caja abierta. Ya podés vender.");
@@ -93,7 +95,24 @@ export function CounterView() {
   const [busy, setBusy] = useState(false);
   const [sending, setSending] = useState(false);
   const charging = useRef(false);
-  const inbox = useDeskInbox(deskStoreId, !phone && Boolean(deskStoreId));
+  // El rol decide los permisos; el ancho, la disposición (ver rol.ts). Si esta
+  // PC deja de ser la caja con un ticket a medio cobrar, ese ticket se termina
+  // de cobrar: nunca se corta una venta en el medio.
+  const { rol, puedeCobrar } = useRol(deskStoreId);
+  // Un turno de otro aparato en la caja (toma forzada): se cierra en Caja
+  // contando la plata antes de cobrar en esta.
+  const turnoAjeno = useTurnoAjeno(deskStoreId) && rol === "caja";
+  const [gracia, setGracia] = useState(false);
+  const pudoCobrar = useRef(puedeCobrar);
+  useEffect(() => {
+    if (pudoCobrar.current && !puedeCobrar && useImanStore.getState().ticket.length) setGracia(true);
+    pudoCobrar.current = puedeCobrar;
+  }, [puedeCobrar]);
+  useEffect(() => {
+    if (!ticket.length) setGracia(false);
+  }, [ticket.length]);
+  const cobra = puedeCobrar || gracia;
+  const inbox = useDeskInbox(deskStoreId, puedeCobrar && Boolean(deskStoreId));
 
   const total = ticketTotal(ticket);
   const paid = Number(paidInput) || 0;
@@ -108,7 +127,7 @@ export function CounterView() {
   }, [products, categoryFilter, search]);
 
   function confirm() {
-    if (charging.current) return;
+    if (charging.current || !cobra || turnoAjeno) return;
     charging.current = true;
     setBusy(true);
     const r = checkout();
@@ -177,13 +196,13 @@ export function CounterView() {
     }
     setSending(true);
     try {
-      const result = await sendOrQueueDeskTicket({ storeId: deskStoreId, lines: ticket });
+      const result = await sendOrQueueDeskTicket({ storeId: deskStoreId, lines: ticket, payMethod, paid: null });
       clearTicket();
       setPayOpen(false);
       if (result === "queued") {
         toast("Sin red. El sobre espera. La venta en este aparato sigue.");
       } else {
-        toast.success("Ticket mandado a la PC");
+        toast.success("Ticket mandado a la caja");
       }
     } catch (err) {
       toast.error(errorText(err, "No se pudo enviar"));
@@ -389,12 +408,14 @@ export function CounterView() {
         paidInput={paidInput}
         setPaidInput={setPaidInput}
         change={change}
-        disabled={!ticket.length || !cash.open || busy}
+        disabled={!ticket.length || !cash.open || busy || turnoAjeno}
         onConfirm={confirm}
         onRefund={() => setRefundOpen(true)}
         noShift={!cash.open}
         cashFloat={cashFloat}
         onOpenShift={openCash}
+        piso={cobra ? undefined : { enviando: sending, onEnviar: () => void sendToDesk() }}
+        turnoAjeno={turnoAjeno}
       />
 
       <div className="lg:hidden flex gap-2">
@@ -455,12 +476,14 @@ export function CounterView() {
             paidInput={paidInput}
             setPaidInput={setPaidInput}
             change={change}
-            disabled={!ticket.length || !cash.open || busy}
+            disabled={!ticket.length || !cash.open || busy || turnoAjeno}
             onConfirm={confirm}
             onRefund={() => setRefundOpen(true)}
             noShift={!cash.open}
             cashFloat={cashFloat}
             onOpenShift={openCash}
+            piso={cobra ? undefined : { enviando: sending, onEnviar: () => void sendToDesk() }}
+            turnoAjeno={turnoAjeno}
           />
         </SheetContent>
       </Sheet>
@@ -633,6 +656,8 @@ function PayPanel({
   cashFloat,
   onOpenShift,
   className,
+  piso,
+  turnoAjeno = false,
 }: {
   total: number;
   payMethod: PayMethod;
@@ -647,6 +672,13 @@ function PayPanel({
   cashFloat: number;
   onOpenShift: () => void;
   className?: string;
+  /**
+   * Esta PC no es la caja del local: arma el ticket y lo manda a la caja con
+   * el medio de pago. Lo que pagó y el vuelto se cuentan en la caja.
+   */
+  piso?: { enviando: boolean; onEnviar: () => void };
+  /** El turno abierto es de otro aparato: se cierra en Caja antes de cobrar. */
+  turnoAjeno?: boolean;
 }) {
   const methods: { id: PayMethod; label: string; icon: typeof Banknote }[] = [
     { id: "efectivo", label: "Efectivo", icon: Banknote },
@@ -688,7 +720,11 @@ function PayPanel({
         })}
       </div>
 
-      {payMethod === "efectivo" ? (
+      {piso ? (
+        <p className="mt-4 rounded-md bg-bg px-3 py-3 text-sm text-muted">
+          Esta PC no es la caja del local. El ticket va a la caja con el medio de pago; ahí se cobra.
+        </p>
+      ) : payMethod === "efectivo" ? (
         <div className="mt-4">
           <label className="text-[11px] font-medium uppercase tracking-[0.08em] text-subtle">Recibir</label>
           <Input
@@ -728,7 +764,13 @@ function PayPanel({
         </p>
       )}
 
-      {noShift ? (
+      {turnoAjeno && !piso ? (
+        <p className="mt-4 rounded-md bg-warn/10 px-3 py-3 text-sm text-warn">
+          Hay un turno abierto de otro aparato. Cerralo en Caja contando la plata antes de cobrar.
+        </p>
+      ) : null}
+
+      {noShift && !piso ? (
         <div className="mt-4 rounded-md bg-warn/10 px-3 py-3">
           <p className="text-sm text-warn">La caja está cerrada. Abrila para vender.</p>
           <Button className="mt-2 w-full" variant="secondary" onClick={onOpenShift}>
@@ -740,19 +782,25 @@ function PayPanel({
         </div>
       ) : null}
 
-      <ShiftRail />
+      {piso ? null : <ShiftRail />}
       </div>
 
       <div className="mt-3 min-h-[100px] shrink-0">
-        <Button className="w-full" size="lg" disabled={disabled} onClick={onConfirm}>
-          Confirmar venta
-        </Button>
-        {onRefund ? (
+        {piso ? (
+          <Button className="w-full" size="lg" disabled={total <= 0 || piso.enviando} onClick={piso.onEnviar}>
+            {piso.enviando ? "Enviando…" : "Enviar a la caja"}
+          </Button>
+        ) : (
+          <Button className="w-full" size="lg" disabled={disabled} onClick={onConfirm}>
+            Confirmar venta
+          </Button>
+        )}
+        {onRefund && !piso && !turnoAjeno ? (
           <Button className="mt-2 w-full" variant="secondary" onClick={onRefund}>
             Devolver
           </Button>
         ) : null}
-        <p className="mt-2 hidden text-center text-[11px] text-subtle lg:block">Atajo F4</p>
+        {piso ? null : <p className="mt-2 hidden text-center text-[11px] text-subtle lg:block">Atajo F4</p>}
       </div>
     </section>
   );

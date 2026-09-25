@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
 import { Banknote, CreditCard, Info, Minus, Plus, ScanBarcode, Search, Smartphone, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { ProductPhoneDialog } from "@/components/phone-floor";
+import { ClienteRefundDialog } from "@/components/refunds";
 import { ScanStrip, type AvisoEscaneo } from "@/components/scan-strip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,16 +10,21 @@ import { sendOrQueueDeskTicket } from "@/lib/desk-outbox";
 import { useDragScroll } from "@/lib/drag-scroll";
 import { formatARS } from "@/lib/format";
 import { vibrar } from "@/lib/camara-lectora";
+import { useRol, useTurnoAjeno } from "@/lib/caja-local";
+import { useDeskInbox } from "@/lib/desk-listen";
+import { mergeTicketLines } from "@/lib/ticket-merge";
 import { crearLectorTeclado, FIN_SIN_ENTER_MS } from "@/lib/escaneo";
 import { findByScan } from "@/lib/pack";
 import { productoNuevo } from "@/lib/producto-nuevo";
 import { beep } from "@/lib/voice";
-import { ticketTotal, useImanStore } from "@/lib/store";
+import { ticketTotal, useCashSnapshot, useImanStore } from "@/lib/store";
 import type { PayMethod, Product, TicketLine } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { errorText } from "@/lib/errors";
 
 const PACK_TOAST = "Eso es el bulto. Sumá stock en Inventario o Pedidos.";
+/** Billetes de un toque para "Cuánto pagó", en el celu que es la caja. */
+const BILLETES = [1000, 10_000, 20_000];
 const SWIPE = 36;
 
 function matchesNameOrCode(p: Product, q: string) {
@@ -50,6 +56,31 @@ export function PhoneSellView() {
   const setPayMethod = useImanStore((s) => s.setPayMethod);
   const deskStoreId = useImanStore((s) => s.deskStoreId);
   const saveProduct = useImanStore((s) => s.saveProduct);
+  const paidInput = useImanStore((s) => s.paidInput);
+  const setPaidInput = useImanStore((s) => s.setPaidInput);
+  const checkout = useImanStore((s) => s.checkout);
+  const openShift = useImanStore((s) => s.openShift);
+  const cashFloat = useImanStore((s) => s.settings.cashFloat);
+  const replaceTicket = useImanStore((s) => s.replaceTicket);
+  const cash = useCashSnapshot();
+
+  // El rol decide si este celu cobra (ver rol.ts). Si deja de ser la caja con
+  // un ticket a medias, ese ticket se termina de cobrar: nunca en medio de una
+  // venta. "Confirmar venta", "Cuánto pagó" y el vuelto son solo de la caja:
+  // en un celu de piso invitaban a manejar plata donde no hay cajón.
+  const { rol, puedeCobrar } = useRol(deskStoreId);
+  const [gracia, setGracia] = useState(false);
+  const pudoCobrar = useRef(puedeCobrar);
+  useEffect(() => {
+    if (pudoCobrar.current && !puedeCobrar && useImanStore.getState().ticket.length) setGracia(true);
+    pudoCobrar.current = puedeCobrar;
+  }, [puedeCobrar]);
+  useEffect(() => {
+    if (!ticket.length) setGracia(false);
+  }, [ticket.length]);
+  const cobra = puedeCobrar || gracia;
+  const turnoAjeno = useTurnoAjeno(deskStoreId) && rol === "caja";
+  const inbox = useDeskInbox(deskStoreId, puedeCobrar && Boolean(deskStoreId));
 
   const [cam, setCam] = useState(false);
   const [ultimo, setUltimo] = useState<string | null>(null);
@@ -63,11 +94,14 @@ export function PhoneSellView() {
   const [asked, setAsked] = useState<Product | null>(null);
   const [payOpen, setPayOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [refundOpen, setRefundOpen] = useState(false);
   const catsRef = useDragScroll<HTMLDivElement>();
   const listRef = useDragScroll<HTMLDivElement>();
   const swipe = useRef<{ y: number; moved: boolean } | null>(null);
   const ignoreClick = useRef(false);
   const total = ticketTotal(ticket);
+  const paid = Number(paidInput) || 0;
+  const change = payMethod === "efectivo" ? Math.max(0, paid - total) : 0;
 
   const filtered = useMemo(() => {
     return products
@@ -267,7 +301,7 @@ export function PhoneSellView() {
       if (result === "queued") {
         toast("Sin red. El sobre espera. La venta en este aparato sigue.");
       } else {
-        toast.success("Ticket mandado a la PC");
+        toast.success(rol === "piso" ? "Ticket mandado a la caja" : "Ticket mandado a la PC");
       }
     } catch (err) {
       toast.error(errorText(err, "No se pudo enviar"));
@@ -317,11 +351,50 @@ export function PhoneSellView() {
 
   // El botón principal del ticket. Hoy manda el ticket a la PC; cuando el celu
   // cobre (paso c del plan del celu) cambia acá y nada más.
-  const accion = {
-    etiqueta: sending ? "Enviando…" : "Enviar a la PC",
-    deshabilitada: !ticket.length || sending,
-    hacer: () => void send(),
-  };
+  const accion = cobra
+    ? {
+        etiqueta: "Cobrar",
+        deshabilitada: !ticket.length,
+        hacer: () => {
+          setCam(false);
+          setPayOpen(true);
+        },
+      }
+    : {
+        etiqueta: sending ? "Enviando…" : rol === "piso" ? "Enviar a la caja" : "Enviar a la PC",
+        deshabilitada: !ticket.length || sending,
+        hacer: () => void send(),
+      };
+
+  /** La venta de verdad: checkout, con el turno abierto (ver store.ts). */
+  function confirmar() {
+    if (!cobra || turnoAjeno) return;
+    const r = checkout();
+    if (!r.ok) {
+      toast.error(r.error);
+      return;
+    }
+    setPayOpen(false);
+    setUltimo(null);
+    toast.success("Venta registrada");
+  }
+
+  function abrirCaja() {
+    if (!puedeCobrar) return;
+    const r = openShift(cashFloat);
+    if (!r.ok) toast.error(r.error);
+    else toast.success("Caja abierta. Ya podés cobrar.");
+  }
+
+  /** Un ticket de otro aparato: si ya hay uno armado, se suman; si no, entra entero. */
+  async function traerTicket() {
+    const t = await inbox.accept();
+    if (!t) return;
+    const cur = useImanStore.getState();
+    if (cur.ticket.length) replaceTicket(mergeTicketLines(cur.ticket, t.lines), { payMethod: cur.payMethod, paidInput: cur.paidInput });
+    else replaceTicket(t.lines, { payMethod: t.payMethod, paidInput: t.paid != null ? String(t.paid) : "" });
+    setPayOpen(true);
+  }
 
   const methods: { id: PayMethod; label: string; icon: typeof Banknote }[] = [
     { id: "efectivo", label: "Efectivo", icon: Banknote },
@@ -421,6 +494,22 @@ export function PhoneSellView() {
             payOpen ? "absolute inset-0 z-20" : "relative min-h-40 flex-1",
           )}
         >
+      {cobra && inbox.incoming ? (
+        <div className="flex shrink-0 items-center justify-between gap-2 rounded-xl bg-sage/15 px-3 py-2.5">
+          <p className="min-w-0 text-sm">
+            <span className="font-medium">Ticket de otro aparato</span>
+            <span className="block text-xs text-muted">{formatARS(inbox.incoming.total)}</span>
+          </p>
+          <div className="flex shrink-0 gap-1.5">
+            <Button size="sm" variant="ghost" onClick={() => inbox.dismiss()}>
+              Después
+            </Button>
+            <Button size="sm" variant="paper" onClick={() => void traerTicket()}>
+              Ponerlo acá
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <section
         data-ticket-sheet
         data-pay-open={payOpen ? "1" : "0"}
@@ -466,14 +555,30 @@ export function PhoneSellView() {
               </button>
             ) : cam ? null : (
               <div className="flex gap-1.5">
-                <button
-                  type="button"
-                  className="h-9 rounded-md border border-ink/25 px-3 text-sm font-medium text-ink disabled:opacity-40"
-                  disabled={!ticket.length}
-                  onClick={() => setPayOpen(true)}
-                >
-                  Ver ticket
-                </button>
+                {cobra ? (
+                  // Solo la caja devuelve plata: sale del cajón del turno abierto.
+                  puedeCobrar && !turnoAjeno ? (
+                    <button
+                      type="button"
+                      className="h-9 rounded-md border border-ink/25 px-3 text-sm font-medium text-ink"
+                      onClick={() => {
+                        if (!cash.open) toast.error("Abrí la caja para devolver plata");
+                        else setRefundOpen(true);
+                      }}
+                    >
+                      Devolver
+                    </button>
+                  ) : null
+                ) : (
+                  <button
+                    type="button"
+                    className="h-9 rounded-md border border-ink/25 px-3 text-sm font-medium text-ink disabled:opacity-40"
+                    disabled={!ticket.length}
+                    onClick={() => setPayOpen(true)}
+                  >
+                    Ver ticket
+                  </button>
+                )}
                 <button
                   type="button"
                   className="h-9 rounded-md bg-ink px-3 text-sm font-medium text-paper disabled:opacity-40"
@@ -508,8 +613,8 @@ export function PhoneSellView() {
 
       {payOpen ? (
       <div className="shrink-0 space-y-1.5">
-        {/* Cómo paga el cliente viaja con el ticket y la PC lo recibe cargado.
-            Lo que pagó y el vuelto no: se cuentan donde está el cajón. */}
+        {/* En un celu de piso, cómo paga viaja con el ticket y la caja lo recibe
+            cargado; lo que pagó y el vuelto se cuentan en la caja. */}
         <p className="px-1 text-[11px] uppercase tracking-[0.08em] text-subtle">Cómo paga</p>
         <div className="grid grid-cols-3 gap-1.5">
           {methods.map((m) => {
@@ -532,14 +637,65 @@ export function PhoneSellView() {
             );
           })}
         </div>
-        <Button className="w-full" size="lg" disabled={accion.deshabilitada} onClick={accion.hacer}>
-          {accion.etiqueta}
-        </Button>
+        {cobra && payMethod === "efectivo" ? (
+          <div className="space-y-1.5">
+            <div className="flex gap-1.5">
+              <label htmlFor="celu-pago" className="sr-only">
+                Cuánto pagó
+              </label>
+              <Input
+                id="celu-pago"
+                inputMode="numeric"
+                value={paidInput}
+                onChange={(e) => setPaidInput(e.target.value.replace(/[^\d]/g, ""))}
+                placeholder="Cuánto pagó"
+                className="h-11 min-w-0 flex-1 text-base font-medium"
+              />
+              {BILLETES.map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  className="h-11 shrink-0 rounded-md bg-elevated px-2 text-[11px] text-muted"
+                  onClick={() => setPaidInput(String(k))}
+                >
+                  {formatARS(k)}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-baseline justify-between px-1">
+              <span className="text-[11px] uppercase tracking-[0.08em] text-subtle">Vuelto</span>
+              <span className="num text-lg font-medium text-sage">{formatARS(change)}</span>
+            </div>
+          </div>
+        ) : null}
+        {cobra && turnoAjeno ? (
+          <p className="rounded-md bg-warn/10 px-3 py-2.5 text-sm text-warn">
+            Hay un turno abierto de otro aparato. Cerralo en Caja contando la plata antes de cobrar.
+          </p>
+        ) : null}
+        {cobra && !cash.open ? (
+          <div className="rounded-md bg-warn/10 px-3 py-2.5">
+            <p className="text-sm text-warn">La caja está cerrada. Abrila para cobrar.</p>
+            <Button className="mt-2 w-full" variant="secondary" onClick={abrirCaja} disabled={!puedeCobrar}>
+              Abrir caja con {formatARS(cashFloat)}
+            </Button>
+          </div>
+        ) : null}
+        {cobra ? (
+          <Button className="w-full" size="lg" disabled={!ticket.length || !cash.open || turnoAjeno} onClick={confirmar}>
+            Confirmar venta
+          </Button>
+        ) : (
+          <Button className="w-full" size="lg" disabled={accion.deshabilitada} onClick={accion.hacer}>
+            {accion.etiqueta}
+          </Button>
+        )}
       </div>
       ) : null}
         </div>
       </div>
 
+      <ClienteRefundDialog open={refundOpen} onOpenChange={setRefundOpen} />
       <ProductPhoneDialog
         open={Boolean(alta)}
         tab={altaTab}

@@ -6,9 +6,12 @@ import { LOCAL_TOO_HEAVY } from "@/lib/errors";
 import { startOfDay } from "@/lib/format";
 import { eventRows } from "@/lib/event-rows";
 import { blankKiosk, MAX_STORES } from "@/lib/kiosk-blank";
+import { esCobraEn, type CobraEn } from "@/lib/cobra-en";
 import { localeCapFor } from "@/lib/license";
 import type { KioskPayload, Sale } from "@/lib/types";
 import type { ImanEvent } from "@/lib/events";
+import type { CajaServidor } from "@/lib/rol";
+import { turnosAbiertos } from "@/lib/turno";
 
 export type StoreMeta = {
   id: string;
@@ -22,6 +25,8 @@ export type AccountBundle = {
   activeStoreId: string;
   payload: KioskPayload;
   rev: number;
+  /** Qué aparato es la caja del local activo (ver rol.ts). */
+  caja?: CajaServidor;
 };
 
 export type StoreRollup = {
@@ -123,17 +128,32 @@ function pack(payload: KioskPayload): { json: string; name: string } {
 async function readStore(
   userId: string,
   storeId: string,
-): Promise<{ payload: KioskPayload; rev: number } | null> {
+): Promise<{ payload: KioskPayload; rev: number; caja: CajaServidor } | null> {
   const sql = await getSql();
-  const rows = await sql<{ payload: unknown; rev: number | null }>`
-    select payload, coalesce(rev, 0) as rev from kiosk_store
+  const rows = await sql<{ payload: unknown; rev: number | null; caja_device: string | null; caja_ver: number | null }>`
+    select payload, coalesce(rev, 0) as rev, caja_device, coalesce(caja_ver, 0) as caja_ver from kiosk_store
     where user_id = ${userId} and store_id = ${storeId}
     limit 1
   `;
   if (!rows[0]) return null;
   const payload = parsePayload(rows[0].payload);
   if (!payload) return null;
-  return { payload, rev: Number(rows[0].rev ?? 0) };
+  return {
+    payload,
+    rev: Number(rows[0].rev ?? 0),
+    caja: { device: rows[0].caja_device ?? null, ver: Number(rows[0].caja_ver ?? 0) },
+  };
+}
+
+/** Qué aparato es la caja del local. Viaja en cada respuesta de la cinta. */
+async function leerCaja(userId: string, storeId: string): Promise<CajaServidor> {
+  const sql = await getSql();
+  const rows = await sql<{ caja_device: string | null; caja_ver: number | null }>`
+    select caja_device, coalesce(caja_ver, 0) as caja_ver from kiosk_store
+    where user_id = ${userId} and store_id = ${storeId}
+    limit 1
+  `;
+  return { device: rows[0]?.caja_device ?? null, ver: Number(rows[0]?.caja_ver ?? 0) };
 }
 
 async function readPayload(userId: string, storeId: string): Promise<KioskPayload | null> {
@@ -216,19 +236,26 @@ export const addStore = createServerFn({ method: "POST" })
 
 export const registerLocals = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((data: { locals: { name: string; alias: string; city?: string }[] }) => {
+  .validator((data: {
+    locals: { name: string; alias: string; city?: string; cobraEn?: CobraEn }[];
+    /** El aparato que registra, y si es un celu: "Solo tengo celular" lo deja como caja. */
+    device?: string;
+    esCelu?: boolean;
+  }) => {
     const locals = Array.isArray(data?.locals) ? data.locals : [];
     const cleaned = locals
       .map((l) => ({
         name: String(l?.name ?? "").trim().slice(0, 40),
         alias: String(l?.alias ?? "").trim().slice(0, 24),
         city: String(l?.city ?? "").trim().slice(0, 40),
+        cobraEn: esCobraEn(l?.cobraEn) ? l.cobraEn : null,
       }))
       .filter((l) => l.name)
       .map((l) => ({ ...l, alias: l.alias || l.name }));
     if (!cleaned.length) throw new Error("Registrá al menos un local");
     if (cleaned.length > MAX_STORES) throw new Error(`Máximo ${MAX_STORES} locales`);
-    return { locals: cleaned };
+    const device = String(data?.device ?? "").trim().slice(0, 64);
+    return { locals: cleaned, device, esCelu: data?.esCelu === true };
   })
   .handler(async ({ context, data }): Promise<AccountBundle> => {
     await migrateLegacy(context.userId);
@@ -251,9 +278,17 @@ export const registerLocals = createServerFn({ method: "POST" })
       const payload = blankKiosk(loc.name, "empty", loc.city);
       const saved = await saveActive(context.userId, storeId, payload);
       await sql`
-        update kiosk_store set alias = ${loc.alias}
+        update kiosk_store set alias = ${loc.alias}, cobra_en = ${loc.cobraEn}
         where user_id = ${context.userId} and store_id = ${storeId}
       `;
+      // Un local recién creado no tiene caja ni ventas: si el dueño dijo que
+      // solo tiene celular y lo registra desde el celu, ese celu es la caja.
+      if (loc.cobraEn === "celu" && data.esCelu && data.device) {
+        await sql`
+          update kiosk_store set caja_device = ${data.device}, caja_ver = 1, caja_desde = now()
+          where user_id = ${context.userId} and store_id = ${storeId} and caja_ver = 0
+        `;
+      }
       if (!firstId) {
         firstId = storeId;
         firstPayload = payload;
@@ -305,7 +340,7 @@ export const selectStore = createServerFn({ method: "POST" })
       on conflict (user_id) do update set active_store_id = excluded.active_store_id, updated_at = now()
     `;
     const stores = await listMeta(context.userId);
-    return { stores, activeStoreId: data.storeId, payload: row.payload, rev: row.rev };
+    return { stores, activeStoreId: data.storeId, payload: row.payload, rev: row.rev, caja: row.caja };
   });
 
 export const groupRollup = createServerFn({ method: "GET" })
@@ -448,7 +483,7 @@ async function migrateAndLoad(userId: string): Promise<AccountBundle | null> {
   if (!stores.some((s) => s.id === activeStoreId)) activeStoreId = stores[0]!.id;
   const row = await readStore(userId, activeStoreId);
   if (!row) return null;
-  return { stores, activeStoreId, payload: row.payload, rev: row.rev };
+  return { stores, activeStoreId, payload: row.payload, rev: row.rev, caja: row.caja };
 }
 
 type SaveKioskIn =
@@ -522,7 +557,8 @@ export const pushEvents = createServerFn({ method: "POST" })
     // ventas del local (ver event-rows.ts).
     const { text, params, accepted } = eventRows(context.userId, data.storeId, data.events);
     if (text) await sql.query(text, params);
-    return { ok: true as const, n: accepted.length, accepted };
+    // Quién es la caja: así un aparato se entera en la próxima subida si otro la tomó.
+    return { ok: true as const, n: accepted.length, accepted, caja: await leerCaja(context.userId, data.storeId) };
   });
 
 const PULL_PAGE = 500;
@@ -542,7 +578,7 @@ export const pullEvents = createServerFn({ method: "POST" })
     async ({
       context,
       data,
-    }): Promise<{ events: ImanEvent[]; cursor: number; hasMore: boolean }> => {
+    }): Promise<{ events: ImanEvent[]; cursor: number; hasMore: boolean; caja: CajaServidor }> => {
       const sql = await getSql();
       // Un aparato que viene de la versión vieja solo tiene la hora del último
       // pull. Se traduce a número de orden una vez, para no volver a aplicar
@@ -575,7 +611,148 @@ export const pullEvents = createServerFn({ method: "POST" })
         limit ${PULL_PAGE}
       `;
       const cursor = rows.reduce((m, r) => Math.max(m, Number(r.seq)), base);
-      return { events: rows.map(asEvent), cursor, hasMore: rows.length === PULL_PAGE };
+      return {
+        events: rows.map(asEvent),
+        cursor,
+        hasMore: rows.length === PULL_PAGE,
+        caja: await leerCaja(context.userId, data.storeId),
+      };
     },
   );
 
+
+export type TomarCajaResult =
+  /** `heredados`: turnos abiertos por otro aparato que quedan en esta caja (toma forzada). */
+  | { ok: true; caja: CajaServidor; heredados: string[] }
+  | { ok: false; caja: CajaServidor; error: string; turnoAbierto?: boolean };
+
+/**
+ * Este aparato pasa a ser la caja del local. Pide el PIN del dueño (el hash,
+ * contra el del local) y la versión de la caja que el aparato conoce: si otro
+ * la cambió en el medio, no pisa (como el `rev` de la fotocopia).
+ *
+ * Pasar la caja exige el turno cerrado: con un turno abierto de otro aparato
+ * (o uno de antes, que no dice de qué aparato es) no pasa. `forzar` es la toma
+ * cuando ese aparato se rompió o se perdió: pasa igual y devuelve los turnos
+ * que quedaron abiertos, que la caja nueva tiene que cerrar contando la plata.
+ */
+export const tomarCaja = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((data: { storeId: string; device: string; esperado: number; pinHash: string; forzar?: boolean }) => {
+    const storeId = String(data?.storeId ?? "").trim();
+    const device = String(data?.device ?? "").trim().slice(0, 64);
+    const pinHash = String(data?.pinHash ?? "").trim();
+    const esperado = Number(data?.esperado);
+    if (!storeId || !device) throw new Error("Falta el local o el aparato");
+    if (!Number.isInteger(esperado) || esperado < 0) throw new Error("Versión de la caja inválida");
+    return { storeId, device, esperado, pinHash, forzar: data?.forzar === true };
+  })
+  .handler(async ({ context, data }): Promise<TomarCajaResult> => {
+    const row = await readStore(context.userId, data.storeId);
+    if (!row) throw new Error("Ese local no existe");
+    const guardado = row.payload.settings?.ownerPinHash ?? "";
+    if (!guardado) {
+      return { ok: false, caja: row.caja, error: "Primero creá el PIN del dueño y tocá Sincronizar." };
+    }
+    if (guardado !== data.pinHash) {
+      return { ok: false, caja: row.caja, error: "El PIN no coincide con el del local." };
+    }
+    const sql = await getSql();
+    const eventos = await sql<{ body: unknown }>`
+      select body from kiosk_event
+      where user_id = ${context.userId} and store_id = ${data.storeId} and type = 'shift'
+      order by seq asc
+    `;
+    const abiertos = turnosAbiertos(
+      row.payload.shifts ?? [],
+      eventos.map((e) => (typeof e.body === "string" ? JSON.parse(e.body) : e.body) as { op?: string }),
+    );
+    const ajenos = abiertos.filter((t) => t.deviceId !== data.device);
+    if (ajenos.length && !data.forzar) {
+      return {
+        ok: false,
+        caja: row.caja,
+        turnoAbierto: true,
+        error: "Hay un turno abierto en otro aparato. Cerralo ahí antes de pasar la caja.",
+      };
+    }
+    const updated = await sql<{ caja_ver: number }>`
+      update kiosk_store
+      set caja_device = ${data.device}, caja_ver = caja_ver + 1, caja_desde = now()
+      where user_id = ${context.userId} and store_id = ${data.storeId} and caja_ver = ${data.esperado}
+      returning caja_ver
+    `;
+    const caja = await leerCaja(context.userId, data.storeId);
+    if (!updated[0]) {
+      return { ok: false, caja, error: "Otro aparato cambió la caja recién. Probá de nuevo." };
+    }
+    return { ok: true, caja, heredados: ajenos.map((t) => t.id) };
+  });
+
+/** Quién es la caja del local, sin nada más: lo consulta el aparato de vez en cuando. */
+export const verCaja = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((data: { storeId: string }) => {
+    if (!data?.storeId) throw new Error("Falta el local");
+    return { storeId: data.storeId };
+  })
+  .handler(async ({ context, data }): Promise<CajaServidor> => leerCaja(context.userId, data.storeId));
+
+/** Lo que contestó el dueño a "¿Dónde vas a cobrar?" para el local; null = todavía no. */
+export const verCobraEn = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((data: { storeId: string }) => {
+    if (!data?.storeId) throw new Error("Falta el local");
+    return { storeId: data.storeId };
+  })
+  .handler(async ({ context, data }): Promise<CobraEn | null> => {
+    const sql = await getSql();
+    const rows = await sql<{ cobra_en: string | null }>`
+      select cobra_en from kiosk_store where user_id = ${context.userId} and store_id = ${data.storeId} limit 1
+    `;
+    const v = rows[0]?.cobra_en;
+    return esCobraEn(v) ? v : null;
+  });
+
+/**
+ * Guarda la respuesta a "¿Dónde vas a cobrar?". "Solo tengo celular",
+ * contestado desde un celu, deja ese celu como caja, pero solo en un local que
+ * nunca tuvo caja y nunca vendió: en un local que ya vende, asignarla sola le
+ * cortaría la caja a otro aparato en medio del día. Ahí se pasa desde Dueño.
+ */
+export const responderCobraEn = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((data: { storeId: string; cobraEn: CobraEn; device: string; esCelu: boolean }) => {
+    if (!data?.storeId || !esCobraEn(data.cobraEn)) throw new Error("Respuesta inválida");
+    return {
+      storeId: data.storeId,
+      cobraEn: data.cobraEn,
+      device: String(data.device ?? "").trim().slice(0, 64),
+      esCelu: data.esCelu === true,
+    };
+  })
+  .handler(async ({ context, data }): Promise<{ caja: CajaServidor; asignada: boolean }> => {
+    const sql = await getSql();
+    await sql`
+      update kiosk_store set cobra_en = ${data.cobraEn}
+      where user_id = ${context.userId} and store_id = ${data.storeId}
+    `;
+    let asignada = false;
+    if (data.cobraEn === "celu" && data.esCelu && data.device) {
+      const row = await readStore(context.userId, data.storeId);
+      const vendio = await sql<{ n: number }>`
+        select count(*)::int as n from kiosk_event
+        where user_id = ${context.userId} and store_id = ${data.storeId} and type = 'sale'
+      `;
+      const nuevo = row && !row.payload.sales.length && !(row.payload.monthAggs ?? []).length && !Number(vendio[0]?.n ?? 0);
+      if (nuevo) {
+        const r = await sql<{ caja_ver: number }>`
+          update kiosk_store set caja_device = ${data.device}, caja_ver = 1, caja_desde = now()
+          where user_id = ${context.userId} and store_id = ${data.storeId} and caja_ver = 0
+          returning caja_ver
+        `;
+        asignada = Boolean(r[0]);
+      }
+    }
+    return { caja: await leerCaja(context.userId, data.storeId), asignada };
+  });

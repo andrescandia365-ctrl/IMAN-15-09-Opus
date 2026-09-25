@@ -117,6 +117,16 @@ try {
   }
   await page.getByText(/Mostrador|Vender/).first().waitFor({ timeout: 30_000 });
 
+  // La primera vez que se entra al local la app pregunta dónde se va a cobrar.
+  // Esta es una PC: computadora.
+  const donde = page.getByRole("radio", { name: "Computadora o notebook" });
+  for (let i = 0; i < 10 && !(await donde.isVisible().catch(() => false)); i += 1) await page.waitForTimeout(500);
+  if (await donde.isVisible().catch(() => false)) {
+    await donde.click();
+    await page.waitForTimeout(800);
+    hecho.push("contestó dónde se cobra: computadora");
+  }
+
   // 4. Clave del dueño.
   await page.getByLabel("Panel del dueño").click();
   await page.waitForTimeout(1500);

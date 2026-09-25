@@ -44,6 +44,10 @@ npm run typecheck && npm run check:auth && npm test && npm run lint
 No declares una tarea lista sin correr los cuatro. `check:auth` existe porque
 las invariantes de auth ya se rompieron antes.
 
+`npm run test:platform` **no** es parte de la verificación: sus 9 tests fallan
+por diseño en este repo. Son de la plataforma Grok (su plugin y su esquema de
+auth), no de IMAN. No se arreglan.
+
 **Los cuatro checks no prueban que la app funcione.** Una función que envuelve
 una API del navegador con contrato de corrientes (streams) no queda probada por
 un test unitario: los tests corren en Node, y Node y el navegador no se portan
@@ -93,10 +97,20 @@ del navegador vive en IndexedDB (`iman-local`) y no se borra con el restart.
 1. **El encargado vende y hace CAJA sin PIN.** Nunca le pidas PIN para vender.
 2. **El overlay de Dueño y la pestaña Dueño del celu piden PIN de dueño**
    (4–8 dígitos, SHA-256 de `iman.dueno.v1:{pin}`, desbloqueo por 20 min).
-3. **El celu revisa el local, no es una segunda caja.** Tabs: Vender, Stock,
-   Llegó, Vence, Dueño. **Sin caja, sin voz.** El celu marca Llegó y manda el
-   ticket a la PC; nunca cobra.
-4. **La PC es la caja:** Mostrador, Inventario, Pedidos, Caja, Dueño (logo).
+3. **Cada local tiene una sola caja, y la decide el servidor.** La caja puede
+   ser la PC, una tablet o un celu: es un **rol** del aparato, no el tamaño de
+   pantalla (`rol.ts`). El ancho decide la disposición; el rol, los permisos.
+   Pasar la caja pide red y PIN del dueño, y el turno cerrado (o la toma
+   forzada, si la caja de antes se rompió). Los demás aparatos son **de
+   piso**: arman el ticket y lo mandan a la caja con el medio de pago. **Un
+   aparato de piso nunca cobra, ni abre turno, ni muestra "Confirmar venta",
+   "Cuánto pagó" o el vuelto.** Sin voz en el celu, sea caja o piso. Un local
+   **sin caja anotada** se comporta como antes: cobra la pantalla de PC.
+4. **La caja cobra y lleva el turno.** En PC: Mostrador, Inventario, Pedidos,
+   Caja, Dueño (logo). En un celu que es la caja: Vender (con cobro) · Caja ·
+   Stock · Más (Llegó, Vence, Actualizar precios, Importar) · Dueño. El celu de
+   piso: Vender · Stock · Llegó · Vence · Dueño. En un turno de otro aparato
+   (toma forzada), la caja no cobra hasta cerrarlo contando la plata.
 5. **Nunca pisar el local con un blob JSON completo en cada scan.** Sync =
    cinta de eventos append-only + snapshot al tocar Sincronizar. La fotocopia va
    con `rev`: si otro aparato subió algo, junta y reintenta una vez en lugar de
@@ -187,6 +201,12 @@ igual. Si no queda escrito, vuelve a pasar.
 | `src/lib/sync.ts` | `syncNow` (botón), `pushQuiet` (la cinta sube sola), `pullCopy` |
 | `src/lib/kiosk.ts` | servidor: `pushEvents`, `pullEvents` |
 | `src/lib/pack.ts` | `findByScan`: packBarcode → packQty unidades; barcode → 1 |
+| `src/lib/rol.ts` | el rol del aparato (caja / piso / sin asignar) y `puedeCobrar`: el ancho decide la disposición, el rol los permisos |
+| `src/lib/caja-local.ts` | lo que el aparato sabe de la caja (`iman-caja:{local}`), `useRol`, `useVigilarCaja` |
+| `src/components/caja-del-local.tsx` | Dueño → Local: quién es la caja y "Pasar la caja a este aparato" (con toma forzada) |
+| `src/components/donde-cobras.tsx` | "¿Dónde vas a cobrar?" al entrar por primera vez a un local; "Solo tengo celular" deja la caja en ese celu si el local es nuevo |
+| `src/lib/cobra-en.ts` | las opciones de "¿Dónde vas a cobrar?" y los avisos (`AVISO_CELU_*`) |
+| `src/components/phone-mas.tsx` | la pestaña Más del celu que es la caja |
 | `src/lib/escaneo.ts` | lecturas por presencia, ritmo de la cámara, recorte visible, lector en modo teclado |
 | `src/lib/camara-lectora.ts` | el bucle de la cámara (BarcodeDetector) que usan las dos pantallas de escaneo |
 | `src/lib/ledger.ts` | filas de Asientos por tags, archivo del mes con las filas de entonces |
@@ -207,7 +227,7 @@ igual. Si no queda escrito, vuelve a pasar.
 - **`lot`:** un lote de vencimiento. Stock y lots no viajan en `product`.
 - **`settings`:** márgenes, redondeo, comisión MP, condición fiscal, filas de Asientos. PIN y logo solo si ese toque los cambió.
 - **`supplier`:** alta/edición/baja de proveedor (`op: save` o `delete`).
-- **`shift`:** apertura y cierre de turno (`op: open` / `close`). El cierre manda el turno entero y la fila de la planilla de ese día.
+- **`shift`:** apertura y cierre de turno (`op: open` / `close`). El cierre manda el turno entero y la fila de la planilla de ese día. El turno cerrado lleva `closedBy` (el aparato que hizo el arqueo) y `heredado` si se cerró después de forzar la toma de la caja: el historial de Caja marca "Lo cerró otro aparato" (`cerradoPorOtro`).
 - **`drop`:** retiro de caja a fuerte, con el `shiftId` del turno.
 - **`sale`** lleva el `shiftId` del turno en que se cobró y el `deviceId` del aparato que cobró (lo usa el plegado del mes). Las ventas sin `shiftId` (de antes, o de un aparato sin actualizar) entran al arqueo por hora (`ventasDelTurno`, `src/lib/turno.ts`).
 - Stock: solo `sale`, `stock`, `refund`, `receive`, `lot`.
@@ -279,6 +299,45 @@ NC real en PDF · login separado para el encargado · PowerSync/CRDT · React
 Native · backup automático de blob completo · impresora WebUSB clase 7 (hoy solo
 serial)
 
+### Pendientes
+
+La lista oficial: lo que no está acá se pierde. Una línea por ítem; al
+resolver uno, se saca de acá en el mismo commit.
+
+**Decisiones de Andres (sin código hasta que decida)**
+- Plan de licencias: cómo se cobra, la prueba gratis, y qué pasa cuando vence. Hoy la PC sigue vendiendo vencida por accidente (ver el NO TOCAR de abajo).
+- Control de planes en el Estudio: plan por cuenta, unificar `extra_seats` (vive en dos tablas), baja por cuenta. Con la baja, borrar la cuenta `qa-sync@iman.local`.
+- Supervisión de precios en el panel del dueño: definirla después de uso real.
+- Umbrales de color del botón Sincronizar: ajustarlos con uso real.
+
+**Producto**
+- Sugerencias en Inventario mucho más completas, con creación e impresión de afiches y carteles de promos y ofertas.
+- Revisar la lógica de vencimientos en celu y PC.
+- Ventas por día de meses viejos: el gráfico de El mes arma los días viejos con los turnos cerrados (se guardan 90). Para meses más viejos haría falta guardar el total por día en el resumen plegado, que es tocar el plegado. Andres: todavía no.
+
+**Técnico**
+- La cinta de eventos (`kiosk_event`) crece sin techo en el servidor.
+- Los lotes quedan distintos entre aparatos (`consumeFifo` corre en cada uno con su propio estado).
+- Dos cambios cruzados al mismo ítem terminan al revés entre aparatos.
+- Cambiar de local carga la fotocopia sin juntarla con la copia del aparato.
+- Los editores guardan campos que el usuario no tocó (pisan cambios de otro aparato).
+- La línea de borrados del registro de sincronización dura 2 días; soporte debería poder verla.
+- Aviso de React en modo demo: el Shell escribe en el store mientras dibuja (`setDeskStoreId`).
+- Tope de pull de 10.000 eventos (20 páginas): un aparato muy atrasado no baja todo de una.
+- Los multiplicadores 2,12 / 1,85 tienen el IVA cocinado adentro: no sirven para otros países.
+- **RIESGO:** las variables de Vercel en Preview apuntan a la base de producción: pushear una rama corre migraciones contra Neon.
+
+**A probar en un celu real (no se puede desde la máquina de desarrollo)**
+- El ícono en la pantalla de arranque (ya están los de 1024).
+- El escáner: el alto de la franja, los 3 cuadros de ausencia, la velocidad de la cámara.
+- El umbral de 40 ms entre teclas con un lector Bluetooth real.
+- iPhone: la cámara con la biblioteca `barcode-detector`, en pausa hasta probarlo.
+
+**Fuera del código**
+- Comprar el dominio antes del primer kiosco.
+- Las piezas de redes y el kit de marca para afiliados.
+- El texto de "Qué necesitás" en la landing.
+
 ### Plan del celu como caja
 
 Decisión de producto: IMAN tiene que servir en un local que solo tiene un
@@ -289,23 +348,24 @@ están escritas.
 
 - **a. Cada venta lleva su turno** y el arqueo cuenta por turno. Hecho.
 - **b. El rol de caja lo decide el servidor**, en lugar del ancho de
-  pantalla. Lo primero: la dirección del Sincronizar (`reviewCloud`).
+  pantalla. Hecho (rama `noche-celu-caja`): `rol.ts`, `caja-local.ts`,
+  `tomarCaja`.
+- **Mínimo de un kiosco solo celu.** Hecho con el c: cobrar, la caja (turno,
+  retiros, cierre), la planilla de un día, Actualizar precios, importar el
+  catálogo, y stock, alta, Llegó y Vence que ya estaban. Pestañas del celu que
+  es la caja: Vender · Caja · Stock · Más · Dueño.
+- **c. Cobro en el celu.** Hecho: "Confirmar venta", "Cuánto pagó" y el vuelto
+  están **solo en el aparato que es la caja**. En un celu de piso siguen
+  afuera, a propósito: "Confirmar venta" mostraba un cartel verde de venta sin
+  registrar nada y el encargado cobraba en efectivo sin registro; el vuelto se
+  calcula donde está la plata. **Un celu de piso nunca los muestra.**
+- **d. Pase de caja** de un aparato a otro. Hecho: pide el turno cerrado, o
+  la toma forzada con el turno heredado.
 
-  **Antes del c: definir el mínimo de un kiosco solo celu.** Necesita más que
-  cobrar. Hoy Pedidos, Actualizar precios y la importación del catálogo son
-  solo de PC; en el celu los precios del dueño son de solo lectura; y la
-  planilla necesita una vista de un día para pantalla chica. Antes de construir
-  el cobro hay que definir el mínimo con el que un kiosco solo celu funciona de
-  verdad.
-- **c. Cobro en el celu.** Con él vuelven "Confirmar venta", "Cuánto pagó" y
-  el vuelto, que se **sacaron a propósito** de Vender del celu. "Confirmar
-  venta" mostraba un cartel verde de venta sin registrar nada: el encargado
-  creía que había vendido y cobraba en efectivo sin registro. El vuelto se
-  calcula donde está la plata, el cajón de la PC; mostrarlo en el celu invita
-  a manejar efectivo donde no hay cajón. Hasta el paso c, el celu solo manda
-  el ticket con el medio de pago. **No volver a ponerlos antes.**
-- **d. Pase de caja** de un aparato a otro. La primera versión pide el turno
-  cerrado.
+"¿Dónde vas a cobrar?" (`donde-cobras.tsx`, `cobra-en.ts`): la respuesta de
+cada local queda en `kiosk_store.cobra_en` y el Estudio la cuenta. **Si cambia
+lo que el celu puede hacer, actualizar los `AVISO_CELU_*` de `cobra-en.ts` y
+avisarle a Andres para que cambie la landing.**
 
 El iPhone queda en pausa hasta poder probarlo en uno real.
 

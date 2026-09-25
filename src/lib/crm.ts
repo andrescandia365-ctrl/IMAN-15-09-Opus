@@ -154,6 +154,26 @@ export const listCrmUsers = createServerFn({ method: "GET" })
     return loadUsers();
   });
 
+export type CobraEnConteo = { computadora: number; tablet: number; celu: number; sinResponder: number };
+
+/** Cuántos locales eligieron cada opción de "¿Dónde vas a cobrar?". */
+export const countCobraEn = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }): Promise<CobraEnConteo> => {
+    await assertEstudio(context.userId);
+    const sql = await getSql();
+    const rows = await sql<{ cobra_en: string | null; n: number | string }>`
+      select cobra_en, count(*)::int as n from kiosk_store group by cobra_en
+    `;
+    const out: CobraEnConteo = { computadora: 0, tablet: 0, celu: 0, sinResponder: 0 };
+    for (const r of rows) {
+      const n = Number(r.n) || 0;
+      if (r.cobra_en === "computadora" || r.cobra_en === "tablet" || r.cobra_en === "celu") out[r.cobra_en] += n;
+      else out.sinResponder += n;
+    }
+    return out;
+  });
+
 export const grantExtraLocal = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((data: { userId: string }) => {
