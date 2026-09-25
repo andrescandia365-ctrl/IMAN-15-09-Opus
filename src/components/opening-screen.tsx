@@ -34,17 +34,15 @@ export function OpeningScreen({
         aria-hidden="true"
       >
         <g className="iman-open-field" fill="none" stroke="#8eae8a" strokeLinecap="round">
-          <path pathLength={1} d="M 34,44 C 26,20 84,20 76,44" strokeWidth={5} />
-          <path pathLength={1} d="M 34,68 C 26,92 84,92 76,68" strokeWidth={5} />
+          <path d="M 34,44 C 26,20 84,20 76,44" strokeWidth={5} />
+          <path d="M 34,68 C 26,92 84,92 76,68" strokeWidth={5} />
           <path
-            pathLength={1}
             className="iman-open-outer"
             d="M 32,42 C 18,4 92,4 78,42"
             strokeWidth={3.5}
             opacity={0.6}
           />
           <path
-            pathLength={1}
             className="iman-open-outer"
             d="M 32,70 C 18,106 92,106 78,70"
             strokeWidth={3.5}

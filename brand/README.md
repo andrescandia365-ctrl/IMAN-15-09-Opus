@@ -54,12 +54,27 @@ hoja. Los archivos del conjunto ya vienen con ese margen incluido.
 - La palabra es **Fraunces 500** (tamaño óptico 36) y va **convertida a
   trazos**: se ve igual en cualquier máquina, tenga o no la letra instalada.
 
+## En movimiento
+
+La pantalla de apertura de la app arma el símbolo (`src/styles.css`,
+`.iman-open`): el láser revela las barras de arriba hacia abajo, y después
+nacen las líneas de campo.
+
+**Las líneas de campo siempre se forman de adentro hacia afuera, nunca de
+izquierda a derecha.** Como un campo magnético de verdad: cada línea arranca
+aplastada contra el bloque de barras y se abre hacia arriba y hacia abajo a la
+vez. Primero las de adentro, después las de afuera. Cualquier pulso o
+respiración también va hacia afuera. Vale para la app, videos, historias y
+cualquier pieza animada.
+
 ## Lo que no se hace
 
 - **Estirar** ni aplastar: se agranda o se achica parejo.
 - **Cambiar los colores**, ni siquiera "parecidos". Para fondo claro está el
   negativo; para una tinta, las de un color.
 - **Rotar** ni inclinar.
+- **Dibujar las líneas de campo de un extremo al otro** en una animación:
+  nacen del imán hacia afuera.
 - Ponerlo **sobre fotos o fondos sin contraste**. Si el fondo es cargado, va
   sobre su cuadrado de tinta o de papel.
 - Escribir la palabra IMAN con otra letra al lado del símbolo: para eso están
