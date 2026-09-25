@@ -6,6 +6,8 @@ import {
   catalogSaveEvent,
   keepStockAndLots,
   receiveBody,
+  markupChanges,
+  MAPAS_DE_MARGEN,
   settingsEventPatch,
   type ShiftBookPatch,
 } from "./events";
@@ -776,7 +778,11 @@ export const useImanStore = create<ImanState>()((set, get) => ({
       saveSettings: (patch) => {
         const st = get();
         set({ settings: { ...st.settings, ...patch } });
+        // Los márgenes viajan uno por rubro (evento markup), nunca la lista
+        // entera: con la lista, un aparato atrasado pisaba lo que otro cambió.
+        for (const m of markupChanges(st.settings, patch)) recordEvent("markup", m);
         const body = settingsEventPatch(patch, st.settings);
+        for (const key of MAPAS_DE_MARGEN) delete body[key];
         if (Object.keys(body).length) recordEvent("settings", body);
       },
 

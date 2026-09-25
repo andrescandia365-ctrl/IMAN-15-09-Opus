@@ -25,6 +25,7 @@ import {
 } from "@/lib/pricing";
 import { usePhoneUi } from "@/lib/device";
 import { useImanStore } from "@/lib/store";
+import { syncNow } from "@/lib/sync";
 import type { Category, Product, Settings, Supplier } from "@/lib/types";
 import { cn, uid } from "@/lib/utils";
 
@@ -86,10 +87,13 @@ export function OwnerPrices() {
   const saveCategory = useImanStore((s) => s.saveCategory);
   const setProductPrices = useImanStore((s) => s.setProductPrices);
   const applyCategoryPrices = useImanStore((s) => s.applyCategoryPrices);
-  // En el celu se mira y no se toca: sus ajustes no viajan todavía (siguen siendo
-  // los de su primer arranque), y alinear desde ahí repreciaba la góndola con
-  // márgenes viejos. Márgenes y precios se cambian en la caja.
-  const soloVer = usePhoneUi();
+  // El celu tiene los mismos controles que la PC, acomodados para pantalla
+  // angosta. Los ajustes viajan por la cinta (settings, y los márgenes en
+  // markup) y alinear sincroniza antes: ya no repreciaba con márgenes viejos.
+  const celu = usePhoneUi();
+  const storeId = useImanStore((s) => s.deskStoreId);
+  // Alinear y confirmar el cruce reescriben la góndola: antes se sincroniza.
+  const [alDia, setAlDia] = useState(false);
 
   const [factorX, setFactorX] = useState<Record<string, string>>(() =>
     Object.fromEntries(categories.map((c) => [c.id, shownFactor(c.id, c.name, "X", settings.priceMarkups, settings)])),
@@ -124,9 +128,39 @@ export function OwnerPrices() {
     setAviso((desalineados.get(id) ?? 0) > 0 ? id : null);
   }
 
-  function alinear(ids: string[]) {
+  /**
+   * Alinear y confirmar el cruce reescriben la góndola entera: se hacen con los
+   * márgenes al día. Pide red y sincroniza justo antes, en PC y en celu; así
+   * un margen que otro aparato cambió entra antes de calcular. Cambiar un
+   * margen no lo pide: viaja solo (evento markup) y no pisa nada.
+   */
+  async function margenesAlDia(): Promise<boolean> {
+    if (!navigator.onLine) {
+      toast.error("Sin red. Alinear cambia los precios de góndola: se hace con internet, así usa los márgenes al día.");
+      return false;
+    }
+    setAlDia(true);
+    try {
+      const r = await syncNow(storeId);
+      if (!r.ok) {
+        toast.error("No se pudo sincronizar. Probá de nuevo: los precios se cambian con los márgenes al día.");
+        return false;
+      }
+      return true;
+    } catch {
+      toast.error("No se pudo sincronizar. Probá de nuevo: los precios se cambian con los márgenes al día.");
+      return false;
+    } finally {
+      setAlDia(false);
+    }
+  }
+
+  /** `null` = todos los rubros: después de sincronizar, los desalineados pueden ser otros. */
+  async function alinear(ids: string[] | null) {
+    if (alDia || !(await margenesAlDia())) return;
+    const lista = ids ?? useImanStore.getState().categories.map((c) => c.id);
     let n = 0;
-    for (const id of ids) n += applyCategoryPrices(id);
+    for (const id of lista) n += applyCategoryPrices(id);
     setAviso(null);
     toast.success(n ? `${n} ${n === 1 ? "precio" : "precios"} de góndola` : "Sin cambios");
   }
@@ -239,16 +273,46 @@ export function OwnerPrices() {
     setPreviewed(false);
   }
 
-  function confirm() {
+  /** Lo que el cruce va a pisar, calculado con el estado de ahora (no el de la última vez que se dibujó). */
+  function cruceAhora(): { id: string; price: number }[] {
+    const st = useImanStore.getState();
+    const sup = st.suppliers.find((s) => s.id === supId) ?? null;
+    const stStep = st.settings.roundStep && st.settings.roundStep > 0 ? st.settings.roundStep : 100;
+    return priceRows({
+      products: st.products,
+      categories: st.categories,
+      suppliers: st.suppliers,
+      settings: st.settings,
+      step: stStep,
+      mode: st.settings.roundMode === "down" ? "down" : "up",
+      category: st.categories.find((c) => c.id === catId) ?? null,
+      supplier: sup,
+      invoice: sup ? invoiceOf(sup) : null,
+      picked: productIds.map((id) => st.products.find((p) => p.id === id)).filter((p): p is Product => Boolean(p)),
+    })
+      .filter((r) => r.next != null && r.next !== r.p.price)
+      .map((r) => ({ id: r.p.id, price: r.next! }));
+  }
+
+  async function confirm() {
     if (!previewed) {
       toast.error("Listá el cruce primero");
       return;
     }
-    const updates = ready
-      .filter((r) => r.next != null)
-      .map((r) => ({ id: r.p.id, price: r.next! }));
-    if (!updates.length) {
+    const antes = cruceAhora();
+    if (!antes.length) {
       toast.error("Nada para pisar. Falta costo por unidad o el precio ya está.");
+      return;
+    }
+    if (alDia || !(await margenesAlDia())) return;
+    // Si otro aparato cambió márgenes, costos o precios, la lista que se miró
+    // ya no es la que se aplicaría: se muestra la nueva y se confirma de nuevo.
+    const updates = cruceAhora();
+    const igual =
+      updates.length === antes.length &&
+      updates.every((u, i) => u.id === antes[i]!.id && u.price === antes[i]!.price);
+    if (!igual) {
+      toast.error("Cambiaron márgenes o costos desde otro aparato. Revisá la lista y confirmá de nuevo.");
       return;
     }
     const n = setProductPrices(updates);
@@ -304,7 +368,7 @@ export function OwnerPrices() {
               <ProductPick
                 products={products.filter((p) => p.active)}
                 selected={productIds}
-                sheet={soloVer}
+                sheet={celu}
                 onChange={(ids) => {
                   setProductIds(ids);
                   if (ids.length) setSupId("");
@@ -318,11 +382,9 @@ export function OwnerPrices() {
               <Button variant="secondary" onClick={listar}>
                 Listar
               </Button>
-              {soloVer ? null : (
-                <Button disabled={!previewed || !ready.length} onClick={confirm}>
-                  Confirmar {ready.length ? `(${ready.length})` : ""}
-                </Button>
-              )}
+              <Button disabled={!previewed || !ready.length || alDia} onClick={() => void confirm()}>
+                {alDia ? "Sincronizando…" : `Confirmar ${ready.length ? `(${ready.length})` : ""}`}
+              </Button>
               <Button variant="secondary" onClick={limpiar}>
                 Limpiar
               </Button>
@@ -371,45 +433,215 @@ export function OwnerPrices() {
         </div>
   );
 
-  if (soloVer) {
+  // Lo mismo en PC y en celu; cambia cómo se acomoda. Todo detrás del PIN del dueño.
+  const redondeo = (
+    <div>
+      <p className="text-xs font-medium uppercase tracking-[0.14em] text-subtle">Redondeo</p>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {STEPS.map((s) => (
+          <button
+            key={s}
+            type="button"
+            className={cn(
+              "h-11 min-w-14 rounded-full px-3 text-sm font-medium",
+              step === s ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
+            )}
+            onClick={() => saveSettings({ roundStep: s })}
+          >
+            {s}
+          </button>
+        ))}
+        <Input
+          className="h-11 w-20"
+          inputMode="numeric"
+          value={String(step)}
+          onChange={(e) => saveSettings({ roundStep: Math.max(1, Number(e.target.value) || 100) })}
+          aria-label="Paso de redondeo"
+        />
+        <button
+          type="button"
+          className={cn(
+            "h-11 flex-1 rounded-full px-3 text-sm font-medium",
+            mode === "up" ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
+          )}
+          onClick={() => saveSettings({ roundMode: "up" })}
+        >
+          Arriba
+        </button>
+        <button
+          type="button"
+          className={cn(
+            "h-11 flex-1 rounded-full px-3 text-sm font-medium",
+            mode === "down" ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
+          )}
+          onClick={() => saveSettings({ roundMode: "down" })}
+        >
+          Abajo
+        </button>
+      </div>
+    </div>
+  );
+
+  const alinearTodo =
+    totalDesalineados > 0 ? (
+    <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg bg-warn/10 px-3 py-2">
+      <p className="text-sm">
+        <span className="num font-medium text-warn">{totalDesalineados}</span>{" "}
+        {totalDesalineados === 1
+          ? "producto tiene el precio desalineado del margen"
+          : "productos tienen el precio desalineado del margen"}
+      </p>
+      <Button
+        size="sm"
+        className="ml-auto"
+        disabled={alDia}
+        onClick={() => void alinear(null)}
+      >
+        {alDia ? "Sincronizando…" : "Alinear todo"}
+      </Button>
+    </div>
+    ) : null;
+
+  function margenInput(c: Category, fac: "X" | "A") {
+    return fac === "X" ? (
+      <Input
+        className="ml-auto h-10 w-[4.5rem] text-right"
+        inputMode="decimal"
+        value={factorX[c.id] ?? shownFactor(c.id, c.name, "X", settings.priceMarkups, settings)}
+        onFocus={(e) => (alEntrar.current = { id: c.id, raw: e.target.value })}
+        onBlur={(e) => alSalirDelMargen(c.id, e.target.value)}
+        onChange={(e) => {
+          setFactorX((m) => ({ ...m, [c.id]: e.target.value }));
+          persistMap("priceMarkups", c.id, e.target.value);
+        }}
+        placeholder="—"
+      />
+    ) : (
+      <Input
+        className="ml-auto h-10 w-[4.5rem] text-right"
+        inputMode="decimal"
+        value={factorA[c.id] ?? shownFactor(c.id, c.name, "A", settings.priceMarkupsA, settings)}
+        onFocus={(e) => (alEntrar.current = { id: c.id, raw: e.target.value })}
+        onBlur={(e) => alSalirDelMargen(c.id, e.target.value)}
+        onChange={(e) => {
+          setFactorA((m) => ({ ...m, [c.id]: e.target.value }));
+          persistMap("priceMarkupsA", c.id, e.target.value);
+        }}
+        placeholder="—"
+      />
+    );
+  }
+
+  function alinearRubro(c: Category, n: number) {
+    return n > 0 ? (
+      <span className="inline-flex items-center gap-1.5">
+        <span className="num text-sm font-medium text-warn">{n}</span>
+        <button
+          type="button"
+          aria-label={`Alinear ${c.name}`}
+          disabled={alDia}
+          className="h-8 rounded-full bg-elevated px-2.5 text-xs font-medium text-muted hover:text-fg disabled:opacity-50"
+          onClick={() => void alinear([c.id])}
+        >
+          Alinear
+        </button>
+      </span>
+    ) : null;
+  }
+
+  function avisoDelMargen(c: Category, n: number) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 rounded-lg bg-warn/10 px-3 py-2">
+        <p className="text-sm">
+          Este margen cambia <span className="num font-medium">{n}</span>{" "}
+          {n === 1 ? "precio" : "precios"} de góndola.
+        </p>
+        <div className="ml-auto flex gap-2">
+          <Button size="sm" disabled={alDia} onClick={() => void alinear([c.id])}>
+            Aplicar ahora
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => setAviso(null)}>
+            Después
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const agregarRubro = (
+    <Button
+      variant="secondary"
+      size="sm"
+      className="shrink-0 self-start"
+      onClick={() => setAddOpen(true)}
+    >
+      Agregar rubro
+    </Button>
+  );
+
+  const agregarDialogo = (
+    <Dialog open={addOpen} onOpenChange={setAddOpen}>
+      <DialogContent className="w-[min(36rem,calc(100vw-48px))] max-w-none p-6">
+        <DialogHeader className="mb-4 pr-10">
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-subtle">Precios</p>
+          <DialogTitle className="mt-1 font-display text-3xl leading-none tracking-tight">
+            Agregar rubro
+          </DialogTitle>
+          <DialogDescription>Un factor se copia a Fac A y Fac X si dejás uno vacío.</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_5.5rem_5.5rem]">
+          <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Juguetes" />
+          <Input inputMode="decimal" value={newX} onChange={(e) => setNewX(e.target.value)} placeholder="X 1.45" />
+          <Input inputMode="decimal" value={newA} onChange={(e) => setNewA(e.target.value)} placeholder="A 1.45" />
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setAddOpen(false)}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={() => {
+              if (addRubro()) setAddOpen(false);
+            }}
+          >
+            Agregar
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+
+  if (celu) {
+    // Pantalla angosta: una columna, cada rubro con sus dos márgenes abajo del
+    // nombre, y el cruce en una hoja aparte.
     return (
       <div className="flex flex-col gap-4 pb-4">
-        <p className="rounded-lg bg-elevated px-3 py-2 text-sm text-muted">
-          Desde el celu se mira. Márgenes y precios se cambian en la caja.
-        </p>
-        <div>
-          <p className="text-xs font-medium uppercase tracking-[0.14em] text-subtle">Redondeo</p>
-          <p className="mt-1.5 text-sm">
-            De a <span className="num">{step}</span> · {mode === "down" ? "abajo" : "arriba"}
-          </p>
-        </div>
+        {redondeo}
+        {alinearTodo}
         <ul>
           {categories.map((c) => {
             const n = desalineados.get(c.id) ?? 0;
-            const x = factorX[c.id] ?? shownFactor(c.id, c.name, "X", settings.priceMarkups, settings);
-            const a = factorA[c.id] ?? shownFactor(c.id, c.name, "A", settings.priceMarkupsA, settings);
             return (
               <li key={c.id} className="border-t border-border py-3">
-                <p className="font-medium">{c.name}</p>
-                <dl className="mt-2 grid grid-cols-2 gap-3">
-                  <div>
-                    <dt className="text-[11px] font-medium uppercase tracking-[0.08em] text-subtle">Fac X</dt>
-                    <dd className="num mt-0.5 text-xl font-medium">{x || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-[11px] font-medium uppercase tracking-[0.08em] text-subtle">Fac A</dt>
-                    <dd className="num mt-0.5 text-xl font-medium">{a || "—"}</dd>
-                  </div>
-                </dl>
-                {n > 0 ? (
-                  <p className="mt-1.5 text-xs text-warn">
-                    {n} {n === 1 ? "precio desalineado" : "precios desalineados"}
-                  </p>
-                ) : null}
+                <div className="flex min-h-8 items-center justify-between gap-2">
+                  <p className="font-medium">{c.name}</p>
+                  {alinearRubro(c, n)}
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-3">
+                  <label className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-subtle">Fac X</span>
+                    {margenInput(c, "X")}
+                  </label>
+                  <label className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-subtle">Fac A</span>
+                    {margenInput(c, "A")}
+                  </label>
+                </div>
+                {aviso === c.id && n > 0 ? <div className="mt-2">{avisoDelMargen(c, n)}</div> : null}
               </li>
             );
           })}
         </ul>
+        {agregarRubro}
         <Button className="w-full" onClick={() => setCruceOpen(true)}>
           Listar precios
         </Button>
@@ -418,11 +650,12 @@ export function OwnerPrices() {
             <DialogHeader className="mb-5 shrink-0 pr-10">
               <p className="text-xs font-medium uppercase tracking-[0.16em] text-subtle">Precios</p>
               <DialogTitle className="mt-1 font-display text-3xl leading-none tracking-tight">Listar</DialogTitle>
-              <DialogDescription>Se mira. Confirmar el recálculo es en la caja.</DialogDescription>
+              <DialogDescription>Rubro y proveedor, o productos sueltos. Confirmar cambia la góndola.</DialogDescription>
             </DialogHeader>
             {cruce}
           </DialogContent>
         </Dialog>
+        {agregarDialogo}
       </div>
     );
   }
@@ -431,73 +664,8 @@ export function OwnerPrices() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[minmax(17rem,0.9fr)_minmax(0,1.2fr)]">
         <div className="flex min-h-0 flex-col gap-3 overflow-hidden">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-[0.14em] text-subtle">Redondeo</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {STEPS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  className={cn(
-                    "h-11 min-w-14 rounded-full px-3 text-sm font-medium",
-                    step === s ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
-                  )}
-                  disabled={soloVer}
-                  onClick={() => saveSettings({ roundStep: s })}
-                >
-                  {s}
-                </button>
-              ))}
-              <Input
-                className="h-11 w-20"
-                inputMode="numeric"
-                value={String(step)}
-                readOnly={soloVer}
-                onChange={(e) => saveSettings({ roundStep: Math.max(1, Number(e.target.value) || 100) })}
-                aria-label="Paso de redondeo"
-              />
-              <button
-                type="button"
-                className={cn(
-                  "h-11 flex-1 rounded-full px-3 text-sm font-medium",
-                  mode === "up" ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
-                )}
-                disabled={soloVer}
-                onClick={() => saveSettings({ roundMode: "up" })}
-              >
-                Arriba
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  "h-11 flex-1 rounded-full px-3 text-sm font-medium",
-                  mode === "down" ? "bg-accent text-accent-fg" : "bg-elevated text-muted hover:text-fg",
-                )}
-                disabled={soloVer}
-                onClick={() => saveSettings({ roundMode: "down" })}
-              >
-                Abajo
-              </button>
-            </div>
-          </div>
-          {totalDesalineados > 0 ? (
-            <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg bg-warn/10 px-3 py-2">
-              <p className="text-sm">
-                <span className="num font-medium text-warn">{totalDesalineados}</span>{" "}
-                {totalDesalineados === 1
-                  ? "producto tiene el precio desalineado del margen"
-                  : "productos tienen el precio desalineado del margen"}
-              </p>
-              <Button
-                size="sm"
-                className="ml-auto"
-                disabled={soloVer}
-                onClick={() => alinear(categories.filter((c) => (desalineados.get(c.id) ?? 0) > 0).map((c) => c.id))}
-              >
-                Alinear todo
-              </Button>
-            </div>
-          ) : null}
+          {redondeo}
+          {alinearTodo}
           <div className="min-h-0 flex-1 overflow-y-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-surface">
@@ -517,70 +685,14 @@ export function OwnerPrices() {
                     <Fragment key={c.id}>
                       <tr className="border-t border-border">
                         <td className="py-1.5 pr-2 font-medium">{c.name}</td>
-                        <td className="py-1.5">
-                          <Input
-                            className="ml-auto h-10 w-[4.5rem] text-right"
-                            inputMode="decimal"
-                            value={factorX[c.id] ?? shownFactor(c.id, c.name, "X", settings.priceMarkups, settings)}
-                            readOnly={soloVer}
-                            onFocus={(e) => (alEntrar.current = { id: c.id, raw: e.target.value })}
-                            onBlur={(e) => alSalirDelMargen(c.id, e.target.value)}
-                            onChange={(e) => {
-                              setFactorX((m) => ({ ...m, [c.id]: e.target.value }));
-                              persistMap("priceMarkups", c.id, e.target.value);
-                            }}
-                            placeholder="—"
-                          />
-                        </td>
-                        <td className="py-1.5 pl-2">
-                          <Input
-                            className="ml-auto h-10 w-[4.5rem] text-right"
-                            inputMode="decimal"
-                            value={factorA[c.id] ?? shownFactor(c.id, c.name, "A", settings.priceMarkupsA, settings)}
-                            readOnly={soloVer}
-                            onFocus={(e) => (alEntrar.current = { id: c.id, raw: e.target.value })}
-                            onBlur={(e) => alSalirDelMargen(c.id, e.target.value)}
-                            onChange={(e) => {
-                              setFactorA((m) => ({ ...m, [c.id]: e.target.value }));
-                              persistMap("priceMarkupsA", c.id, e.target.value);
-                            }}
-                            placeholder="—"
-                          />
-                        </td>
-                        <td className="py-1.5 pl-2 text-right">
-                          {n > 0 ? (
-                            <span className="inline-flex items-center gap-1.5">
-                              <span className="num text-sm font-medium text-warn">{n}</span>
-                              <button
-                                type="button"
-                                aria-label={`Alinear ${c.name}`}
-                                disabled={soloVer}
-                                className="h-8 rounded-full bg-elevated px-2.5 text-xs font-medium text-muted hover:text-fg disabled:opacity-50"
-                                onClick={() => alinear([c.id])}
-                              >
-                                Alinear
-                              </button>
-                            </span>
-                          ) : null}
-                        </td>
+                        <td className="py-1.5">{margenInput(c, "X")}</td>
+                        <td className="py-1.5 pl-2">{margenInput(c, "A")}</td>
+                        <td className="py-1.5 pl-2 text-right">{alinearRubro(c, n)}</td>
                       </tr>
                       {aviso === c.id && n > 0 ? (
                         <tr>
                           <td colSpan={4} className="pb-2">
-                            <div className="flex flex-wrap items-center gap-2 rounded-lg bg-warn/10 px-3 py-2">
-                              <p className="text-sm">
-                                Este margen cambia <span className="num font-medium">{n}</span>{" "}
-                                {n === 1 ? "precio" : "precios"} de góndola.
-                              </p>
-                              <div className="ml-auto flex gap-2">
-                                <Button size="sm" disabled={soloVer} onClick={() => alinear([c.id])}>
-                                  Aplicar ahora
-                                </Button>
-                                <Button size="sm" variant="secondary" onClick={() => setAviso(null)}>
-                                  Después
-                                </Button>
-                              </div>
-                            </div>
+                            {avisoDelMargen(c, n)}
                           </td>
                         </tr>
                       ) : null}
@@ -590,48 +702,12 @@ export function OwnerPrices() {
               </tbody>
             </table>
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="shrink-0 self-start"
-            disabled={soloVer}
-            onClick={() => setAddOpen(true)}
-          >
-            Agregar rubro
-          </Button>
+          {agregarRubro}
         </div>
 
         <div className="flex min-h-0 flex-col overflow-hidden rounded-lg bg-bg p-3">{cruce}</div>
       </div>
-
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="w-[min(36rem,calc(100vw-48px))] max-w-none p-6">
-          <DialogHeader className="mb-4 pr-10">
-            <p className="text-xs font-medium uppercase tracking-[0.16em] text-subtle">Precios</p>
-            <DialogTitle className="mt-1 font-display text-3xl leading-none tracking-tight">
-              Agregar rubro
-            </DialogTitle>
-            <DialogDescription>Un factor se copia a Fac A y Fac X si dejás uno vacío.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_5.5rem_5.5rem]">
-            <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Juguetes" />
-            <Input inputMode="decimal" value={newX} onChange={(e) => setNewX(e.target.value)} placeholder="X 1.45" />
-            <Input inputMode="decimal" value={newA} onChange={(e) => setNewA(e.target.value)} placeholder="A 1.45" />
-          </div>
-          <div className="mt-4 flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setAddOpen(false)}>
-              Cancelar
-            </Button>
-            <Button
-              onClick={() => {
-                if (addRubro()) setAddOpen(false);
-              }}
-            >
-              Agregar
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {agregarDialogo}
     </div>
   );
 }
