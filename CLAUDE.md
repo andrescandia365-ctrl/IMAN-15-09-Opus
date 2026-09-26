@@ -205,6 +205,8 @@ igual. Si no queda escrito, vuelve a pasar.
 | `src/lib/caja-local.ts` | lo que el aparato sabe de la caja (`iman-caja:{local}`), `useRol`, `useVigilarCaja` |
 | `src/components/caja-del-local.tsx` | arriba de todo del panel del dueño (PC y celu): "La caja de este local:" en palabras y "Pasar la caja a este aparato" (con toma forzada) |
 | `src/lib/sugerencias.ts` + `src/components/sugerencias-panel.tsx` | por vencer y no se venden, por plata en riesgo; plazos por local (`sugVence`, `sugSinVenta`) |
+| `src/lib/carteles.ts` + `cartel-salida.ts` + `cartel-fuentes.ts` | carteles: 7 plantillas en SVG (con versión ahorro de tinta y paletas fijas), imprimir A4 y media hoja, imagen vertical 1080×1920 para compartir. Letras en `public/fuentes/` (libres, con sus licencias), guardadas por el service worker y cargadas solo en el editor |
+| `src/components/cartel-editor.tsx` + `carteles-celu.tsx` | el armador: Inventario → Sugerencias en la PC, Stock → Carteles en el celu. Una plantilla de promo no se imprime hasta activar la promo en la caja (PIN del dueño) |
 | `src/lib/fotos.ts` + `src/components/foto-producto.tsx` | fotos de producto para los carteles: SOLO en el aparato (base aparte `iman-fotos`, nunca en la copia ni en la cinta), cuadradas de 800 px, recortadas al centro |
 | `src/lib/promos.ts` | promos: vigencia, `cobrar` (lo que cobra la caja), carteles por sacar, evento y juntar |
 | `src/components/owner-promos.tsx` + `promo-ticket.tsx` | Dueño → Promos (crear, terminar; precio a mano con el costo al lado); promos en el ticket y el aviso de sacar el cartel |
@@ -342,6 +344,8 @@ resolver uno, se saca de acá en el mismo commit.
 - El umbral de 40 ms entre teclas con un lector Bluetooth real.
 - iPhone: la cámara con la biblioteca `barcode-detector`, en pausa hasta probarlo.
 - La foto del producto con la cámara del celu ("Sacar foto"): orientación y recorte con una foto de verdad.
+- Compartir el cartel desde el celu: que abra Compartir y llegue a WhatsApp (en la máquina de desarrollo solo se prueba la descarga).
+- Imprimir los carteles en una impresora de verdad, A4 y media hoja.
 
 **Fuera del código**
 - Comprar el dominio antes del primer kiosco.

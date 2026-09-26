@@ -24,6 +24,7 @@ import type { Product } from "@/lib/types";
 import { faltaRubro, productoNuevo, recordarRubro } from "@/lib/producto-nuevo";
 import { cn } from "@/lib/utils";
 import { FotoProducto } from "@/components/foto-producto";
+import { CartelesCelu } from "@/components/carteles-celu";
 
 export function PhoneStockView() {
   const products = useImanStore((s) => s.products);
@@ -50,6 +51,8 @@ export function PhoneStockView() {
       .sort((a, b) => a.name.localeCompare(b.name, "es"));
   }, [products, q, low]);
 
+  const [carteles, setCarteles] = useState(false);
+
   function startNew(barcode = "") {
     setDraft(productoNuevo(barcode));
     setTab("rapida");
@@ -58,12 +61,16 @@ export function PhoneStockView() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
+      {carteles ? <CartelesCelu onClose={() => setCarteles(false)} /> : null}
       <div className="flex items-start justify-between gap-2">
         <div>
           <h2 className="font-display text-2xl tracking-tight">Stock</h2>
           <p className="text-xs text-subtle">Unidades o packs. El camión se recibe en Llegó.</p>
         </div>
         <div className="flex gap-1">
+          <Button size="sm" variant="secondary" onClick={() => setCarteles(true)}>
+            Carteles
+          </Button>
           <Button size="sm" variant="secondary" onClick={() => setEdit((v) => !v)}>
             {edit ? "Listo" : "Editar"}
           </Button>

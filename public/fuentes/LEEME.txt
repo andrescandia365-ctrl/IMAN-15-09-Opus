@@ -1,0 +1,9 @@
+Letras para los carteles de IMAN (Inventario → Sugerencias → carteles).
+Todas de licencia libre, bajadas de Google Fonts, solo el juego "latin"
+(incluye ñ y tildes). Van dentro de la app para imprimir sin internet y se
+cargan recién al abrir el editor de carteles.
+
+SIL Open Font License 1.1: Anton, Bebas Neue, Archivo Black, Alfa Slab One,
+Bowlby One, Bungee, Passion One (700), Titan One, Oswald (700).
+Apache 2.0: Luckiest Guy.
+La licencia de cada una está en LICENCIA-<nombre>.txt.

@@ -42,6 +42,7 @@ import { useImanStore } from "@/lib/store";
 import type { Category, Product } from "@/lib/types";
 import { cn, uid } from "@/lib/utils";
 import { SugerenciasPanel } from "@/components/sugerencias-panel";
+import { CartelEditor, type CartelPreset } from "@/components/cartel-editor";
 import { FotoProducto } from "@/components/foto-producto";
 
 type Filter = "all" | "cats" | "suggest" | "low" | "expire";
@@ -401,6 +402,7 @@ function SuggestBoard({
   orders: Parameters<typeof buildSuggestions>[0]["orders"];
   onOffer: (p: Product) => void;
 }) {
+  const [preset, setPreset] = useState<CartelPreset | null>(null);
   // Ofertas y vencimientos los cubre el panel de arriba (carteles y promos de verdad).
   const tips = buildSuggestions({ products, sales, suppliers, orders }).filter(
     (t) => t.kind !== "offer" && t.kind !== "shift",
@@ -409,9 +411,14 @@ function SuggestBoard({
     <div className="space-y-3 p-2">
       <p className="font-display text-2xl tracking-tight">Sugerencias</p>
       <p className="text-sm text-muted">
-        Lo que la góndola ya sabe y el Excel no. Qué promocionar, pedidos, lo que se está yendo.
+        Carteles de ofertas, combos y avisos. Al costado, qué conviene promocionar.
       </p>
-      <SugerenciasPanel />
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(20rem,1fr)]">
+        <div className="rounded-xl bg-elevated/40 p-3">
+          <CartelEditor preset={preset} />
+        </div>
+        <SugerenciasPanel columna onArmar={(s) => setPreset({ plantilla: s.plantilla, productId: s.productId, n: Date.now() })} />
+      </div>
       {tips.length === 0 ? (
         <p className="rounded-lg bg-elevated px-4 py-8 text-center text-sm text-subtle">
           Sin pedidos ni faltantes para avisar hoy.

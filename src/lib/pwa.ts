@@ -1,3 +1,4 @@
+import { FUENTES } from "@/lib/cartel-fuentes";
 function collectShellUrls(): string[] {
   const urls = new Set<string>([
     "/",
@@ -6,6 +7,9 @@ function collectShellUrls(): string[] {
     "/icon-192.png",
     "/icon-512.png",
     window.location.href,
+    // Las letras de los carteles: quedan guardadas para imprimir sin internet,
+    // sin cargarse en la página hasta abrir el editor.
+    ...FUENTES.map((f) => f.archivo),
   ]);
   document.querySelectorAll("script[src], link[href], img[src]").forEach((el) => {
     const v = el.getAttribute("src") || el.getAttribute("href");

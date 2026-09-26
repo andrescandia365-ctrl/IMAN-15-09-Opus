@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
  * un toque y quedan guardados por local. Lo que ya está en una promo vigente
  * no aparece.
  */
-export function SugerenciasPanel({ onArmar }: { onArmar?: (s: Sugerencia) => void }) {
+export function SugerenciasPanel({ onArmar, columna }: { onArmar?: (s: Sugerencia) => void; columna?: boolean }) {
   const products = useImanStore((s) => s.products);
   const promos = useImanStore((s) => s.promos);
   const lastSold = useImanStore((s) => s.lastSold);
@@ -44,7 +44,7 @@ export function SugerenciasPanel({ onArmar }: { onArmar?: (s: Sugerencia) => voi
   }, [products, promos, lastSold, desde, hoy, vence, sinVenta]);
 
   return (
-    <div className="grid gap-3 lg:grid-cols-2">
+    <div className={cn("grid gap-3", !columna && "lg:grid-cols-2")}>
       <Lista
         titulo="Por vencer"
         sugiere="Liquidación"
