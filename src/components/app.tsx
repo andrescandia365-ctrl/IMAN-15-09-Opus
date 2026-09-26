@@ -245,9 +245,21 @@ export function App() {
         .catch(() => {});
     }
 
-    const hasFloor = Boolean(readFloorLockSync());
+    const floorLock = readFloorLockSync();
+    const hasFloor = Boolean(floorLock);
     const remoteWork = Promise.all([loadAccount(), getMyAccess()]);
-    const remote = hasFloor ? withTimeout(remoteWork, 4000) : remoteWork;
+    // Con candado, el servidor tiene 4 s: el aparato abre con su copia y no la
+    // pisa tarde. Pero si el aparato no tiene copia, el servidor es lo único
+    // que hay: se lo espera aunque tarde (Neon despertando a primera hora).
+    // Cortarlo a los 4 s dejaba "No pude abrir el local" y Reintentar volvía a
+    // cortar. Si no contesta nunca, a los 12 s avisa igual (openFailed).
+    const remote = hasFloor
+      ? withTimeout(remoteWork, 4000).catch(async (err: unknown) => {
+          const esTiempo = err instanceof Error && err.message === "timeout";
+          if (esTiempo && floorLock && !localHasCopy(await loadLocalSnapshot(floorLock.storeId))) return remoteWork;
+          throw err;
+        })
+      : remoteWork;
     void remote
       .then(async ([account, loaded]) => {
         if (cancelled) return;

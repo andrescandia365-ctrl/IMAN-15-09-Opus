@@ -15,7 +15,13 @@
  *   3. en ningún cuadro se ve otro local que no sea el de verdad;
  *   4. el aparato tiene el candado pero no la copia: la baja del servidor;
  *   5. tampoco hay servidor: avisa "No pude abrir el local", no abre otra cosa,
- *      y Reintentar abre cuando vuelve.
+ *      y Reintentar abre cuando vuelve, aunque vuelva lento (Neon despertando
+ *      a primera hora): durante el Reintentar el servidor tarda SERVIDOR_LENTO_MS,
+ *      más que el corte de 4 s que tiene el arranque con candado.
+ *
+ * Nada espera un tiempo fijo a que el servidor conteste: se espera a que se
+ * vea el local, con tope. Una espera fija fallaba al azar con el servidor
+ * recién levantado, y un test que falla a veces enseña a ignorarlo.
  *
  * Las subidas se atajan acá y no llegan al servidor.
  *
@@ -45,6 +51,8 @@ if (motivo) {
 }
 const CUENTA = { email: "prueba@iman.local", clave: "prueba1234", local: "Kiosco de Prueba" };
 const DEMORA_MS = 2500;
+const SERVIDOR_LENTO_MS = 6000;
+const TOPE_MS = 30_000;
 
 /** Corre en la página antes que la app. */
 function ganchos(demora) {
@@ -168,11 +176,13 @@ const browser = await chromium.launch();
 const ctx = await browser.newContext({ ...devices["Pixel 5"] });
 const subidas = [];
 let sinServidor = false;
+let servidorLento = false;
 await ctx.route("**/_serverFn/**", async (route) => {
   if (sinServidor) {
     await route.abort();
     return;
   }
+  if (servidorLento) await new Promise((r) => setTimeout(r, SERVIDOR_LENTO_MS));
   const body = route.request().postData() ?? "";
   if (/"gzip"/.test(body)) {
     const nombre = nombreSubido(body);
@@ -187,6 +197,29 @@ await ctx.route("**/_serverFn/**", async (route) => {
 
 const page = await ctx.newPage();
 const fallas = [];
+
+/** Espera a que se pinte el local, con tope: no depende de cuánto tarde el servidor. */
+async function esperarLocal(tope = TOPE_MS) {
+  const desde = Date.now();
+  while (Date.now() - desde < tope) {
+    const nombres = await page.evaluate(() => window.__nombres ?? []).catch(() => []);
+    if (nombres.some((n) => n.includes(CUENTA.local))) return true;
+    await page.waitForTimeout(250);
+  }
+  return false;
+}
+
+/** La copia del local en IndexedDB, cuando llega (se guarda después de abrir). */
+async function esperarCopia(key, tope = 10_000) {
+  const desde = Date.now();
+  let copia = null;
+  while (Date.now() - desde < tope) {
+    copia = await leer(page, key);
+    if (copia?.settings?.name === CUENTA.local) return copia;
+    await page.waitForTimeout(250);
+  }
+  return copia;
+}
 
 try {
   // Entrar y abrir el local una vez: deja el candado, la copia y el rev.
@@ -258,10 +291,9 @@ try {
   ctx.__caso = "sin-copia";
   await borrar(page, snapKey);
   await page.reload();
-  await page.waitForTimeout(8000);
+  if (!(await esperarLocal())) fallas.push("[sin-copia] no abrió el local desde el servidor");
   const nombres4 = await page.evaluate(() => window.__nombres);
-  const bajada = await leer(page, snapKey);
-  if (!nombres4.some((n) => n.includes(CUENTA.local))) fallas.push("[sin-copia] no abrió el local desde el servidor");
+  const bajada = await esperarCopia(snapKey);
   for (const n of nombres4) {
     if (!n.includes(CUENTA.local)) fallas.push(`[sin-copia] se pintó un encabezado que no es el local: "${n.slice(0, 60)}"`);
   }
@@ -277,11 +309,12 @@ try {
   });
   const nombres5 = await page.evaluate(() => window.__nombres);
   if (nombres5.length) fallas.push(`[sin-nada] abrió un local igual: "${nombres5[0].slice(0, 60)}"`);
+  // Vuelve el servidor, pero lento: el Reintentar de primera hora.
   sinServidor = false;
+  servidorLento = true;
   await page.getByRole("button", { name: "Reintentar" }).click().catch(() => {});
-  await page.waitForTimeout(8000);
-  const nombres6 = await page.evaluate(() => window.__nombres);
-  if (!nombres6.some((n) => n.includes(CUENTA.local))) fallas.push("[sin-nada] Reintentar no abrió el local");
+  if (!(await esperarLocal())) fallas.push("[sin-nada] Reintentar no abrió el local con el servidor lento");
+  servidorLento = false;
 
   console.log(`subidas atajadas: ${subidas.length ? subidas.map((s) => `${s.caso}:"${s.nombre}"`).join(", ") : "ninguna"}`);
 } catch (err) {
