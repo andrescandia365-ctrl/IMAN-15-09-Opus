@@ -195,7 +195,7 @@ igual. Si no queda escrito, vuelve a pasar.
 | Archivo | Qué es |
 |---|---|
 | `src/lib/store.ts` | Zustand. `checkout`, `refundCliente`, `refundProveedor`, `saveProduct`, `adjustStock`, `setLedgerCell`, `receiveOrder`, `saveSettings`, `saveSupplier`, `importCatalog`, `applyCategoryPrices` — **todos llaman `recordEvent`** |
-| `src/lib/events.ts` | `applyEvent`. Tipos: sale, stock, ledger, product, product.delete, refund, receive, order, staff, category, lot, supplier, settings, price, shift, drop, markup |
+| `src/lib/events.ts` | `applyEvent`. Tipos: sale, stock, ledger, product, product.delete, refund, receive, order, staff, category, lot, supplier, settings, price, shift, drop, markup, promo |
 | `src/lib/local-db.ts` | IndexedDB, `recordEvent`, `pendingEvents`, `markAcked`, `editQueue` |
 | `src/lib/event-queue.ts` | cola local pura (append/ack/trim/chunk) + tests |
 | `src/lib/sync.ts` | `syncNow` (botón), `pushQuiet` (la cinta sube sola), `pullCopy` |
@@ -204,6 +204,8 @@ igual. Si no queda escrito, vuelve a pasar.
 | `src/lib/rol.ts` | el rol del aparato (caja / piso / sin asignar) y `puedeCobrar`: el ancho decide la disposición, el rol los permisos |
 | `src/lib/caja-local.ts` | lo que el aparato sabe de la caja (`iman-caja:{local}`), `useRol`, `useVigilarCaja` |
 | `src/components/caja-del-local.tsx` | arriba de todo del panel del dueño (PC y celu): "La caja de este local:" en palabras y "Pasar la caja a este aparato" (con toma forzada) |
+| `src/lib/promos.ts` | promos: vigencia, `cobrar` (lo que cobra la caja), carteles por sacar, evento y juntar |
+| `src/components/owner-promos.tsx` + `promo-ticket.tsx` | Dueño → Promos (crear, terminar; precio a mano con el costo al lado); promos en el ticket y el aviso de sacar el cartel |
 | `src/lib/tipo-aparato.ts` | qué tipo de aparato es la caja (celu, tablet, computadora) y cómo se le dice al dueño; lo guarda `kiosk_store.caja_tipo` al tomar la caja |
 | `src/components/donde-cobras.tsx` | "¿Dónde vas a cobrar?" al entrar por primera vez a un local; "Solo tengo celular" deja la caja en ese celu si el local es nuevo |
 | `src/lib/cobra-en.ts` | las opciones de "¿Dónde vas a cobrar?" y los avisos (`AVISO_CELU_*`) |
@@ -232,6 +234,8 @@ igual. Si no queda escrito, vuelve a pasar.
 - **`shift`:** apertura y cierre de turno (`op: open` / `close`). El cierre manda el turno entero y la fila de la planilla de ese día. El turno cerrado lleva `closedBy` (el aparato que hizo el arqueo) y `heredado` si se cerró después de forzar la toma de la caja: el historial de Caja marca "Lo cerró otro aparato" (`cerradoPorOtro`).
 - **`drop`:** retiro de caja a fuerte, con el `shiftId` del turno.
 - **`sale`** lleva el `shiftId` del turno en que se cobró y el `deviceId` del aparato que cobró (lo usa el plegado del mes). Las ventas sin `shiftId` (de antes, o de un aparato sin actualizar) entran al arqueo por hora (`ventasDelTurno`, `src/lib/turno.ts`).
+- **`promo`:** una promo entera (Oferta, Liquidación, 2x1, Combo), en alta, cambio, terminada o con el cartel sacado. Gana la de `updatedAt` más nuevo. Va **aparte del precio de góndola**: alinear y Actualizar precios no la tocan, y al terminar el precio vuelve solo. Tipo nuevo: un aparato sin actualizar la ignora y cobra el precio de góndola. Al juntar la fotocopia, las promos se juntan de los dos lados (`juntarPromos` en `mergePayload`).
+- **Cobro con promos** (`promos.ts cobrar`): se calcula al cobrar, con las vigentes ese día local; nunca cobra más que la góndola. En la venta, **un producto va siempre en un solo renglón** (el `sale` que aplica otro aparato junta cantidades por producto: dos renglones del mismo producto descontarían mal el stock). El renglón en promo lleva `promoId`, `listPrice` y `promoQty`; en un combo, `price` es su parte del precio del combo. El resumen del mes suma `promo` y `promoAhorro`; el turno cerrado, `promoTotal` y `promoAhorro`.
 - Stock: solo `sale`, `stock`, `refund`, `receive`, `lot`.
 
 `importCatalog` ya no es un `setState` masivo: emite `category`/`product` (o `price` si solo cambió la plata) uno por uno. Producto que ya existe: nombre, código, precio, costo, rubro. **El stock de la planilla se ignora.**

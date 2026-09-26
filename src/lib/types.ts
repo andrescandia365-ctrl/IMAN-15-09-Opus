@@ -50,6 +50,17 @@ export interface SaleItem {
    * guardadas antes de esto no lo traen.
    */
   cost?: number;
+  /**
+   * Se cobró (entero o en parte) con una promo: cuál, y el precio de góndola
+   * por unidad de ese momento. `price` es lo que se cobró por unidad (en un
+   * combo, su parte del precio del combo, que puede tener centavos). Un
+   * producto va siempre en un solo renglón: el `sale` que aplica otro aparato
+   * junta las cantidades por producto.
+   */
+  promoId?: string;
+  listPrice?: number;
+  /** Cuántas de las `qty` unidades entraron en la promo (en un 2x1 con tres, dos). */
+  promoQty?: number;
 }
 
 export interface Sale {
@@ -99,6 +110,9 @@ export interface CashShift {
   virtualCel?: number | null;
   virtualSube?: number | null;
   safeCount?: number | null;
+  /** Al cerrar: lo que se cobró en promo en el turno y lo que se descontó. */
+  promoTotal?: number;
+  promoAhorro?: number;
 }
 
 export interface CashDrop {
@@ -321,6 +335,9 @@ export interface MonthAgg {
   devoluciones?: number;
   /** Lo que había costado la mercadería que volvió a la góndola. */
   devolucionesCogs?: number;
+  /** Lo que se cobró en promo ese mes, y lo que se descontó. Ausente = plegado antes de las promos. */
+  promo?: number;
+  promoAhorro?: number;
 }
 
 export interface MonthSheet {
@@ -362,6 +379,37 @@ export interface StaffPayout {
   note: string;
 }
 
+/** Oferta y Liquidación: un precio por unidad. 2x1 y Combo: un precio por el conjunto. */
+export type PromoKind = "oferta" | "liquidacion" | "2x1" | "combo";
+
+/**
+ * Una promo que cobra la caja mientras está vigente (ver promos.ts). Va aparte
+ * del precio de góndola: alinear y Actualizar precios no la tocan, y al
+ * terminar el precio vuelve solo. Viaja en el evento `promo`, entera.
+ */
+export interface Promo {
+  id: string;
+  kind: PromoKind;
+  /** Para el ticket y la lista: "Combo merienda". */
+  name: string;
+  /** Qué lleva. Oferta y Liquidación: un producto, 1. 2x1: un producto, 2. */
+  items: { productId: string; qty: number }[];
+  /** Lo pone el kiosquero a mano. Por unidad (Oferta, Liquidación) o por el conjunto (2x1, Combo). */
+  price: number;
+  /** Días locales (todayKey), los dos incluidos. */
+  from: string;
+  until: string;
+  /** El cartel dice "Hasta agotar stock". */
+  hastaAgotarStock?: boolean;
+  /** Terminada a mano antes de la fecha. */
+  endedAt?: string | null;
+  /** Alguien confirmó que sacó el cartel después de terminada. */
+  retiradaAt?: string | null;
+  createdAt: string;
+  /** El más nuevo gana entre dos aparatos. */
+  updatedAt: string;
+}
+
 export interface KioskPayload {
   products: Product[];
   categories: Category[];
@@ -391,6 +439,7 @@ export interface KioskPayload {
   mark?: CopyMark;
   /** Productos borrados: no se reviven con eventos viejos (ver deleted.ts). */
   deletedProducts?: DeletedProduct[];
+  promos?: Promo[];
 }
 
 export interface DeletedProduct {

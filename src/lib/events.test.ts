@@ -21,6 +21,7 @@ import type {
   Category,
   KioskPayload,
   Product,
+  Promo,
   Refund,
   Sale,
   Settings,
@@ -998,4 +999,40 @@ test("markup mal formado no toca nada", () => {
   const antes = conMargenes({ "c-bebidas": 1.5 });
   const next = applyEvent(antes, { id: "m", type: "markup", at: "", deviceId: "d", storeId: "s1", body: { fac: "X", value: 2 } });
   assert.equal(next, antes);
+});
+
+// ── Promos (evento promo, fotocopia) ────────────────────────────────────────
+
+function unaPromo(id: string, updatedAt: string, over: Partial<Promo> = {}): Promo {
+  return {
+    id,
+    kind: "oferta",
+    name: id,
+    items: [{ productId: "p1", qty: 1 }],
+    price: 800,
+    from: "2026-09-20",
+    until: "2026-09-30",
+    createdAt: "2026-09-20T10:00:00.000Z",
+    updatedAt,
+    ...over,
+  };
+}
+
+test("el evento promo entra en la copia y pulledPatch la guarda", () => {
+  const p = unaPromo("of1", "2026-09-20T10:00:00.000Z");
+  const next = applyEvent(payload(), { id: "e1", type: "promo", at: "2026-09-20T10:00:00.000Z", deviceId: "dev_celu", storeId: "s1", body: { promo: p } as unknown as ImanEvent["body"] });
+  assert.equal(next.promos?.length, 1);
+  assert.equal(pulledPatch(next).promos[0]?.id, "of1");
+});
+
+test("una fotocopia vieja no revive una promo que este aparato ya terminó, y trae las del otro", () => {
+  const terminada = unaPromo("of1", "2026-09-22T10:00:00.000Z", { endedAt: "2026-09-22T10:00:00.000Z" });
+  const local = payload({ products: [conLotes()], promos: [terminada] });
+  const server = payload({
+    products: [conLotes()],
+    promos: [unaPromo("of1", "2026-09-20T10:00:00.000Z"), unaPromo("combo-pc", "2026-09-21T10:00:00.000Z", { kind: "combo" })],
+  });
+  const juntos = mergeBackup(server, local);
+  assert.deepEqual(juntos.promos?.map((p) => p.id).sort(), ["combo-pc", "of1"]);
+  assert.equal(juntos.promos?.find((p) => p.id === "of1")?.endedAt, "2026-09-22T10:00:00.000Z");
 });

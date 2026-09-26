@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useMemo } from "react";
 import { catalogImportTouched } from "./catalog-io";
 import { prunePayload, setEsteAparato } from "./cap";
 import { todayKey } from "./format";
@@ -32,6 +33,7 @@ import { addLot, consumeFifo } from "./lots";
 import { marginPrice, repriceProducts, unitCost } from "./pricing";
 import { costoAGondola, planReceive } from "./receive-cost";
 import { devolucionesDelTurno, ventasDelTurno } from "./turno";
+import { cobrar, promoDeVenta, type Cobro } from "./promos";
 import { uid } from "./utils";
 import {
   CATEGORY_SUPPLIER,
@@ -52,6 +54,7 @@ import type {
   OrderDraft,
   PayMethod,
   Product,
+  Promo,
   Refund,
   Sale,
   Settings,
@@ -93,6 +96,10 @@ export interface ImanState {
   roster: RosterSlot[];
   payouts: StaffPayout[];
   deletedProducts: DeletedProduct[];
+  /** Las promos que cobra la caja (ver promos.ts). */
+  promos: Promo[];
+  /** Guarda una promo entera (alta, cambio, terminarla, cartel sacado) y la manda por la cinta. */
+  savePromo: (p: Promo) => void;
   lastSaleId: string | null;
   receiptOpen: boolean;
   deskStoreId: string;
@@ -362,6 +369,7 @@ function seedState() {
     roster: [] as RosterSlot[],
     payouts: [] as StaffPayout[],
     deletedProducts: [] as DeletedProduct[],
+    promos: [] as Promo[],
     lastSaleId: null as string | null,
     receiptOpen: false,
     deskStoreId: "",
@@ -435,7 +443,11 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         });
         beep(true);
         const s = get().settings;
-        speakPrice(p.name, p.price, {
+        // Si está en oferta, la voz dice el precio de la oferta: el que va a cobrar la caja.
+        const precioVoz =
+          cobrar([{ productId: p.id, name: p.name, barcode: p.barcode, price: p.price, qty: 1 }], get().promos, todayKey())
+            .total;
+        speakPrice(p.name, precioVoz, {
           enabled: s.voiceEnabled,
           lang: s.voiceLang,
           gender: s.voiceGender,
@@ -486,7 +498,9 @@ export const useImanStore = create<ImanState>()((set, get) => ({
       checkout: () => {
         const st = get();
         if (!st.ticket.length) return { ok: false, error: "Carrito vacío" };
-        const total = st.ticket.reduce((s, l) => s + l.price * l.qty, 0);
+        // Lo que dice el cartel lo cobra la caja: las promos vigentes hoy.
+        const cobro = cobrar(st.ticket, st.promos, todayKey());
+        const total = cobro.total;
         const paid = st.payMethod === "efectivo" ? Number(st.paidInput) || 0 : total;
         if (st.payMethod === "efectivo" && paid > 0 && paid < total) {
           return { ok: false, error: "El efectivo no cubre el total" };
@@ -515,23 +529,25 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           paid: st.payMethod === "efectivo" ? paid || total : null,
           shiftId: open.id,
           deviceId: getDeviceId(),
-          items: st.ticket.map((l) => ({
-            productId: l.productId,
-            name: l.name,
-            price: l.price,
-            qty: l.qty,
-            cost: costOf(l.productId),
+          // Un renglón por producto (el sale que aplica otro aparato junta por producto).
+          items: cobro.items.map((it) => ({
+            productId: it.productId,
+            name: it.name,
+            price: it.price,
+            qty: it.qty,
+            cost: costOf(it.productId),
+            ...(it.promoId ? { promoId: it.promoId, listPrice: it.listPrice, promoQty: it.promoQty } : {}),
           })),
         };
 
-        const stockMap = new Map(st.ticket.map((l) => [l.productId, l.qty]));
+        const stockMap = new Map(sale.items.map((it) => [it.productId, it.qty]));
         const products = st.products.map((p) => {
           const q = stockMap.get(p.id);
           if (!q) return p;
           return consumeFifo(p, q, sale.createdAt);
         });
         const movements: StockMove[] = [
-          ...st.ticket.map((l) => ({
+          ...sale.items.map((l) => ({
             id: uid("mv"),
             productId: l.productId,
             productName: l.name,
@@ -786,6 +802,16 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         if (Object.keys(body).length) recordEvent("settings", body);
       },
 
+      savePromo: (p) => {
+        const promo = { ...p, updatedAt: new Date().toISOString() };
+        set((st) => ({
+          promos: st.promos.some((x) => x.id === promo.id)
+            ? st.promos.map((x) => (x.id === promo.id ? promo : x))
+            : [promo, ...st.promos],
+        }));
+        recordEvent("promo", { promo });
+      },
+
       applyCategoryPrices: (categoryId) => {
         const st = get();
         const cat = st.categories.find((c) => c.id === categoryId);
@@ -863,6 +889,13 @@ export const useImanStore = create<ImanState>()((set, get) => ({
         const open = st.shifts.find((s) => s.status === "open");
         if (!open) return { ok: false, error: "No hay caja abierta" };
         const salesIn = ventasDelTurno(st.sales, open);
+        const promoTurno = salesIn.reduce(
+          (a, v) => {
+            const p = promoDeVenta(v);
+            return { total: a.total + p.total, ahorro: a.ahorro + p.ahorro };
+          },
+          { total: 0, ahorro: 0 },
+        );
         const efectivo = salesIn
           .filter((s) => s.paymentMethod === "efectivo")
           .reduce((a, s) => a + s.total, 0);
@@ -899,6 +932,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           safeCount,
           closedAt: new Date().toISOString(),
           closedBy: getDeviceId(),
+          ...(promoTurno.total ? { promoTotal: promoTurno.total, promoAhorro: promoTurno.ahorro } : {}),
           ...(extra?.heredado ? { heredado: true } : {}),
         };
         set({
@@ -1449,6 +1483,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           roster: pruned.roster ?? [],
           payouts: pruned.payouts ?? [],
           deletedProducts: pruned.deletedProducts ?? [],
+          promos: pruned.promos ?? [],
           ticket: keepUi ? (cur?.ticket ?? []) : restore ? [] : (pruned.ticket ?? []),
           payMethod: keepUi ? (cur?.payMethod ?? "efectivo") : (pruned.payMethod ?? "efectivo"),
           hydrated: true,
@@ -1477,6 +1512,14 @@ export function ticketTotal(ticket: TicketLine[]): number {
   return ticket.reduce((s, l) => s + l.price * l.qty, 0);
 }
 
+/** Lo que va a cobrar la caja por el ticket de ahora, con las promos vigentes: lo mismo que checkout. */
+export function useCobro(): Cobro {
+  const ticket = useImanStore((s) => s.ticket);
+  const promos = useImanStore((s) => s.promos);
+  const hoy = todayKey();
+  return useMemo(() => cobrar(ticket, promos, hoy), [ticket, promos, hoy]);
+}
+
 export function snapshotKiosk(st: ImanState): KioskPayload {
   return {
     products: st.products,
@@ -1497,6 +1540,7 @@ export function snapshotKiosk(st: ImanState): KioskPayload {
     roster: st.roster,
     payouts: st.payouts,
     deletedProducts: st.deletedProducts,
+    promos: st.promos,
     ticket: st.ticket,
     payMethod: st.payMethod,
   };
@@ -1524,6 +1568,8 @@ export function computeCash(st: {
       debito: 0,
       drops: 0,
       refunds: 0,
+      promoTotal: 0,
+      promoAhorro: 0,
       cajaChica: 0,
       over: false,
       threshold: st.cashThreshold,
@@ -1548,6 +1594,13 @@ export function computeCash(st: {
     debito: debito - rfDeb,
     drops,
     refunds: rfEf + rfMp + rfDeb,
+    ...sales.reduce(
+      (a, v) => {
+        const p = promoDeVenta(v);
+        return { promoTotal: a.promoTotal + p.total, promoAhorro: a.promoAhorro + p.ahorro };
+      },
+      { promoTotal: 0, promoAhorro: 0 },
+    ),
     cajaChica,
     over: cajaChica >= st.cashThreshold,
     threshold: st.cashThreshold,

@@ -14,6 +14,7 @@ import type {
 } from "@/lib/types";
 import { unitCost } from "./pricing.ts";
 import { mergeDeleted } from "./deleted.ts";
+import { juntarPromos, promoDeVenta } from "./promos.ts";
 import { cubierto, ladoDelResumen, marcaDespues, quienPliega } from "./plegado.ts";
 
 /**
@@ -101,6 +102,12 @@ function foldSale(map: Map<string, MonthAgg>, s: Sale, byId: Map<string, Product
     if (c == null) cur.cogsMissing = (cur.cogsMissing ?? 0) + it.qty;
     else cur.cogs += c * it.qty;
   }
+  // Solo suma dos números más: no cambia qué se pliega ni cuándo.
+  const promo = promoDeVenta(s);
+  if (promo.total) {
+    cur.promo = (cur.promo ?? 0) + promo.total;
+    cur.promoAhorro = (cur.promoAhorro ?? 0) + promo.ahorro;
+  }
   map.set(ym, cur);
 }
 
@@ -150,6 +157,8 @@ export function mergeAggs(a: MonthAgg[], b: MonthAgg[]): MonthAgg[] {
       cogsTrusted: cur.cogsTrusted === true && row.cogsTrusted === true,
       devoluciones: (cur.devoluciones ?? 0) + (row.devoluciones ?? 0),
       devolucionesCogs: (cur.devolucionesCogs ?? 0) + (row.devolucionesCogs ?? 0),
+      promo: (cur.promo ?? 0) + (row.promo ?? 0),
+      promoAhorro: (cur.promoAhorro ?? 0) + (row.promoAhorro ?? 0),
     });
   }
   return [...map.values()].sort((x, y) => y.ym.localeCompare(x.ym)).slice(0, 36);
@@ -336,6 +345,9 @@ export function mergePayload(
   // Proveedores y ajustes viajan por la cinta. Este aparato ya los aplicó:
   // la fotocopia del otro no los pisa (last-write es el evento, no quien sube).
   const suppliers = local.suppliers;
+  // Las promos se juntan de los dos lados, cada una en su versión más nueva:
+  // una que el otro aparato terminó (o de la que sacó el cartel) no revive.
+  const promos = juntarPromos(server.promos, local.promos);
   const settings = {
     ...server.settings,
     ...local.settings,
@@ -351,6 +363,7 @@ export function mergePayload(
     categories,
     suppliers,
     settings,
+    promos,
     sales,
     refunds,
     orders: mergeOrders(server.orders, local.orders),

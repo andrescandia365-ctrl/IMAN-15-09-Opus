@@ -94,6 +94,9 @@ export function CashView({ celu = false }: { celu?: boolean } = {}) {
             <Stat k="Débito" v={formatARS(cash.debito)} />
             <Stat k="Retiros" v={formatARS(cash.drops)} />
             <Stat k="Devoluciones" v={formatARS(cash.refunds)} />
+            {cash.promoTotal > 0 ? (
+              <Stat k="En promo" v={`${formatARS(cash.promoTotal)} · −${formatARS(cash.promoAhorro)}`} />
+            ) : null}
           </dl>
         </section>
 
@@ -168,6 +171,7 @@ export function CashView({ celu = false }: { celu?: boolean } = {}) {
                   {formatTime(s.openedAt)}
                   {s.closedAt ? ` → ${formatTime(s.closedAt)}` : ""}
                   {s.note ? ` · ${s.note}` : ""}
+                  {s.promoTotal ? ` · en promo ${formatARS(s.promoTotal)}` : ""}
                 </div>
                 {cerradoPorOtro(s) ? (
                   <div className="mt-0.5 text-[11px] font-medium text-warn">

@@ -2,6 +2,7 @@ import { formatARS, formatDateTime, PAY_LABEL } from "@/lib/format";
 import { TICKET_FISCAL_HINT, TICKET_NOT_FISCAL } from "@/lib/fiscal";
 import { packOf } from "@/lib/pack";
 import { printTicket } from "@/lib/print";
+import { promoDeVenta } from "@/lib/promos";
 import { usePhoneUi } from "@/lib/device";
 import { useImanStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
@@ -81,6 +82,7 @@ export function ReceiptDialog() {
                   <td className="py-1.5 align-top num">{it.qty}</td>
                   <td className="py-1.5 pr-2">
                     {it.name}
+                    {it.promoId ? <span className="ml-1.5 text-[10px] font-medium uppercase text-danger">Promo</span> : null}
                     {left > 0 ? (
                       <div className="mt-1 flex gap-1">
                         <Button size="sm" variant="secondary" onClick={() => giveBack(it.productId, 1)}>
@@ -105,6 +107,12 @@ export function ReceiptDialog() {
         </table>
         </div>
         <div className="min-h-[100px] shrink-0">
+        {promoDeVenta(sale).ahorro > 0 ? (
+          <p className="flex justify-between border-t border-dashed border-ink/20 pt-2 text-sm text-danger">
+            <span>Ahorro en promos</span>
+            <span className="num">−{formatARS(promoDeVenta(sale).ahorro)}</span>
+          </p>
+        ) : null}
         <div className="flex items-end justify-between border-t border-dashed border-ink/20 pt-3">
           <span className="text-[11px] uppercase tracking-[0.08em] text-ink-muted">Total</span>
           <span className="num text-3xl font-medium">{formatARS(sale.total)}</span>

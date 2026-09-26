@@ -20,6 +20,7 @@ import type {
 } from "./types";
 import { richerOrder } from "./cap.ts";
 import { cubierto } from "./plegado.ts";
+import { aplicarPromo } from "./promos.ts";
 
 export type Json =
   | string
@@ -51,7 +52,8 @@ export type ImanEvent = {
     | "price"
     | "shift"
     | "drop"
-    | "markup";
+    | "markup"
+    | "promo";
   body: Json;
   acked?: boolean;
 };
@@ -578,6 +580,11 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
         }),
       };
     }
+    case "promo": {
+      // Tipo nuevo: un aparato sin actualizar lo ignora y cobra el precio de góndola.
+      const promos = aplicarPromo(payload.promos, ev.body);
+      return promos ? { ...payload, promos } : payload;
+    }
     case "markup": {
       const b = ev.body as Partial<MarkupBody> | null;
       if (!b?.categoryId || (b.fac !== "X" && b.fac !== "A")) return payload;
@@ -625,6 +632,7 @@ export function pulledPatch(next: KioskPayload) {
     staff: next.staff ?? [],
     roster: next.roster ?? [],
     payouts: next.payouts ?? [],
+    promos: next.promos ?? [],
     deletedProducts: next.deletedProducts ?? [],
   };
 }

@@ -17,7 +17,9 @@ import { crearLectorTeclado, FIN_SIN_ENTER_MS } from "@/lib/escaneo";
 import { findByScan } from "@/lib/pack";
 import { productoNuevo } from "@/lib/producto-nuevo";
 import { beep } from "@/lib/voice";
-import { ticketTotal, useCashSnapshot, useImanStore } from "@/lib/store";
+import { useCashSnapshot, useCobro, useImanStore } from "@/lib/store";
+import { PromosAplicadas } from "@/components/promo-ticket";
+import { importeDeLinea, type Cobro } from "@/lib/promos";
 import type { PayMethod, Product, TicketLine } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { errorText } from "@/lib/errors";
@@ -97,7 +99,9 @@ export function PhoneSellView() {
   const [refundOpen, setRefundOpen] = useState(false);
   const catsRef = useDragScroll<HTMLDivElement>();
   const listRef = useDragScroll<HTMLDivElement>();
-  const total = ticketTotal(ticket);
+  // Lo que va a cobrar la caja, con las promos vigentes: lo mismo que checkout.
+  const cobro = useCobro();
+  const total = cobro.total;
   const paid = Number(paidInput) || 0;
   const change = payMethod === "efectivo" ? Math.max(0, paid - total) : 0;
 
@@ -475,7 +479,8 @@ export function PhoneSellView() {
             ) : null}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-4">
-            <TicketLines ticket={ticket} destacado={ultimo} onQty={setLineQty} onRemove={removeLine} />
+            <TicketLines ticket={ticket} cobro={cobro} destacado={ultimo} onQty={setLineQty} onRemove={removeLine} />
+            <PromosAplicadas cobro={cobro} />
           </div>
           {buscando && !cam ? (
             <div
@@ -655,11 +660,13 @@ export function PhoneSellView() {
 
 function TicketLines({
   ticket,
+  cobro,
   destacado,
   onQty,
   onRemove,
 }: {
   ticket: TicketLine[];
+  cobro: Cobro;
   /** El último leído: va arriba y resaltado. */
   destacado?: string | null;
   onQty: (id: string, qty: number) => void;
@@ -682,7 +689,16 @@ function TicketLines({
         >
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium">{l.name}</div>
-            <div className="num text-xs text-ink-muted">{formatARS(l.price)}</div>
+            {(() => {
+              const { importe, promo } = importeDeLinea(cobro, l.productId, l.price * l.qty);
+              return promo ? (
+                <div className="num text-xs font-medium text-danger">
+                  Promo · {formatARS(importe)} <span className="font-normal text-ink-muted line-through">{formatARS(l.price * l.qty)}</span>
+                </div>
+              ) : (
+                <div className="num text-xs text-ink-muted">{formatARS(l.price)}</div>
+              );
+            })()}
           </div>
           <button
             type="button"

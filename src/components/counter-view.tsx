@@ -27,7 +27,9 @@ import { CameraScan } from "@/components/camera-scan";
 import { SalesHistory } from "@/components/sales-history";
 import { currentShiftKey, formatARS } from "@/lib/format";
 import { findByScan, productMatchesQuery, stockBreakdown } from "@/lib/pack";
-import { ticketTotal, useCashSnapshot, useImanStore } from "@/lib/store";
+import { useCashSnapshot, useCobro, useImanStore } from "@/lib/store";
+import { PromosAplicadas } from "@/components/promo-ticket";
+import { importeDeLinea, type Cobro } from "@/lib/promos";
 import { sendOrQueueDeskTicket } from "@/lib/desk-outbox";
 import { useDeskInbox } from "@/lib/desk-listen";
 import { useRol, useTurnoAjeno } from "@/lib/caja-local";
@@ -114,7 +116,9 @@ export function CounterView() {
   const cobra = puedeCobrar || gracia;
   const inbox = useDeskInbox(deskStoreId, puedeCobrar && Boolean(deskStoreId));
 
-  const total = ticketTotal(ticket);
+  // Lo que va a cobrar la caja, con las promos vigentes: lo mismo que checkout.
+  const cobro = useCobro();
+  const total = cobro.total;
   const paid = Number(paidInput) || 0;
   const change = payMethod === "efectivo" ? Math.max(0, paid - total) : 0;
 
@@ -395,6 +399,7 @@ export function CounterView() {
         className="hidden min-h-0 overflow-hidden lg:flex"
         ticket={ticket}
         total={total}
+        cobro={cobro}
         onQty={setLineQty}
         onRemove={removeLine}
         onClear={clearTicket}
@@ -453,6 +458,7 @@ export function CounterView() {
             className="max-h-[36vh]"
             ticket={ticket}
             total={total}
+            cobro={cobro}
             onQty={setLineQty}
             onRemove={removeLine}
             onClear={clearTicket}
@@ -559,6 +565,7 @@ function Chip({
 function TicketPanel({
   ticket,
   total,
+  cobro,
   onQty,
   onRemove,
   onClear,
@@ -567,6 +574,7 @@ function TicketPanel({
 }: {
   ticket: { productId: string; name: string; price: number; qty: number }[];
   total: number;
+  cobro: Cobro;
   onQty: (id: string, qty: number) => void;
   onRemove: (id: string) => void;
   onClear: () => void;
@@ -620,7 +628,15 @@ function TicketPanel({
                     <Plus className="size-3.5" />
                   </button>
                 </div>
-                <div className="num w-16 text-right text-sm font-medium">{formatARS(l.price * l.qty)}</div>
+                {(() => {
+                  const { importe, promo } = importeDeLinea(cobro, l.productId, l.price * l.qty);
+                  return (
+                    <div className="w-16 text-right">
+                      <div className={cn("num text-sm font-medium", promo && "text-danger")}>{formatARS(importe)}</div>
+                      {promo ? <div className="text-[10px] font-medium uppercase text-danger">Promo</div> : null}
+                    </div>
+                  );
+                })()}
                 <button
                   type="button"
                   className="grid size-8 place-items-center rounded-sm text-ink-muted hover:text-danger"
@@ -634,6 +650,7 @@ function TicketPanel({
           </ul>
         )}
       </div>
+      <PromosAplicadas cobro={cobro} />
       <div className="mt-3 flex min-h-[100px] items-end justify-between border-t border-dashed border-ink/20 pt-3">
         <span className="text-[11px] uppercase tracking-[0.08em] text-ink-muted">Total</span>
         <span className="num text-3xl font-medium leading-none tracking-tight">{formatARS(total)}</span>

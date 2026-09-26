@@ -43,6 +43,7 @@ export function blankKiosk(name: string, catalog: "example" | "empty", city = ""
     staff: [],
     roster: [],
     payouts: [],
+    promos: [],
     ticket: [],
     payMethod: "efectivo",
   };
