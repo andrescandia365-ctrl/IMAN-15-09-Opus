@@ -23,6 +23,7 @@ import { useImanStore } from "@/lib/store";
 import type { Product } from "@/lib/types";
 import { faltaRubro, productoNuevo, recordarRubro } from "@/lib/producto-nuevo";
 import { cn } from "@/lib/utils";
+import { FotoProducto } from "@/components/foto-producto";
 
 export function PhoneStockView() {
   const products = useImanStore((s) => s.products);
@@ -338,6 +339,10 @@ export function ProductPhoneDialog({
             <div className="col-span-2 flex items-center gap-2 text-sm text-muted">
               <input type="checkbox" checked={Boolean(product.onOffer)} onChange={(e) => set({ onOffer: e.target.checked })} />
               Oferta
+            </div>
+            <div className="col-span-2">
+              <Label>Foto</Label>
+              <FotoProducto productId={product.id} className="mt-1.5" />
             </div>
           </div>
         )}

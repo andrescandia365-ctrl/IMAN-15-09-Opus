@@ -42,6 +42,7 @@ import { useImanStore } from "@/lib/store";
 import type { Category, Product } from "@/lib/types";
 import { cn, uid } from "@/lib/utils";
 import { SugerenciasPanel } from "@/components/sugerencias-panel";
+import { FotoProducto } from "@/components/foto-producto";
 
 type Filter = "all" | "cats" | "suggest" | "low" | "expire";
 
@@ -619,6 +620,10 @@ function ProductDialog({
                 />
                 En oferta
               </label>
+            </div>
+            <div className="col-span-full">
+              <Label>Foto</Label>
+              <FotoProducto productId={product.id} className="mt-1.5" />
             </div>
           </div>
         )}
