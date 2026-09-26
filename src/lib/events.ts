@@ -21,6 +21,7 @@ import type {
 import { richerOrder } from "./cap.ts";
 import { cubierto } from "./plegado.ts";
 import { aplicarPromo } from "./promos.ts";
+import { anotarVenta } from "./sugerencias.ts";
 
 export type Json =
   | string
@@ -273,6 +274,8 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
       return {
         ...payload,
         sales: yaPlegada ? payload.sales : [sale, ...payload.sales],
+        // La última venta de cada producto: aunque la venta se pliegue, esto queda.
+        lastSold: anotarVenta(payload.lastSold, sale.items ?? [], sale.createdAt),
         // La misma cuenta que hizo checkout en la caja: descuenta stock y lotes
         // que ya existían en ev.at. El evento no manda el array de lotes.
         products: payload.products.map((p) => {
@@ -633,6 +636,8 @@ export function pulledPatch(next: KioskPayload) {
     roster: next.roster ?? [],
     payouts: next.payouts ?? [],
     promos: next.promos ?? [],
+    lastSold: next.lastSold ?? {},
+    lastSoldSince: next.lastSoldSince,
     deletedProducts: next.deletedProducts ?? [],
   };
 }

@@ -41,6 +41,7 @@ import { buildSuggestions } from "@/lib/suggest";
 import { useImanStore } from "@/lib/store";
 import type { Category, Product } from "@/lib/types";
 import { cn, uid } from "@/lib/utils";
+import { SugerenciasPanel } from "@/components/sugerencias-panel";
 
 type Filter = "all" | "cats" | "suggest" | "low" | "expire";
 
@@ -399,16 +400,20 @@ function SuggestBoard({
   orders: Parameters<typeof buildSuggestions>[0]["orders"];
   onOffer: (p: Product) => void;
 }) {
-  const tips = buildSuggestions({ products, sales, suppliers, orders });
+  // Ofertas y vencimientos los cubre el panel de arriba (carteles y promos de verdad).
+  const tips = buildSuggestions({ products, sales, suppliers, orders }).filter(
+    (t) => t.kind !== "offer" && t.kind !== "shift",
+  );
   return (
     <div className="space-y-3 p-2">
       <p className="font-display text-2xl tracking-tight">Sugerencias</p>
       <p className="text-sm text-muted">
-        Lo que la góndola ya sabe y el Excel no. Ofertas, pedidos, lo que se está yendo.
+        Lo que la góndola ya sabe y el Excel no. Qué promocionar, pedidos, lo que se está yendo.
       </p>
+      <SugerenciasPanel />
       {tips.length === 0 ? (
         <p className="rounded-lg bg-elevated px-4 py-8 text-center text-sm text-subtle">
-          Hoy no hay drama. Cuando venza algo o se venda de más, aparece acá.
+          Sin pedidos ni faltantes para avisar hoy.
         </p>
       ) : (
         <ul className="grid gap-2 sm:grid-cols-2">

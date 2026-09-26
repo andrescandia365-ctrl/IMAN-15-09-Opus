@@ -375,6 +375,7 @@ export function App() {
       "roster",
       "payouts",
       "promos",
+      "lastSold",
       "ticket",
       "payMethod",
     ] as const;

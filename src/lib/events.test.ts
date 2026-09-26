@@ -1036,3 +1036,9 @@ test("una fotocopia vieja no revive una promo que este aparato ya terminó, y tr
   assert.deepEqual(juntos.promos?.map((p) => p.id).sort(), ["combo-pc", "of1"]);
   assert.equal(juntos.promos?.find((p) => p.id === "of1")?.endedAt, "2026-09-22T10:00:00.000Z");
 });
+
+test("una venta de otro aparato anota la última venta de sus productos", () => {
+  const next = applyEvent(payload({ products: [conLotes()] }), venta("v-otro", 1));
+  assert.ok(next.lastSold?.[conLotes().id]);
+  assert.equal(pulledPatch(next).lastSold[conLotes().id], next.lastSold?.[conLotes().id]);
+});

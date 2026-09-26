@@ -194,6 +194,9 @@ export interface Settings {
   voiceRate: number;
   theme: ThemeMode;
   blockZeroStock: boolean;
+  /** Sugerencias de carteles: "vence pronto" (días) y "no se vende" (días sin ventas). */
+  sugVence?: number;
+  sugSinVenta?: number;
   stockAlertsEnabled: boolean;
   cashFloat: number;
   cashThreshold: number;
@@ -440,6 +443,15 @@ export interface KioskPayload {
   /** Productos borrados: no se reviven con eventos viejos (ver deleted.ts). */
   deletedProducts?: DeletedProduct[];
   promos?: Promo[];
+  /**
+   * La última venta de cada producto (fecha y hora). Las ventas de más de una
+   * semana se pliegan en el resumen del mes y ahí no queda qué producto se
+   * vendió: esto es lo que dice "no se vende hace 34 días". Va aparte de la
+   * ficha: una ficha vieja de otro aparato no lo borra.
+   */
+  lastSold?: Record<string, string>;
+  /** Desde cuándo se anota `lastSold` en este local: antes de eso no se sabe. */
+  lastSoldSince?: string;
 }
 
 export interface DeletedProduct {

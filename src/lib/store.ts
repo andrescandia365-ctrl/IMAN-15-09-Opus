@@ -34,6 +34,7 @@ import { marginPrice, repriceProducts, unitCost } from "./pricing";
 import { costoAGondola, planReceive } from "./receive-cost";
 import { devolucionesDelTurno, ventasDelTurno } from "./turno";
 import { cobrar, promoDeVenta, type Cobro } from "./promos";
+import { anotarVenta } from "./sugerencias";
 import { uid } from "./utils";
 import {
   CATEGORY_SUPPLIER,
@@ -98,6 +99,9 @@ export interface ImanState {
   deletedProducts: DeletedProduct[];
   /** Las promos que cobra la caja (ver promos.ts). */
   promos: Promo[];
+  /** La última venta de cada producto y desde cuándo se anota (ver sugerencias.ts). */
+  lastSold: Record<string, string>;
+  lastSoldSince: string | undefined;
   /** Guarda una promo entera (alta, cambio, terminarla, cartel sacado) y la manda por la cinta. */
   savePromo: (p: Promo) => void;
   lastSaleId: string | null;
@@ -370,6 +374,8 @@ function seedState() {
     payouts: [] as StaffPayout[],
     deletedProducts: [] as DeletedProduct[],
     promos: [] as Promo[],
+    lastSold: {} as Record<string, string>,
+    lastSoldSince: undefined as string | undefined,
     lastSaleId: null as string | null,
     receiptOpen: false,
     deskStoreId: "",
@@ -590,6 +596,7 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           monthSheets: pruned.monthSheets ?? st.monthSheets,
           ticket: [],
           paidInput: "",
+          lastSold: anotarVenta(st.lastSold, sale.items, sale.createdAt),
           lastSaleId: sale.id,
           receiptOpen: true,
           selectedId: null,
@@ -1484,6 +1491,13 @@ export const useImanStore = create<ImanState>()((set, get) => ({
           payouts: pruned.payouts ?? [],
           deletedProducts: pruned.deletedProducts ?? [],
           promos: pruned.promos ?? [],
+          // Un local que todavía no anotaba: arranca hoy, con las ventas que quedan en la lista.
+          lastSold: pruned.lastSoldSince
+            ? (pruned.lastSold ?? {})
+            : pruned.sales.reduce((m, v) => anotarVenta(m, v.items, v.createdAt), pruned.lastSold ?? {}),
+          lastSoldSince:
+            pruned.lastSoldSince ??
+            pruned.sales.reduce((min, v) => (v.createdAt < min ? v.createdAt : min), new Date().toISOString()),
           ticket: keepUi ? (cur?.ticket ?? []) : restore ? [] : (pruned.ticket ?? []),
           payMethod: keepUi ? (cur?.payMethod ?? "efectivo") : (pruned.payMethod ?? "efectivo"),
           hydrated: true,
@@ -1541,6 +1555,8 @@ export function snapshotKiosk(st: ImanState): KioskPayload {
     payouts: st.payouts,
     deletedProducts: st.deletedProducts,
     promos: st.promos,
+    lastSold: st.lastSold,
+    ...(st.lastSoldSince ? { lastSoldSince: st.lastSoldSince } : {}),
     ticket: st.ticket,
     payMethod: st.payMethod,
   };

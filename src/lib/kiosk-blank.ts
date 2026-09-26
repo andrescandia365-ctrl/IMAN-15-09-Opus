@@ -44,6 +44,7 @@ export function blankKiosk(name: string, catalog: "example" | "empty", city = ""
     roster: [],
     payouts: [],
     promos: [],
+    lastSold: {},
     ticket: [],
     payMethod: "efectivo",
   };

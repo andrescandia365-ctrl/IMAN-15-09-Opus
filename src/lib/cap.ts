@@ -15,6 +15,7 @@ import type {
 import { unitCost } from "./pricing.ts";
 import { mergeDeleted } from "./deleted.ts";
 import { juntarPromos, promoDeVenta } from "./promos.ts";
+import { juntarDesde, juntarUltimas } from "./sugerencias.ts";
 import { cubierto, ladoDelResumen, marcaDespues, quienPliega } from "./plegado.ts";
 
 /**
@@ -348,6 +349,9 @@ export function mergePayload(
   // Las promos se juntan de los dos lados, cada una en su versión más nueva:
   // una que el otro aparato terminó (o de la que sacó el cartel) no revive.
   const promos = juntarPromos(server.promos, local.promos);
+  // La última venta de cada producto: la más nueva de los dos lados.
+  const lastSold = juntarUltimas(server.lastSold, local.lastSold);
+  const lastSoldSince = juntarDesde(server.lastSoldSince, local.lastSoldSince);
   const settings = {
     ...server.settings,
     ...local.settings,
@@ -364,6 +368,8 @@ export function mergePayload(
     suppliers,
     settings,
     promos,
+    lastSold,
+    ...(lastSoldSince ? { lastSoldSince } : {}),
     sales,
     refunds,
     orders: mergeOrders(server.orders, local.orders),
