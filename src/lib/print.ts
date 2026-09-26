@@ -1,7 +1,7 @@
 import { formatARS, formatDateTime, PAY_LABEL } from "@/lib/format";
 import { TICKET_FISCAL_SHORT } from "@/lib/fiscal";
 import { encodeEscPosTicket } from "@/lib/escpos";
-import { promoDeVenta } from "@/lib/promos";
+import { marcaDePromo, promoDeVenta } from "@/lib/promos";
 import { printThermal } from "@/lib/usb-print";
 import type { PayMethod, Product, Sale, Settings } from "@/lib/types";
 
@@ -66,7 +66,7 @@ export async function printTicket(opts: {
     nro,
     items: sale.items.map((it) => ({
       qty: it.qty,
-      name: it.promoId ? `${it.name} (promo)` : it.name,
+      name: it.promoId ? `${it.name} (${marcaDePromo(it)})` : it.name,
       unit: formatARS(it.price),
       sum: formatARS(it.price * it.qty),
     })),
@@ -87,7 +87,7 @@ function printTicketDialog(opts: { sale: Sale; store: string; city?: string }): 
   if (!w) return false;
   const rows = sale.items
     .map((it) => {
-      const name = escapeHtml(it.promoId ? `${it.name} (promo)` : it.name);
+      const name = escapeHtml(it.promoId ? `${it.name} (${marcaDePromo(it)})` : it.name);
       const qty = it.qty;
       const unit = formatARS(it.price);
       const sum = formatARS(it.price * it.qty);

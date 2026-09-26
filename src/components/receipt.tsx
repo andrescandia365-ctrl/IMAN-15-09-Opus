@@ -2,7 +2,7 @@ import { formatARS, formatDateTime, PAY_LABEL } from "@/lib/format";
 import { TICKET_FISCAL_HINT, TICKET_NOT_FISCAL } from "@/lib/fiscal";
 import { packOf } from "@/lib/pack";
 import { printTicket } from "@/lib/print";
-import { promoDeVenta } from "@/lib/promos";
+import { marcaDePromo, promoDeVenta } from "@/lib/promos";
 import { usePhoneUi } from "@/lib/device";
 import { useImanStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
@@ -82,7 +82,7 @@ export function ReceiptDialog() {
                   <td className="py-1.5 align-top num">{it.qty}</td>
                   <td className="py-1.5 pr-2">
                     {it.name}
-                    {it.promoId ? <span className="ml-1.5 text-[10px] font-medium uppercase text-danger">Promo</span> : null}
+                    {it.promoId ? <span className="ml-1.5 text-[10px] font-medium uppercase text-danger">{marcaDePromo(it)}</span> : null}
                     {left > 0 ? (
                       <div className="mt-1 flex gap-1">
                         <Button size="sm" variant="secondary" onClick={() => giveBack(it.productId, 1)}>

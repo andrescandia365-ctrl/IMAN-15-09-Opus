@@ -38,6 +38,7 @@ export type CobroItem = {
   promoId?: string;
   /** Unidades que entraron en la promo. */
   promoQty?: number;
+  promoKind?: PromoKind;
 };
 
 export type Cobro = {
@@ -62,7 +63,7 @@ const cents = (n: number) => Math.round(n * 100);
  * promedio.
  */
 export function cobrar(lines: TicketLine[], promos: Promo[], hoy: string): Cobro {
-  type Estado = { line: TicketLine; qty: number; left: number; totalC: number; promoId?: string; promoQty: number };
+  type Estado = { line: TicketLine; qty: number; left: number; totalC: number; promoId?: string; promoKind?: PromoKind; promoQty: number };
   const porProducto = new Map<string, Estado>();
   for (const l of lines) {
     if (l.qty <= 0) continue;
@@ -106,6 +107,7 @@ export function cobrar(lines: TicketLine[], promos: Promo[], hoy: string): Cobro
       e.left -= it.qty * veces;
       e.promoQty += it.qty * veces;
       e.promoId = p.id;
+      e.promoKind = p.kind;
     });
     anotar(p, veces, ahorroC * veces);
   }
@@ -121,6 +123,7 @@ export function cobrar(lines: TicketLine[], promos: Promo[], hoy: string): Cobro
     if (!mejor) continue;
     e.totalC += e.left * cents(mejor.price);
     anotar(mejor, e.left, e.left * (listaC - cents(mejor.price)));
+    e.promoKind = e.promoId ? e.promoKind : mejor.kind;
     e.promoId = e.promoId ?? mejor.id;
     e.promoQty += e.left;
     e.left = 0;
@@ -140,7 +143,7 @@ export function cobrar(lines: TicketLine[], promos: Promo[], hoy: string): Cobro
       qty,
       price: e.totalC / 100 / qty,
       listPrice: e.line.price,
-      ...(e.promoId ? { promoId: e.promoId, promoQty: e.promoQty } : {}),
+      ...(e.promoId ? { promoId: e.promoId, promoQty: e.promoQty, promoKind: e.promoKind } : {}),
     });
   }
   return { items, total: totalC / 100, ahorro: (listaTotalC - totalC) / 100, aplicadas: [...aplicadas.values()] };
@@ -197,7 +200,18 @@ export function juntarPromos(a: Promo[] | undefined, b: Promo[] | undefined): Pr
 }
 
 /** El importe de una línea como la cobra la caja, con la marca si va en promo. */
-export function importeDeLinea(cobro: Cobro, productId: string, fallback: number): { importe: number; promo: boolean } {
+export function importeDeLinea(
+  cobro: Cobro,
+  productId: string,
+  fallback: number,
+): { importe: number; promo: boolean; marca: string | null } {
   const it = cobro.items.find((i) => i.productId === productId);
-  return it ? { importe: it.price * it.qty, promo: Boolean(it.promoId) } : { importe: fallback, promo: false };
+  if (!it) return { importe: fallback, promo: false, marca: null };
+  return { importe: it.price * it.qty, promo: Boolean(it.promoId), marca: marcaDePromo(it) };
+}
+
+/** Lo que dice el renglón al lado del producto: "2x1", "Combo", "Oferta"… */
+export function marcaDePromo(it: { promoId?: string; promoKind?: PromoKind }): string | null {
+  if (!it.promoId) return null;
+  return it.promoKind ? PROMO_NOMBRE[it.promoKind] : "Promo";
 }

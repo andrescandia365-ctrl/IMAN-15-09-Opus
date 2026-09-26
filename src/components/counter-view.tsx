@@ -25,11 +25,11 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { ClienteRefundDialog } from "@/components/refunds";
 import { CameraScan } from "@/components/camera-scan";
 import { SalesHistory } from "@/components/sales-history";
-import { currentShiftKey, formatARS } from "@/lib/format";
+import { currentShiftKey, formatARS, todayKey } from "@/lib/format";
 import { findByScan, productMatchesQuery, stockBreakdown } from "@/lib/pack";
 import { useCashSnapshot, useCobro, useImanStore } from "@/lib/store";
 import { PromosAplicadas } from "@/components/promo-ticket";
-import { importeDeLinea, type Cobro } from "@/lib/promos";
+import { importeDeLinea, PROMO_NOMBRE, vigente, type Cobro } from "@/lib/promos";
 import { sendOrQueueDeskTicket } from "@/lib/desk-outbox";
 import { useDeskInbox } from "@/lib/desk-listen";
 import { useRol, useTurnoAjeno } from "@/lib/caja-local";
@@ -604,12 +604,11 @@ function TicketPanel({
         ) : (
           <ul className="flex flex-col gap-2">
             {ticket.map((l) => (
-              <li key={l.productId} className="flex items-start gap-2 border-b border-ink/10 pb-2">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{l.name}</div>
-                  <div className="num text-xs text-ink-muted">{formatARS(l.price)} · u.</div>
-                </div>
-                <div className="flex items-center gap-1">
+              <li key={l.productId} className="border-b border-ink/10 pb-2">
+                {/* El nombre arriba, a todo lo ancho: al lado de los botones se cortaba y no se sabía qué producto era. */}
+                <div className="break-words text-sm font-medium leading-snug">{l.name}</div>
+                <div className="mt-0.5 flex items-center gap-1">
+                  <div className="num min-w-0 flex-1 text-xs text-ink-muted">{formatARS(l.price)} · u.</div>
                   <button
                     type="button"
                     className="grid size-8 place-items-center rounded-sm hover:bg-ink/5"
@@ -627,24 +626,24 @@ function TicketPanel({
                   >
                     <Plus className="size-3.5" />
                   </button>
+                  {(() => {
+                    const { importe, promo, marca } = importeDeLinea(cobro, l.productId, l.price * l.qty);
+                    return (
+                      <div className="w-20 text-right">
+                        <div className={cn("num text-sm font-medium", promo && "text-danger")}>{formatARS(importe)}</div>
+                        {promo ? <div className="text-[10px] font-medium uppercase text-danger">{marca}</div> : null}
+                      </div>
+                    );
+                  })()}
+                  <button
+                    type="button"
+                    className="grid size-8 place-items-center rounded-sm text-ink-muted hover:text-danger"
+                    onClick={() => onRemove(l.productId)}
+                    aria-label="Quitar"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
                 </div>
-                {(() => {
-                  const { importe, promo } = importeDeLinea(cobro, l.productId, l.price * l.qty);
-                  return (
-                    <div className="w-16 text-right">
-                      <div className={cn("num text-sm font-medium", promo && "text-danger")}>{formatARS(importe)}</div>
-                      {promo ? <div className="text-[10px] font-medium uppercase text-danger">Promo</div> : null}
-                    </div>
-                  );
-                })()}
-                <button
-                  type="button"
-                  className="grid size-8 place-items-center rounded-sm text-ink-muted hover:text-danger"
-                  onClick={() => onRemove(l.productId)}
-                  aria-label="Quitar"
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
               </li>
             ))}
           </ul>
@@ -826,11 +825,13 @@ function PayPanel({
 function ShiftRail() {
   const cash = useCashSnapshot();
   const settings = useImanStore((s) => s.settings);
-  const products = useImanStore((s) => s.products);
+  const promos = useImanStore((s) => s.promos);
   const hour = new Date().getHours();
   const shiftKey = currentShiftKey(settings.shifts, hour);
   const tasks = settings.taskRemindersEnabled ? (settings.tasks[shiftKey] ?? []).slice(0, 3) : [];
-  const offers = products.filter((p) => p.active && p.onOffer).slice(0, 3);
+  // Las promos que cobra la caja hoy: para ofrecerle al cliente.
+  const hoy = todayKey();
+  const offers = promos.filter((p) => vigente(p, hoy)).slice(0, 3);
   const rows = [
     { k: "Efectivo", v: cash.efectivo },
     { k: "MP", v: cash.mp },
@@ -878,11 +879,11 @@ function ShiftRail() {
       ) : null}
       {offers.length ? (
         <div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-subtle">Ofertas</p>
+          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-subtle">Promos de hoy</p>
           <ul className="mt-1.5 space-y-1 text-xs text-sage">
             {offers.map((p) => (
               <li key={p.id} className="truncate">
-                {p.name}
+                {PROMO_NOMBRE[p.kind]} · {p.name} · {formatARS(p.price)}
               </li>
             ))}
           </ul>

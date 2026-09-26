@@ -343,10 +343,6 @@ export function ProductPhoneDialog({
               <Input inputMode="numeric" value={product.stockMin} onChange={(e) => set({ stockMin: Number(e.target.value) || 0 })} />
             </div>
             <VenceField product={product} onChange={(expiresAt) => set({ expiresAt })} />
-            <div className="col-span-2 flex items-center gap-2 text-sm text-muted">
-              <input type="checkbox" checked={Boolean(product.onOffer)} onChange={(e) => set({ onOffer: e.target.checked })} />
-              Oferta
-            </div>
             <div className="col-span-2">
               <Label>Foto</Label>
               <FotoProducto productId={product.id} className="mt-1.5" />

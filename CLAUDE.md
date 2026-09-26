@@ -328,6 +328,7 @@ resolver uno, se saca de acá en el mismo commit.
 
 **Técnico**
 - La cinta de eventos (`kiosk_event`) crece sin techo en el servidor.
+- Las promos terminadas no se borran nunca de la copia del local: tienen que borrarse cuando ya no sirvan (terminadas y con el cartel sacado, pasado un tiempo), como el resto de los datos viejos.
 - Los lotes quedan distintos entre aparatos (`consumeFifo` corre en cada uno con su propio estado).
 - Dos cambios cruzados al mismo ítem terminan al revés entre aparatos.
 - Cambiar de local carga la fotocopia sin juntarla con la copia del aparato.

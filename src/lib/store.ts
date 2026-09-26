@@ -542,7 +542,9 @@ export const useImanStore = create<ImanState>()((set, get) => ({
             price: it.price,
             qty: it.qty,
             cost: costOf(it.productId),
-            ...(it.promoId ? { promoId: it.promoId, listPrice: it.listPrice, promoQty: it.promoQty } : {}),
+            ...(it.promoId
+              ? { promoId: it.promoId, listPrice: it.listPrice, promoQty: it.promoQty, promoKind: it.promoKind }
+              : {}),
           })),
         };
 

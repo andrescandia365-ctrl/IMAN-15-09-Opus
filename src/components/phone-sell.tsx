@@ -690,10 +690,10 @@ function TicketLines({
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium">{l.name}</div>
             {(() => {
-              const { importe, promo } = importeDeLinea(cobro, l.productId, l.price * l.qty);
+              const { importe, promo, marca } = importeDeLinea(cobro, l.productId, l.price * l.qty);
               return promo ? (
                 <div className="num text-xs font-medium text-danger">
-                  Promo · {formatARS(importe)} <span className="font-normal text-ink-muted line-through">{formatARS(l.price * l.qty)}</span>
+                  {marca} · {formatARS(importe)} <span className="font-normal text-ink-muted line-through">{formatARS(l.price * l.qty)}</span>
                 </div>
               ) : (
                 <div className="num text-xs text-ink-muted">{formatARS(l.price)}</div>

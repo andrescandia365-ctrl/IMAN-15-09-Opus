@@ -14,7 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
-import { daysUntil, formatARS } from "@/lib/format";
+import { daysUntil, formatARS, todayKey } from "@/lib/format";
+import { vigente } from "@/lib/promos";
 import {
   applyCatalogPreview,
   detectNumberFormat,
@@ -49,6 +50,12 @@ type Filter = "all" | "cats" | "suggest" | "low" | "expire";
 
 export function InventoryView() {
   const products = useImanStore((s) => s.products);
+  const promos = useImanStore((s) => s.promos);
+  // "En promo": lo que cobra la caja hoy con una promo (la marca "En oferta" de antes no cobraba).
+  const enPromo = useMemo(() => {
+    const hoy = todayKey();
+    return new Set(promos.filter((x) => vigente(x, hoy)).flatMap((x) => x.items.map((it) => it.productId)));
+  }, [promos]);
   const categories = useImanStore((s) => s.categories);
   const saveProduct = useImanStore((s) => s.saveProduct);
   const deleteProduct = useImanStore((s) => s.deleteProduct);
@@ -213,7 +220,6 @@ export function InventoryView() {
             sales={sales}
             suppliers={suppliers}
             orders={orders}
-            onOffer={(p) => saveProduct({ ...p, onOffer: true })}
           />
         ) : list.length === 0 ? (
           <p className="px-3 py-10 text-center text-sm text-subtle">No hay productos con ese filtro.</p>
@@ -232,7 +238,7 @@ export function InventoryView() {
                       <span className="truncate text-lg font-medium tracking-tight">{p.name}</span>
                       {packOf(p) > 1 ? <Badge>Pack x{packOf(p)}</Badge> : null}
                       {!p.active ? <Badge>Inactivo</Badge> : null}
-                      {p.onOffer ? <Badge variant="sage">Oferta</Badge> : null}
+                      {enPromo.has(p.id) ? <Badge variant="sage">En promo</Badge> : null}
                     </div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-subtle">
                       {shortCodeOf(p) ? <span className="font-mono">#{shortCodeOf(p)}</span> : null}
@@ -394,13 +400,11 @@ function SuggestBoard({
   sales,
   suppliers,
   orders,
-  onOffer,
 }: {
   products: Product[];
   sales: Parameters<typeof buildSuggestions>[0]["sales"];
   suppliers: Parameters<typeof buildSuggestions>[0]["suppliers"];
   orders: Parameters<typeof buildSuggestions>[0]["orders"];
-  onOffer: (p: Product) => void;
 }) {
   const [preset, setPreset] = useState<CartelPreset | null>(null);
   // Ofertas y vencimientos los cubre el panel de arriba (carteles y promos de verdad).
@@ -426,7 +430,6 @@ function SuggestBoard({
       ) : (
         <ul className="grid gap-2 sm:grid-cols-2">
           {tips.map((t) => {
-            const p = t.productId ? products.find((x) => x.id === t.productId) : null;
             return (
               <li
                 key={t.id}
@@ -435,11 +438,6 @@ function SuggestBoard({
                 <p className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">{t.kind}</p>
                 <p className="mt-1 font-display text-lg leading-tight">{t.title}</p>
                 <p className="mt-2 text-sm text-ink-muted">{t.body}</p>
-                {p && !p.onOffer && t.kind === "offer" ? (
-                  <Button size="sm" className="mt-3" onClick={() => onOffer(p)}>
-                    Poner en oferta
-                  </Button>
-                ) : null}
               </li>
             );
           })}
@@ -616,16 +614,6 @@ function ProductDialog({
                   onChange={(e) => set({ active: e.target.checked })}
                 />
                 Activo
-              </label>
-            </div>
-            <div className="flex items-end pb-1">
-              <label className="flex items-center gap-2 text-sm text-muted">
-                <input
-                  type="checkbox"
-                  checked={Boolean(product.onOffer)}
-                  onChange={(e) => set({ onOffer: e.target.checked })}
-                />
-                En oferta
               </label>
             </div>
             <div className="col-span-full">

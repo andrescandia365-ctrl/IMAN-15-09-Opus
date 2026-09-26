@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { aplicarPromo, cartelesPorSacar, cobrar, juntarPromos, promoDeVenta, vigente } from "./promos.ts";
+import { aplicarPromo, cartelesPorSacar, cobrar, juntarPromos, marcaDePromo, promoDeVenta, vigente } from "./promos.ts";
 import type { Promo, TicketLine } from "./types.ts";
 
 const HOY = "2026-09-25";
@@ -48,7 +48,16 @@ describe("cobrar", () => {
     const c = cobrar([linea("alfajor", 1000, 3), linea("coca", 3000, 1)], [p], HOY);
     assert.equal(c.total, 3 * 800 + 3000);
     assert.equal(c.ahorro, 600);
-    assert.deepEqual(c.items[0], { productId: "alfajor", name: "alfajor", qty: 3, price: 800, listPrice: 1000, promoId: "of", promoQty: 3 });
+    assert.deepEqual(c.items[0], {
+      productId: "alfajor",
+      name: "alfajor",
+      qty: 3,
+      price: 800,
+      listPrice: 1000,
+      promoId: "of",
+      promoQty: 3,
+      promoKind: "oferta",
+    });
     assert.equal(c.items[1]?.promoId, undefined);
     assert.deepEqual(c.aplicadas, [{ promoId: "of", name: "of", kind: "oferta", veces: 3, ahorro: 600 }]);
   });
@@ -75,6 +84,8 @@ describe("cobrar", () => {
     assert.equal(c.items[0]?.price, 2000);
     assert.equal(c.items[0]?.promoId, "dos");
     assert.equal(c.items[0]?.promoQty, 2);
+    // El renglón dice "2x1": así se entiende el precio promedio.
+    assert.equal(marcaDePromo(c.items[0]!), "2x1");
     // En promo se cobraron los 2 del 2x1 (3000), no la tercera suelta.
     assert.deepEqual(promoDeVenta({ items: c.items }), { total: 3000, ahorro: 3000 });
   });

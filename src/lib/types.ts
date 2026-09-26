@@ -61,6 +61,8 @@ export interface SaleItem {
   listPrice?: number;
   /** Cuántas de las `qty` unidades entraron en la promo (en un 2x1 con tres, dos). */
   promoQty?: number;
+  /** Qué promo: el ticket dice "2x1" o "Combo" al lado del renglón, así se entiende el precio. */
+  promoKind?: PromoKind;
 }
 
 export interface Sale {
