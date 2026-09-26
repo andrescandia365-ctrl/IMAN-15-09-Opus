@@ -1,6 +1,7 @@
 import { formatARS, formatDateTime, PAY_LABEL } from "@/lib/format";
 import { TICKET_FISCAL_SHORT } from "@/lib/fiscal";
 import { encodeEscPosTicket } from "@/lib/escpos";
+import { marcaDePromo, promoDeVenta } from "@/lib/promos";
 import { printThermal } from "@/lib/usb-print";
 import type { PayMethod, Product, Sale, Settings } from "@/lib/types";
 
@@ -65,7 +66,7 @@ export async function printTicket(opts: {
     nro,
     items: sale.items.map((it) => ({
       qty: it.qty,
-      name: it.name,
+      name: it.promoId ? `${it.name} (${marcaDePromo(it)})` : it.name,
       unit: formatARS(it.price),
       sum: formatARS(it.price * it.qty),
     })),
@@ -73,6 +74,7 @@ export async function printTicket(opts: {
     total: formatARS(sale.total),
     paid: sale.paid != null ? formatARS(sale.paid) : undefined,
     change: change > 0 ? formatARS(change) : undefined,
+    ahorro: promoDeVenta(sale).ahorro > 0 ? formatARS(promoDeVenta(sale).ahorro) : undefined,
   });
   const usb = await printThermal(bytes, opts.baud ?? 9600);
   if (usb) return true;
@@ -85,7 +87,7 @@ function printTicketDialog(opts: { sale: Sale; store: string; city?: string }): 
   if (!w) return false;
   const rows = sale.items
     .map((it) => {
-      const name = escapeHtml(it.name);
+      const name = escapeHtml(it.promoId ? `${it.name} (${marcaDePromo(it)})` : it.name);
       const qty = it.qty;
       const unit = formatARS(it.price);
       const sum = formatARS(it.price * it.qty);
@@ -129,6 +131,7 @@ function printTicketDialog(opts: { sale: Sale; store: string; city?: string }): 
   </table>
   <hr />
   <table>
+    ${promoDeVenta(sale).ahorro > 0 ? `<tr><td>Ahorro en promos</td><td class="r">-${formatARS(promoDeVenta(sale).ahorro)}</td></tr>` : ""}
     <tr><td>TOTAL</td><td class="r tot">${formatARS(sale.total)}</td></tr>
     <tr><td>${escapeHtml(pay)}</td><td class="r">${sale.paid != null ? formatARS(sale.paid) : formatARS(sale.total)}</td></tr>
     ${change ? `<tr><td>Vuelto</td><td class="r">${formatARS(change)}</td></tr>` : ""}

@@ -24,6 +24,7 @@ import { OrdersView } from "@/components/orders-view";
 import { PhoneExpireView, PhoneStockView } from "@/components/phone-floor";
 import { PhoneReceiveView } from "@/components/phone-receive";
 import { PhoneSellView } from "@/components/phone-sell";
+import { AvisoCartelesPorSacar } from "@/components/promo-ticket";
 import { PhoneMasView } from "@/components/phone-mas";
 import { ReceiptDialog } from "@/components/receipt";
 import { DondeCobras } from "@/components/donde-cobras";
@@ -441,6 +442,8 @@ export function Shell({
             </div>
           </div>
         ) : null}
+
+        <AvisoCartelesPorSacar />
 
         <main className="mx-auto min-h-0 w-full max-w-[2400px] flex-1 overflow-hidden px-3 py-3 pb-[calc(var(--bottom-nav)+16px)] sm:px-5 sm:pb-5">
           {ownerOpen ? (

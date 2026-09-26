@@ -9,6 +9,7 @@ import {
   Settings2,
   Tag,
   Ticket,
+  Percent,
   Users,
   Wallet,
 } from "lucide-react";
@@ -51,6 +52,7 @@ import {
   monthsOfYear,
 } from "@/lib/ledger";
 import { CajaDelLocal } from "@/components/caja-del-local";
+import { OwnerPromos } from "@/components/owner-promos";
 import { SettingsView } from "@/components/settings-view";
 import { TeamView } from "@/components/team-view";
 import { OwnerPrices } from "@/components/owner-prices";
@@ -58,6 +60,7 @@ import { OwnerTicket } from "@/components/owner-ticket";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PAY_LABEL, formatARS, formatARSCompact, todayKey } from "@/lib/format";
+import { promoDeVenta } from "@/lib/promos";
 import type { StoreMeta, StoreRollup } from "@/lib/kiosk";
 import type { MyAccess } from "@/lib/license";
 import { unitCost } from "@/lib/pricing";
@@ -67,7 +70,7 @@ import { useImanStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { usePhoneUi } from "@/lib/device";
 
-type Tab = "precios" | "mes" | "ticket" | "factura" | "grupo" | "equipo" | "local";
+type Tab = "precios" | "promos" | "mes" | "ticket" | "factura" | "grupo" | "equipo" | "local";
 
 export function OwnerDesk({
   access,
@@ -152,6 +155,7 @@ export function OwnerDesk({
   const tabs = (
     [
       ["precios", "Precios", Tag],
+      ["promos", "Promos", Percent],
       ["mes", "El mes", Wallet],
       ["ticket", "Ticket", Ticket],
       ["factura", "Factura", FileText],
@@ -443,6 +447,15 @@ export function OwnerDesk({
                         <dt className="text-muted">Ticket promedio</dt>
                         <dd className="num font-mono text-lg">{formatARS(mes.ventas / mes.tickets)}</dd>
                       </div>
+                      {mes.promo > 0 ? (
+                        <div className="col-span-2">
+                          <dt className="text-muted">Vendido en promo</dt>
+                          <dd className="num font-mono text-lg">
+                            {formatARS(mes.promo)}
+                            <span className="ml-2 text-sm text-muted">descontado {formatARS(mes.promoAhorro)}</span>
+                          </dd>
+                        </div>
+                      ) : null}
                     </dl>
                   )}
                 </Tarjeta>
@@ -503,6 +516,12 @@ export function OwnerDesk({
         {tab === "equipo" ? (
           <div className="h-full min-h-0 overflow-y-auto">
             <TeamView />
+          </div>
+        ) : null}
+
+        {tab === "promos" ? (
+          <div className="h-full min-h-0 overflow-y-auto rounded-xl bg-surface p-5 shadow-[var(--shadow-border)]">
+            <OwnerPromos />
           </div>
         ) : null}
 
@@ -592,6 +611,9 @@ type MesVentas = {
   efectivo: number;
   mercadopago: number;
   debito: number;
+  /** Cobrado en promo, y lo descontado. */
+  promo: number;
+  promoAhorro: number;
 };
 
 /**
@@ -602,13 +624,16 @@ type MesVentas = {
  */
 function ventasDelMes(ym: string, sales: Sale[], aggs: MonthAgg[]): MesVentas | null {
   let vivos = 0;
-  const t: MesVentas = { ventas: 0, tickets: 0, efectivo: 0, mercadopago: 0, debito: 0 };
+  const t: MesVentas = { ventas: 0, tickets: 0, efectivo: 0, mercadopago: 0, debito: 0, promo: 0, promoAhorro: 0 };
   for (const s of sales) {
     if (ymLocal(s.createdAt) !== ym) continue;
     vivos += 1;
     t.ventas += s.total;
     t.tickets += 1;
     t[s.paymentMethod] += s.total;
+    const p = promoDeVenta(s);
+    t.promo += p.total;
+    t.promoAhorro += p.ahorro;
   }
   const agg = aggs.find((a) => a.ym === ym);
   if (agg) {
@@ -617,6 +642,8 @@ function ventasDelMes(ym: string, sales: Sale[], aggs: MonthAgg[]): MesVentas | 
     t.efectivo += agg.efectivo;
     t.mercadopago += agg.mp;
     t.debito += agg.debito;
+    t.promo += agg.promo ?? 0;
+    t.promoAhorro += agg.promoAhorro ?? 0;
   }
   return vivos || agg ? t : null;
 }

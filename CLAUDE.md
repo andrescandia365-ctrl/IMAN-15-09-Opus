@@ -195,7 +195,7 @@ igual. Si no queda escrito, vuelve a pasar.
 | Archivo | Qué es |
 |---|---|
 | `src/lib/store.ts` | Zustand. `checkout`, `refundCliente`, `refundProveedor`, `saveProduct`, `adjustStock`, `setLedgerCell`, `receiveOrder`, `saveSettings`, `saveSupplier`, `importCatalog`, `applyCategoryPrices` — **todos llaman `recordEvent`** |
-| `src/lib/events.ts` | `applyEvent`. Tipos: sale, stock, ledger, product, product.delete, refund, receive, order, staff, category, lot, supplier, settings, price, shift, drop, markup |
+| `src/lib/events.ts` | `applyEvent`. Tipos: sale, stock, ledger, product, product.delete, refund, receive, order, staff, category, lot, supplier, settings, price, shift, drop, markup, promo |
 | `src/lib/local-db.ts` | IndexedDB, `recordEvent`, `pendingEvents`, `markAcked`, `editQueue` |
 | `src/lib/event-queue.ts` | cola local pura (append/ack/trim/chunk) + tests |
 | `src/lib/sync.ts` | `syncNow` (botón), `pushQuiet` (la cinta sube sola), `pullCopy` |
@@ -204,6 +204,12 @@ igual. Si no queda escrito, vuelve a pasar.
 | `src/lib/rol.ts` | el rol del aparato (caja / piso / sin asignar) y `puedeCobrar`: el ancho decide la disposición, el rol los permisos |
 | `src/lib/caja-local.ts` | lo que el aparato sabe de la caja (`iman-caja:{local}`), `useRol`, `useVigilarCaja` |
 | `src/components/caja-del-local.tsx` | arriba de todo del panel del dueño (PC y celu): "La caja de este local:" en palabras y "Pasar la caja a este aparato" (con toma forzada) |
+| `src/lib/sugerencias.ts` + `src/components/sugerencias-panel.tsx` | por vencer y no se venden, por plata en riesgo; plazos por local (`sugVence`, `sugSinVenta`) |
+| `src/lib/carteles.ts` + `cartel-salida.ts` + `cartel-fuentes.ts` | carteles: 7 plantillas en SVG (con versión ahorro de tinta y paletas fijas), imprimir A4 y media hoja, imagen vertical 1080×1920 para compartir. Letras en `public/fuentes/` (libres, con sus licencias), guardadas por el service worker y cargadas solo en el editor |
+| `src/components/cartel-editor.tsx` + `carteles-celu.tsx` | el armador: Inventario → Sugerencias en la PC, Stock → Carteles en el celu. Una plantilla de promo no se imprime hasta activar la promo en la caja (PIN del dueño) |
+| `src/lib/fotos.ts` + `src/components/foto-producto.tsx` | fotos de producto para los carteles: SOLO en el aparato (base aparte `iman-fotos`, nunca en la copia ni en la cinta), cuadradas de 800 px, recortadas al centro |
+| `src/lib/promos.ts` | promos: vigencia, `cobrar` (lo que cobra la caja), carteles por sacar, evento y juntar |
+| `src/components/owner-promos.tsx` + `promo-ticket.tsx` | Dueño → Promos (crear, terminar; precio a mano con el costo al lado); promos en el ticket y el aviso de sacar el cartel |
 | `src/lib/tipo-aparato.ts` | qué tipo de aparato es la caja (celu, tablet, computadora) y cómo se le dice al dueño; lo guarda `kiosk_store.caja_tipo` al tomar la caja |
 | `src/components/donde-cobras.tsx` | "¿Dónde vas a cobrar?" al entrar por primera vez a un local; "Solo tengo celular" deja la caja en ese celu si el local es nuevo |
 | `src/lib/cobra-en.ts` | las opciones de "¿Dónde vas a cobrar?" y los avisos (`AVISO_CELU_*`) |
@@ -232,6 +238,9 @@ igual. Si no queda escrito, vuelve a pasar.
 - **`shift`:** apertura y cierre de turno (`op: open` / `close`). El cierre manda el turno entero y la fila de la planilla de ese día. El turno cerrado lleva `closedBy` (el aparato que hizo el arqueo) y `heredado` si se cerró después de forzar la toma de la caja: el historial de Caja marca "Lo cerró otro aparato" (`cerradoPorOtro`).
 - **`drop`:** retiro de caja a fuerte, con el `shiftId` del turno.
 - **`sale`** lleva el `shiftId` del turno en que se cobró y el `deviceId` del aparato que cobró (lo usa el plegado del mes). Las ventas sin `shiftId` (de antes, o de un aparato sin actualizar) entran al arqueo por hora (`ventasDelTurno`, `src/lib/turno.ts`).
+- **`promo`:** una promo entera (Oferta, Liquidación, 2x1, Combo), en alta, cambio, terminada o con el cartel sacado. Gana la de `updatedAt` más nuevo. Va **aparte del precio de góndola**: alinear y Actualizar precios no la tocan, y al terminar el precio vuelve solo. Tipo nuevo: un aparato sin actualizar la ignora y cobra el precio de góndola. Al juntar la fotocopia, las promos se juntan de los dos lados (`juntarPromos` en `mergePayload`).
+- **Cobro con promos** (`promos.ts cobrar`): se calcula al cobrar, con las vigentes ese día local; nunca cobra más que la góndola. En la venta, **un producto va siempre en un solo renglón** (el `sale` que aplica otro aparato junta cantidades por producto: dos renglones del mismo producto descontarían mal el stock). El renglón en promo lleva `promoId`, `listPrice` y `promoQty`; en un combo, `price` es su parte del precio del combo. El resumen del mes suma `promo` y `promoAhorro`; el turno cerrado, `promoTotal` y `promoAhorro`.
+- **Última venta de cada producto** (`lastSold`, `lastSoldSince`, `sugerencias.ts`): la anota la caja y cada `sale` que baja de la cinta. Va aparte de la ficha y se junta quedándose con la más nueva. Es lo que dice "no se vende hace 34 días": las ventas de más de una semana se pliegan y ahí no queda qué producto se vendió. Antes de `lastSoldSince` no se sabe, y no se inventa.
 - Stock: solo `sale`, `stock`, `refund`, `receive`, `lot`.
 
 `importCatalog` ya no es un `setState` masivo: emite `category`/`product` (o `price` si solo cambió la plata) uno por uno. Producto que ya existe: nombre, código, precio, costo, rubro. **El stock de la planilla se ignora.**
@@ -319,6 +328,7 @@ resolver uno, se saca de acá en el mismo commit.
 
 **Técnico**
 - La cinta de eventos (`kiosk_event`) crece sin techo en el servidor.
+- Las promos terminadas no se borran nunca de la copia del local: tienen que borrarse cuando ya no sirvan (terminadas y con el cartel sacado, pasado un tiempo), como el resto de los datos viejos.
 - Los lotes quedan distintos entre aparatos (`consumeFifo` corre en cada uno con su propio estado).
 - Dos cambios cruzados al mismo ítem terminan al revés entre aparatos.
 - Cambiar de local carga la fotocopia sin juntarla con la copia del aparato.
@@ -334,6 +344,9 @@ resolver uno, se saca de acá en el mismo commit.
 - El escáner: el alto de la franja, los 3 cuadros de ausencia, la velocidad de la cámara.
 - El umbral de 40 ms entre teclas con un lector Bluetooth real.
 - iPhone: la cámara con la biblioteca `barcode-detector`, en pausa hasta probarlo.
+- La foto del producto con la cámara del celu ("Sacar foto"): orientación y recorte con una foto de verdad.
+- Compartir el cartel desde el celu: que abra Compartir y llegue a WhatsApp (en la máquina de desarrollo solo se prueba la descarga).
+- Imprimir los carteles en una impresora de verdad, A4 y media hoja.
 
 **Fuera del código**
 - Comprar el dominio antes del primer kiosco.

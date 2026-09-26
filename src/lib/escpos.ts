@@ -58,6 +58,8 @@ export function encodeEscPosTicket(opts: {
   total: string;
   paid?: string;
   change?: string;
+  /** Lo descontado con promos, si hubo. */
+  ahorro?: string;
 }): Uint8Array {
   const b: number[] = [
     ESC, 0x40,
@@ -79,6 +81,7 @@ export function encodeEscPosTicket(opts: {
     if (it.unit) b.push(...line(`     ${it.unit} c/u`));
   }
   b.push(...line("-".repeat(42)));
+  if (opts.ahorro) b.push(...padRow("Ahorro en promos", `-${opts.ahorro}`));
   b.push(ESC, 0x21, 0x20);
   b.push(...padRow("TOTAL", opts.total));
   b.push(ESC, 0x21, 0x00);

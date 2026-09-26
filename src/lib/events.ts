@@ -20,6 +20,8 @@ import type {
 } from "./types";
 import { richerOrder } from "./cap.ts";
 import { cubierto } from "./plegado.ts";
+import { aplicarPromo } from "./promos.ts";
+import { anotarVenta } from "./sugerencias.ts";
 
 export type Json =
   | string
@@ -51,7 +53,8 @@ export type ImanEvent = {
     | "price"
     | "shift"
     | "drop"
-    | "markup";
+    | "markup"
+    | "promo";
   body: Json;
   acked?: boolean;
 };
@@ -271,6 +274,8 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
       return {
         ...payload,
         sales: yaPlegada ? payload.sales : [sale, ...payload.sales],
+        // La última venta de cada producto: aunque la venta se pliegue, esto queda.
+        lastSold: anotarVenta(payload.lastSold, sale.items ?? [], sale.createdAt),
         // La misma cuenta que hizo checkout en la caja: descuenta stock y lotes
         // que ya existían en ev.at. El evento no manda el array de lotes.
         products: payload.products.map((p) => {
@@ -578,6 +583,11 @@ export function applyEvent(payload: KioskPayload, ev: ImanEvent): KioskPayload {
         }),
       };
     }
+    case "promo": {
+      // Tipo nuevo: un aparato sin actualizar lo ignora y cobra el precio de góndola.
+      const promos = aplicarPromo(payload.promos, ev.body);
+      return promos ? { ...payload, promos } : payload;
+    }
     case "markup": {
       const b = ev.body as Partial<MarkupBody> | null;
       if (!b?.categoryId || (b.fac !== "X" && b.fac !== "A")) return payload;
@@ -625,6 +635,9 @@ export function pulledPatch(next: KioskPayload) {
     staff: next.staff ?? [],
     roster: next.roster ?? [],
     payouts: next.payouts ?? [],
+    promos: next.promos ?? [],
+    lastSold: next.lastSold ?? {},
+    lastSoldSince: next.lastSoldSince,
     deletedProducts: next.deletedProducts ?? [],
   };
 }

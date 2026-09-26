@@ -50,6 +50,19 @@ export interface SaleItem {
    * guardadas antes de esto no lo traen.
    */
   cost?: number;
+  /**
+   * Se cobró (entero o en parte) con una promo: cuál, y el precio de góndola
+   * por unidad de ese momento. `price` es lo que se cobró por unidad (en un
+   * combo, su parte del precio del combo, que puede tener centavos). Un
+   * producto va siempre en un solo renglón: el `sale` que aplica otro aparato
+   * junta las cantidades por producto.
+   */
+  promoId?: string;
+  listPrice?: number;
+  /** Cuántas de las `qty` unidades entraron en la promo (en un 2x1 con tres, dos). */
+  promoQty?: number;
+  /** Qué promo: el ticket dice "2x1" o "Combo" al lado del renglón, así se entiende el precio. */
+  promoKind?: PromoKind;
 }
 
 export interface Sale {
@@ -99,6 +112,9 @@ export interface CashShift {
   virtualCel?: number | null;
   virtualSube?: number | null;
   safeCount?: number | null;
+  /** Al cerrar: lo que se cobró en promo en el turno y lo que se descontó. */
+  promoTotal?: number;
+  promoAhorro?: number;
 }
 
 export interface CashDrop {
@@ -180,6 +196,9 @@ export interface Settings {
   voiceRate: number;
   theme: ThemeMode;
   blockZeroStock: boolean;
+  /** Sugerencias de carteles: "vence pronto" (días) y "no se vende" (días sin ventas). */
+  sugVence?: number;
+  sugSinVenta?: number;
   stockAlertsEnabled: boolean;
   cashFloat: number;
   cashThreshold: number;
@@ -321,6 +340,9 @@ export interface MonthAgg {
   devoluciones?: number;
   /** Lo que había costado la mercadería que volvió a la góndola. */
   devolucionesCogs?: number;
+  /** Lo que se cobró en promo ese mes, y lo que se descontó. Ausente = plegado antes de las promos. */
+  promo?: number;
+  promoAhorro?: number;
 }
 
 export interface MonthSheet {
@@ -362,6 +384,37 @@ export interface StaffPayout {
   note: string;
 }
 
+/** Oferta y Liquidación: un precio por unidad. 2x1 y Combo: un precio por el conjunto. */
+export type PromoKind = "oferta" | "liquidacion" | "2x1" | "combo";
+
+/**
+ * Una promo que cobra la caja mientras está vigente (ver promos.ts). Va aparte
+ * del precio de góndola: alinear y Actualizar precios no la tocan, y al
+ * terminar el precio vuelve solo. Viaja en el evento `promo`, entera.
+ */
+export interface Promo {
+  id: string;
+  kind: PromoKind;
+  /** Para el ticket y la lista: "Combo merienda". */
+  name: string;
+  /** Qué lleva. Oferta y Liquidación: un producto, 1. 2x1: un producto, 2. */
+  items: { productId: string; qty: number }[];
+  /** Lo pone el kiosquero a mano. Por unidad (Oferta, Liquidación) o por el conjunto (2x1, Combo). */
+  price: number;
+  /** Días locales (todayKey), los dos incluidos. */
+  from: string;
+  until: string;
+  /** El cartel dice "Hasta agotar stock". */
+  hastaAgotarStock?: boolean;
+  /** Terminada a mano antes de la fecha. */
+  endedAt?: string | null;
+  /** Alguien confirmó que sacó el cartel después de terminada. */
+  retiradaAt?: string | null;
+  createdAt: string;
+  /** El más nuevo gana entre dos aparatos. */
+  updatedAt: string;
+}
+
 export interface KioskPayload {
   products: Product[];
   categories: Category[];
@@ -391,6 +444,16 @@ export interface KioskPayload {
   mark?: CopyMark;
   /** Productos borrados: no se reviven con eventos viejos (ver deleted.ts). */
   deletedProducts?: DeletedProduct[];
+  promos?: Promo[];
+  /**
+   * La última venta de cada producto (fecha y hora). Las ventas de más de una
+   * semana se pliegan en el resumen del mes y ahí no queda qué producto se
+   * vendió: esto es lo que dice "no se vende hace 34 días". Va aparte de la
+   * ficha: una ficha vieja de otro aparato no lo borra.
+   */
+  lastSold?: Record<string, string>;
+  /** Desde cuándo se anota `lastSold` en este local: antes de eso no se sabe. */
+  lastSoldSince?: string;
 }
 
 export interface DeletedProduct {
